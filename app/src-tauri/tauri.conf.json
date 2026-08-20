@@ -1,0 +1,71 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WinDeployKit",
+  "version": "0.5.3",
+  "identifier": "com.macsinspace.windeploykit",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:42410",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "WinDeployKit",
+        "width": 1400,
+        "height": 880,
+        "maximized": true,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "decorations": true,
+        "transparent": false,
+        "backgroundColor": "#08111f"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; media-src 'self' https: blob:; frame-src 'self' asset: http://asset.localhost https://asset.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$LOCALDATA/WinDeployKit/cache/**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "publisher": "MacsInSpace",
+    "targets": [
+      "app"
+    ],
+    "resources": {
+      "../../sidecar/": "sidecar/"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Windows deployment toolkit \u2014 PXE, images, drivers, task sequences",
+    "longDescription": "Cross-platform Windows deployment toolkit \u2014 PXE boot, image library, drivers and task sequences.",
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true
+    },
+    "windows": {
+      "wix": {
+        "language": "en-US",
+        "upgradeCode": "7354bc72-1499-5bb9-9b95-6a4f720799a7"
+      },
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    }
+  }
+}

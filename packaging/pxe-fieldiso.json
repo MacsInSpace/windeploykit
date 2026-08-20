@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "fileName": "FieldIso.wim",
+  "label": "FieldIso (HTTP ISO boot WinPE)",
+  "sizeBytes": 336028768,
+  "sizeBytesNote": "Approximate — refresh after publishing a new build",
+  "sha256": "ddcbddfdf90f86d7e8fc7fb14d6f09e33a72c8ed9bfb8bbd42621992f99f61c8",
+  "wimUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/FieldIso.wim",
+  "updated": "2026-06-20"
+}

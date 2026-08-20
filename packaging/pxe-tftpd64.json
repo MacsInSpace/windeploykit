@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "version": "4.74",
+  "updated": "2025-10-21",
+  "manifestUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/pxe-tftpd64.json",
+  "platforms": {
+    "windows_amd64": {
+      "archiveName": "tftpd64_portable_v4.74.zip",
+      "archiveKind": "zip",
+      "binaryName": "tftpd64.exe",
+      "sizeBytes": 587589,
+      "sha256": "3ad38a71c0d7d42915429f8f02945e27bcf88161ad1028980d1364af8f76bf22",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/tftpd64_portable_v4.74.zip",
+      "githubUrl": "https://github.com/PJO2/tftpd64/releases/download/v4.74/tftpd64_portable_v4.74.zip"
+    },
+    "windows_arm64": {
+      "archiveName": "tftpd64_portable_v4.74.zip",
+      "archiveKind": "zip",
+      "binaryName": "tftpd64.exe",
+      "sizeBytes": 587589,
+      "sha256": "3ad38a71c0d7d42915429f8f02945e27bcf88161ad1028980d1364af8f76bf22",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/tftpd64_portable_v4.74.zip",
+      "githubUrl": "https://github.com/PJO2/tftpd64/releases/download/v4.74/tftpd64_portable_v4.74.zip",
+      "notes": "Portable build is x64; runs under WoW64 on ARM64 Windows."
+    }
+  }
+}

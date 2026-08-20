@@ -1,0 +1,6 @@
+// Prevent extra Windows console on release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+fn main() {
+    windeploykit_lib::run();
+}

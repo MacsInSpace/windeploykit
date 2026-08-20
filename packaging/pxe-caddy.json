@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "version": "2.11.4",
+  "updated": "2026-06-20",
+  "manifestUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/pxe-caddy.json",
+  "platforms": {
+    "macos_arm64": {
+      "archiveName": "caddy_2.11.4_mac_arm64.tar.gz",
+      "archiveKind": "tar.gz",
+      "binaryName": "caddy",
+      "sizeBytes": 16448366,
+      "sha256": "9efb0af2d6cf09cfb5053c0e51721b9b3d4956d346234f39368d943d25a3c9a7",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/caddy_2.11.4_mac_arm64.tar.gz",
+      "githubUrl": "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_mac_arm64.tar.gz"
+    },
+    "macos_amd64": {
+      "archiveName": "caddy_2.11.4_mac_amd64.tar.gz",
+      "archiveKind": "tar.gz",
+      "binaryName": "caddy",
+      "sizeBytes": 17631734,
+      "sha256": "34bc9e5cceee8d67844ef51da624f5b79e8d070f27236e050c3f0066a2dba534",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/caddy_2.11.4_mac_amd64.tar.gz",
+      "githubUrl": "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_mac_amd64.tar.gz"
+    },
+    "windows_amd64": {
+      "archiveName": "caddy_2.11.4_windows_amd64.zip",
+      "archiveKind": "zip",
+      "binaryName": "caddy.exe",
+      "sizeBytes": 17559418,
+      "sha256": "1708333f79e274c7697285afe6d592ab39314e0b131e9ec6bea08ad27df62ebf",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/caddy_2.11.4_windows_amd64.zip",
+      "githubUrl": "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_windows_amd64.zip"
+    },
+    "windows_arm64": {
+      "archiveName": "caddy_2.11.4_windows_arm64.zip",
+      "archiveKind": "zip",
+      "binaryName": "caddy.exe",
+      "sizeBytes": 15748221,
+      "sha256": "c7f16da93728f61455f77c04eac1ff4de06a38da281ed6d3dcbfae795be2a936",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/caddy_2.11.4_windows_arm64.zip",
+      "githubUrl": "https://github.com/caddyserver/caddy/releases/download/v2.11.4/caddy_2.11.4_windows_arm64.zip"
+    }
+  }
+}

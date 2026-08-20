@@ -1,0 +1,2 @@
+# wimboot v2.9.0 ? https://github.com/ipxe/wimboot/releases/tag/v2.9.0
+5f067ccdc4d084d5bf77b6c853bd0f8402dfc2b4cd1b103d358993ae97fae8e3  wimboot

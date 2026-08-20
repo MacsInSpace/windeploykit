@@ -1,0 +1,222 @@
+<#
+    WinDeployKit sidecar — long-lived PowerShell 7 service, NDJSON over stdio.
+
+    Protocol (unchanged from the USM original this was ported from):
+      stdin   one JSON object per line: {"id":N,"cmd":"Name","params":{...}}
+      stdout  one JSON response per line — responses ONLY
+      stderr  human-readable log lines
+
+    There is no bootstrap gauntlet here: WinDeployKit has no directory session and
+    no sign-in, so the service is ready the moment the dispatch loop starts.
+    Commands resolve by convention — "Foo" runs Handle-Foo from handlers/.
+#>
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+$script:SidecarRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Repo/bundle root — libs resolve vendored binaries and packaging manifests from
+# here (vendor/binaries, packaging/*.json). Must be set before any lib loads.
+$script:AppSidecarProjectRoot = Split-Path -Parent $script:SidecarRoot
+$ProjectRoot = $script:AppSidecarProjectRoot
+$env:PSModulePath = "$($script:SidecarRoot)/modules" + [IO.Path]::PathSeparator + $env:PSModulePath
+
+# --- Shared state -----------------------------------------------------------
+$script:AppState = @{
+    IsReady       = $false
+    Lifecycle     = 'booting'
+    RuntimeConfig = @{}
+    StartedAt     = (Get-Date).ToString('o')
+}
+
+# --- Library load -----------------------------------------------------------
+# Ipc first (everything logs through it), then the rest alphabetically.
+$libRoot = Join-Path $script:SidecarRoot 'lib'
+. (Join-Path $libRoot 'Ipc.ps1')
+. (Join-Path $libRoot 'SidecarParams.ps1')
+. (Join-Path $libRoot 'AppPlatform.ps1')
+. (Join-Path $libRoot 'AppPaths.ps1')
+. (Join-Path $libRoot 'AppHttp.ps1')
+. (Join-Path $libRoot 'AppElevation.ps1')
+. (Join-Path $libRoot 'AppNativeProcess.ps1')
+. (Join-Path $libRoot 'AppPluginGates.ps1')
+. (Join-Path $libRoot 'LocalMachineCredentials.ps1')
+. (Join-Path $libRoot 'InfrastructureSshCredentials.ps1')
+. (Join-Path $libRoot 'AcerSccmDriverCatalog.ps1')
+. (Join-Path $libRoot 'DellSccmDriverCatalog.ps1')
+. (Join-Path $libRoot 'HpSccmDriverCatalog.ps1')
+. (Join-Path $libRoot 'LenovoSccmDriverCatalog.ps1')
+. (Join-Path $libRoot 'MicrosoftSccmDriverCatalog.ps1')
+. (Join-Path $libRoot 'VendorSccmCatalogRefresh.ps1')
+. (Join-Path $libRoot 'PxeBootPlugin.ps1')
+. (Join-Path $libRoot 'PxeBootTaskSequences.ps1')
+. (Join-Path $libRoot 'PxeBootDriverPullThrough.ps1')
+. (Join-Path $libRoot 'Aria2Plugin.ps1')
+. (Join-Path $libRoot 'Aria2TrackerScrape.ps1')
+. (Join-Path $libRoot 'Aria2PxeIntegration.ps1')
+. (Join-Path $libRoot 'EvalIsoCatalog.ps1')
+
+foreach ($handler in (Get-ChildItem -Path (Join-Path $script:SidecarRoot 'handlers') -Filter '*.ps1' -File | Sort-Object Name)) {
+    . $handler.FullName
+}
+
+# --- Core handlers ----------------------------------------------------------
+function Handle-Ping {
+    param([int]$Id, $Params)
+    Write-SidecarResponse -Id $Id -Data @{ pong = $true; at = (Get-Date).ToString('o') }
+}
+
+function Handle-GetSidecarStatus {
+    param([int]$Id, $Params)
+    Write-SidecarResponse -Id $Id -Data @{
+        ready       = [bool]$script:AppState.IsReady
+        lifecycle   = [string]$script:AppState.Lifecycle
+        startedAt   = [string]$script:AppState.StartedAt
+        pid         = $PID
+        psVersion   = $PSVersionTable.PSVersion.ToString()
+        platform    = if ($IsMacOS) { 'macos' } elseif ($IsWindows) { 'windows' } else { 'other' }
+    }
+}
+
+function Handle-ApplyRuntimeConfig {
+    param([int]$Id, $Params)
+    $cfg = @{}
+    foreach ($name in @('verboseLogging', 'verbosePowershell', 'skipHttpCertificateCheck')) {
+        $cfg[$name] = [bool](Get-AppSidecarParam -Params $Params -Name $name)
+    }
+    $script:AppState['RuntimeConfig'] = $cfg
+    if (Get-Command Set-AppHttpTlsPolicy -ErrorAction SilentlyContinue) {
+        Set-AppHttpTlsPolicy -SkipCertificateCheck ([bool]$cfg['skipHttpCertificateCheck'])
+    }
+    Write-SidecarResponse -Id $Id -Data @{ applied = $true }
+}
+
+function Handle-PrepareAppExit {
+    param([int]$Id, $Params)
+    try { if (Get-Command Stop-AppPxeBootServices -ErrorAction SilentlyContinue) { Stop-AppPxeBootServices | Out-Null } } catch { }
+    try { if (Get-Command Stop-AppAria2Daemon -ErrorAction SilentlyContinue) { Stop-AppAria2Daemon | Out-Null } } catch { }
+    Write-SidecarResponse -Id $Id -Data @{ stopped = $true }
+}
+
+# --- Dispatch ---------------------------------------------------------------
+function Invoke-SidecarCommand {
+    param([int]$Id, [string]$Cmd, $Params)
+
+    Write-SidecarIpcBegin -Cmd $Cmd -Id $Id
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $outcome = 'ok'
+    try {
+        $handler = "Handle-$Cmd"
+        if (-not (Get-Command $handler -ErrorAction SilentlyContinue)) {
+            Write-SidecarLog "IPC: unknown command $Cmd ($Id)"
+            Write-SidecarError -Id $Id -Message "Unknown command: $Cmd" -Code 'UNKNOWN'
+            return
+        }
+        try {
+            & $handler -Id $Id -Params ($Params ?? @{})
+        } catch {
+            $outcome = 'error'
+            Write-SidecarLog "IPC: $Cmd failed - $($_.Exception.Message)"
+            Write-SidecarError -Id $Id -Message $_.Exception.Message -Code 'UNKNOWN'
+        }
+    } finally {
+        $sw.Stop()
+        Write-SidecarIpcComplete -Cmd $Cmd -Id $Id -ElapsedMs $sw.ElapsedMilliseconds -Outcome $outcome
+    }
+}
+
+function Initialize-SidecarHostBridge {
+    # Pure .NET stdin pump: the reader thread has no runspace, so it must not
+    # call back into PowerShell — it only enqueues raw lines.
+    if ('WinDeployKitSidecar.SidecarHost' -as [type]) { return }
+    Add-Type @'
+using System;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Threading;
+
+namespace WinDeployKitSidecar {
+    public static class SidecarHost {
+        public static readonly ConcurrentQueue<string> RequestLines = new ConcurrentQueue<string>();
+        public static int StdinComplete;
+
+        public static void StartStdinPump() {
+            var t = new Thread(StdinPumpWorker) { IsBackground = true, Name = "windeploykit-sidecar-stdin" };
+            t.Start();
+        }
+
+        static void StdinPumpWorker() {
+            try {
+                using (var reader = new StreamReader(Console.OpenStandardInput())) {
+                    string line;
+                    while ((line = reader.ReadLine()) != null) { RequestLines.Enqueue(line); }
+                }
+            } catch { }
+            finally { Interlocked.Exchange(ref StdinComplete, 1); }
+        }
+    }
+}
+'@ -ErrorAction Stop
+}
+
+function Invoke-SidecarDispatchOnce {
+    try {
+        # Background housekeeping the panels depend on for progress events.
+        foreach ($job in @('Sync-AppAria2DirectDownloadJobs', 'Sync-AppVendorSccmCatalogRefreshJob', 'Sync-AppPxeBootDriverPullThrough')) {
+            if (Get-Command $job -ErrorAction SilentlyContinue) {
+                try { & $job | Out-Null } catch { }
+            }
+        }
+
+        $line = $null
+        if (-not [WinDeployKitSidecar.SidecarHost]::RequestLines.TryDequeue([ref]$line)) { return $false }
+        if ([string]::IsNullOrWhiteSpace($line)) { return $true }
+
+        $req = $null
+        try {
+            $req = $line | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            Write-SidecarLog "IPC: malformed request line - $($_.Exception.Message)"
+            return $true
+        }
+
+        $id = 0
+        try { $id = [int]$req.id } catch { $id = 0 }
+        $cmd = [string]$req.cmd
+        $prm = if ($req.PSObject.Properties.Name -contains 'params') { $req.params } else { @{} }
+        if ([string]::IsNullOrWhiteSpace($cmd)) {
+            Write-SidecarError -Id $id -Message 'Request had no cmd.' -Code 'UNKNOWN'
+            return $true
+        }
+        Invoke-SidecarCommand -Id $id -Cmd $cmd -Params $prm
+        return $true
+    } catch {
+        Write-SidecarLog "Dispatch error: $($_.Exception.Message)"
+        return $true
+    }
+}
+
+# --- Main -------------------------------------------------------------------
+try {
+    Initialize-SidecarHostBridge
+    [WinDeployKitSidecar.SidecarHost]::StartStdinPump()
+
+    $script:AppState.IsReady = $true
+    $script:AppState.Lifecycle = 'ready'
+    Write-SidecarLog "WinDeployKit sidecar ready (pwsh $($PSVersionTable.PSVersion), pid $PID)." -Flush
+    Write-SidecarEvent -EventName 'ready' -Data @{ lifecycle = 'ready' }
+
+    while ($true) {
+        $handled = Invoke-SidecarDispatchOnce
+        if ([WinDeployKitSidecar.SidecarHost]::StdinComplete -ne 0 -and -not $handled) { break }
+        if (-not $handled) { [System.Threading.Thread]::Sleep(40) }
+    }
+} catch {
+    Write-SidecarLog "Sidecar fatal: $($_.Exception.Message)"
+    try { Write-SidecarEvent -EventName 'error' -Data @{ message = $_.Exception.Message; phase = 'fatal' } } catch { }
+} finally {
+    try { if (Get-Command Stop-AppPxeBootServices -ErrorAction SilentlyContinue) { Stop-AppPxeBootServices | Out-Null } } catch { }
+    try { if (Get-Command Stop-AppAria2Daemon -ErrorAction SilentlyContinue) { Stop-AppAria2Daemon | Out-Null } } catch { }
+    Write-SidecarLog 'WinDeployKit sidecar stopped.'
+}

@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "version": "1.37.0",
+  "updated": "2026-06-23",
+  "manifestUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2-tools.json",
+  "platforms": {
+    "macos_arm64": {
+      "archiveName": "aria2-1.37.0_mac_arm64.tar.gz",
+      "archiveKind": "tar.gz",
+      "binaryName": "aria2c",
+      "sizeBytes": 1038611,
+      "sha256": "bd62ee64319289bfb950047c5e12a913f26517ca9a4db3dacd23d52b20dbf995",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2-1.37.0_mac_arm64.tar.gz",
+      "githubUrl": null,
+      "notes": "Homebrew bottle repack — run scripts/fetch-aria2-tools.ps1 on Apple Silicon Mac to refresh."
+    },
+    "macos_amd64": {
+      "archiveName": "aria2-1.37.0_mac_amd64.tar.gz",
+      "archiveKind": "tar.gz",
+      "binaryName": "aria2c",
+      "sizeBytes": 0,
+      "sha256": "",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2-1.37.0_mac_amd64.tar.gz",
+      "githubUrl": null,
+      "notes": "No official macOS x64 binary — maintainer repack via fetch-aria2-tools.ps1 on Intel Mac."
+    },
+    "windows_amd64": {
+      "archiveName": "aria2-1.37.0-win-64bit-build1.zip",
+      "archiveKind": "zip",
+      "binaryName": "aria2c.exe",
+      "sizeBytes": 2475379,
+      "sha256": "67d015301eef0b612191212d564c5bb0a14b5b9c4796b76454276a4d28d9b288",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2-1.37.0-win-64bit-build1.zip",
+      "githubUrl": "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+    },
+    "windows_arm64": {
+      "archiveName": "aria2_1.37.0_arm64.zip",
+      "archiveKind": "zip",
+      "binaryName": "aria2c.exe",
+      "sizeBytes": 1968610,
+      "sha256": "5694080902fff84c8636e561c48f7a65278e8d4f05efefe953637f60a397c81f",
+      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2_1.37.0_arm64.zip",
+      "githubUrl": "https://github.com/minnyres/aria2-windows-arm64/releases/download/v1.37.0/aria2_1.37.0_arm64.zip",
+      "notes": "Community Windows on ARM build (minnyres/aria2-windows-arm64)."
+    }
+  }
+}

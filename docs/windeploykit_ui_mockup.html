@@ -1,0 +1,1077 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WinDeployKit — UI Concept</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0f1117;
+    --surface:   #161b27;
+    --surface2:  #1e2535;
+    --surface3:  #242d42;
+    --border:    #2a3349;
+    --border2:   #364060;
+    --accent:    #3b82f6;
+    --accent2:   #60a5fa;
+    --accent-dim:#1d4ed8;
+    --green:     #22c55e;
+    --green-dim: #166534;
+    --amber:     #f59e0b;
+    --amber-dim: #78350f;
+    --red:       #ef4444;
+    --red-dim:   #7f1d1d;
+    --purple:    #a78bfa;
+    --text:      #e2e8f0;
+    --text2:     #94a3b8;
+    --text3:     #64748b;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+    --cond:      'IBM Plex Sans Condensed', sans-serif;
+  }
+
+  html, body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* ── APP SHELL ─────────────────────────── */
+  .app {
+    display: grid;
+    grid-template-rows: 44px 1fr;
+    grid-template-columns: 260px 1fr;
+    height: 100vh;
+    gap: 0;
+  }
+
+  /* ── TITLE BAR ─────────────────────────── */
+  .titlebar {
+    grid-column: 1 / -1;
+    background: #0a0d14;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+    user-select: none;
+    position: relative;
+  }
+
+  .titlebar-dots {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: filter 0.15s;
+  }
+  .dot:hover { filter: brightness(1.3); }
+  .dot-red    { background: #ff5f57; }
+  .dot-amber  { background: #febc2e; }
+  .dot-green  { background: #28c840; }
+
+  .titlebar-divider {
+    width: 1px; height: 20px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  .app-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--accent2);
+    flex-shrink: 0;
+  }
+  .app-logo svg { color: var(--accent); }
+
+  .titlebar-center {
+    flex: 1;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text3);
+    letter-spacing: 0.04em;
+  }
+
+  .titlebar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .session-pill {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text2);
+  }
+  .session-pill .dot-status {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-ok  { background: var(--green); box-shadow: 0 0 4px var(--green); }
+  .dot-err { background: var(--red);   box-shadow: 0 0 4px var(--red); }
+
+  .site-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #1e3a5f, #1a2d4a);
+    border: 1px solid #2a4a7a;
+    border-radius: 4px;
+    padding: 3px 10px 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .site-pill:hover { border-color: var(--accent); }
+  .site-pill .label { color: var(--text3); font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .site-pill .name  { color: var(--accent2); font-weight: 500; }
+  .site-pill .arrow { color: var(--text3); font-size: 9px; }
+
+  /* ── LEFT SIDEBAR ──────────────────────── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Site Profile card */
+  .site-card {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(160deg, #121827 0%, #0f1520 100%);
+    position: relative;
+    overflow: hidden;
+  }
+  .site-card::before {
+    content: '';
+    position: absolute;
+    top: -20px; right: -20px;
+    width: 80px; height: 80px;
+    background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+  .site-id {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+  .site-name {
+    font-family: var(--cond);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.2;
+    margin-bottom: 10px;
+  }
+  .site-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 8px;
+  }
+  .meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .meta-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .meta-value {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text2);
+  }
+  .meta-value.ok { color: var(--green); }
+  .meta-value.subnet { color: var(--purple); }
+
+  /* Nav section */
+  .nav {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+
+  .nav-section-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text3);
+    padding: 8px 16px 4px;
+    margin-top: 4px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 16px;
+    cursor: pointer;
+    border-left: 2px solid transparent;
+    transition: all 0.12s;
+    color: var(--text2);
+    font-size: 12.5px;
+    position: relative;
+  }
+  .nav-item:hover {
+    background: var(--surface2);
+    color: var(--text);
+    border-left-color: var(--border2);
+  }
+  .nav-item.active {
+    background: linear-gradient(90deg, rgba(59,130,246,0.12) 0%, transparent 100%);
+    color: var(--accent2);
+    border-left-color: var(--accent);
+  }
+  .nav-item.active .nav-icon { color: var(--accent); }
+  .nav-icon { width: 14px; text-align: center; font-size: 12px; color: var(--text3); flex-shrink: 0; }
+
+  .nav-badge {
+    margin-left: auto;
+    background: var(--surface3);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text3);
+    padding: 1px 5px;
+  }
+  .nav-badge.warn { background: rgba(245,158,11,0.15); border-color: var(--amber-dim); color: var(--amber); }
+  .nav-badge.ok   { background: rgba(34,197,94,0.12);  border-color: var(--green-dim);  color: var(--green); }
+
+  .nav-item.expandable::after {
+    content: '›';
+    margin-left: auto;
+    color: var(--text3);
+    font-size: 14px;
+    transition: transform 0.15s;
+  }
+  .nav-item.expandable.open::after { transform: rotate(90deg); }
+
+  .nav-sub {
+    background: rgba(0,0,0,0.2);
+    display: none;
+  }
+  .nav-sub.open { display: block; }
+  .nav-sub .nav-item {
+    padding-left: 38px;
+    font-size: 12px;
+    color: var(--text3);
+  }
+  .nav-sub .nav-item:hover { color: var(--text2); }
+  .nav-sub .nav-item.active { color: var(--accent2); }
+
+  /* Bottom of sidebar */
+  .sidebar-footer {
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text3);
+  }
+  .user-avatar {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent-dim), var(--purple));
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: white;
+    flex-shrink: 0;
+  }
+  .user-info { flex: 1; }
+  .user-name { color: var(--text2); font-weight: 500; font-size: 11.5px; }
+  .user-role { font-family: var(--mono); font-size: 9px; color: var(--accent); }
+
+  /* ── MAIN CONTENT ──────────────────────── */
+  .main {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  /* Panel toolbar */
+  .panel-toolbar {
+    padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .panel-title {
+    font-family: var(--cond);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  .panel-subtitle {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+  }
+  .toolbar-spacer { flex: 1; }
+
+  .toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text2);
+    padding: 5px 10px;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: all 0.12s;
+    font-family: var(--sans);
+  }
+  .toolbar-btn:hover { border-color: var(--border2); color: var(--text); background: var(--surface3); }
+  .toolbar-btn.primary {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: white;
+  }
+  .toolbar-btn.primary:hover { background: var(--accent); }
+
+  .search-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    width: 200px;
+    transition: border-color 0.15s;
+  }
+  .search-box:focus-within { border-color: var(--accent); }
+  .search-box input {
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 12px;
+    width: 100%;
+  }
+  .search-box input::placeholder { color: var(--text3); }
+
+  /* Panel content */
+  .panel-content {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 20px;
+    gap: 12px;
+  }
+
+  /* Status pills row */
+  .status-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .status-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text2);
+  }
+  .status-chip.ok    { border-color: var(--green-dim);  background: rgba(34,197,94,0.08); }
+  .status-chip.warn  { border-color: var(--amber-dim);  background: rgba(245,158,11,0.08); }
+  .status-chip .label { color: var(--text3); margin-right: 2px; }
+  .status-chip.ok .val  { color: var(--green); }
+  .status-chip.warn .val { color: var(--amber); }
+
+  /* Data table */
+  .data-table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  thead {
+    background: var(--surface2);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  th {
+    padding: 8px 14px;
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text3);
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  th:hover { color: var(--text2); cursor: pointer; }
+  td {
+    padding: 9px 14px;
+    border-bottom: 1px solid rgba(42,51,73,0.5);
+    color: var(--text2);
+    font-size: 12px;
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(59,130,246,0.04); color: var(--text); }
+  tr.selected td { background: rgba(59,130,246,0.08); }
+
+  .td-mono { font-family: var(--mono); font-size: 11px; color: var(--text); }
+  .td-dim  { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 3px;
+    padding: 2px 7px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 500;
+  }
+  .badge-ok     { background: rgba(34,197,94,0.12);   color: var(--green); border: 1px solid var(--green-dim); }
+  .badge-warn   { background: rgba(245,158,11,0.12);  color: var(--amber); border: 1px solid var(--amber-dim); }
+  .badge-err    { background: rgba(239,68,68,0.12);   color: var(--red);   border: 1px solid var(--red-dim); }
+  .badge-dim    { background: var(--surface3);        color: var(--text3); border: 1px solid var(--border); }
+
+  .row-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  tr:hover .row-actions { opacity: 1; }
+  .row-btn {
+    background: var(--surface3);
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    color: var(--text2);
+    padding: 2px 7px;
+    font-size: 10px;
+    cursor: pointer;
+    font-family: var(--sans);
+    transition: all 0.1s;
+  }
+  .row-btn:hover { background: var(--accent-dim); border-color: var(--accent); color: white; }
+  .row-btn.danger:hover { background: rgba(239,68,68,0.2); border-color: var(--red); color: var(--red); }
+
+  /* Detail pane (right panel — shown as overlay hint) */
+  .detail-pane {
+    width: 280px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .detail-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .detail-name {
+    font-family: var(--cond);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 3px;
+  }
+  .detail-sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+  }
+  .detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border2) transparent;
+  }
+  .detail-section-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text3);
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .detail-key {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--text3);
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+  .detail-val {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text2);
+    text-align: right;
+    word-break: break-all;
+  }
+  .detail-val.accent { color: var(--accent2); }
+  .detail-val.green  { color: var(--green); }
+  .detail-val.amber  { color: var(--amber); }
+  .detail-val.purple { color: var(--purple); }
+
+  .detail-actions {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+  .action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text2);
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: all 0.12s;
+    font-family: var(--sans);
+  }
+  .action-btn:hover { border-color: var(--border2); color: var(--text); background: var(--surface3); }
+  .action-btn.primary-action { border-color: var(--accent-dim); color: var(--accent2); }
+  .action-btn.primary-action:hover { background: var(--accent-dim); border-color: var(--accent); color: white; }
+  .action-btn.danger-action { }
+  .action-btn.danger-action:hover { border-color: var(--red); color: var(--red); background: rgba(239,68,68,0.1); }
+
+  /* OU tree special styling */
+  .ou-tree { padding: 8px 0; }
+  .ou-node {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px 5px 16px;
+    cursor: pointer;
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--text2);
+    transition: background 0.1s;
+    user-select: none;
+  }
+  .ou-node:hover { background: var(--surface2); color: var(--text); }
+  .ou-node.active { background: rgba(59,130,246,0.1); color: var(--accent2); }
+  .ou-node .expand-icon { color: var(--text3); font-size: 11px; width: 12px; flex-shrink: 0; }
+  .ou-node .type-icon   { font-size: 13px; flex-shrink: 0; }
+  .ou-node .ou-count    { margin-left: auto; font-family: var(--mono); font-size: 9px; color: var(--text3); }
+  .ou-children { padding-left: 18px; }
+
+  /* Subnet display */
+  .subnet-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  .subnet-site { font-family: var(--mono); font-size: 11px; color: var(--accent2); margin-bottom: 6px; }
+  .subnet-row  { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .subnet-cidr { font-family: var(--mono); font-size: 11px; color: var(--text); }
+  .subnet-type-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 2px;
+    font-weight: 500;
+  }
+  .type-admin  { background: rgba(59,130,246,0.15); color: var(--accent2); border: 1px solid rgba(59,130,246,0.3); }
+  .type-curric { background: rgba(34,197,94,0.12);  color: var(--green);   border: 1px solid rgba(34,197,94,0.25); }
+  .type-dmz    { background: rgba(245,158,11,0.12); color: var(--amber);   border: 1px solid rgba(245,158,11,0.25); }
+
+  /* Animations */
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .panel-content { animation: fadeSlideIn 0.2s ease both; }
+
+  /* Tab bar inside panels */
+  .tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 20px;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .tab {
+    padding: 8px 14px;
+    font-size: 12px;
+    color: var(--text3);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all 0.12s;
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--text2); }
+  .tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  /* Main content flex row for table + detail */
+  .content-flex {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    gap: 0;
+  }
+  .table-area {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 0 16px 20px;
+    gap: 12px;
+  }
+
+  /* Label for mockup context */
+  .mockup-label {
+    position: fixed;
+    bottom: 12px;
+    right: 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 10px;
+    z-index: 100;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ── TITLE BAR ───────────────────────────── -->
+  <div class="titlebar">
+    <div class="titlebar-dots">
+      <div class="dot dot-red"></div>
+      <div class="dot dot-amber"></div>
+      <div class="dot dot-green"></div>
+    </div>
+    <div class="titlebar-divider"></div>
+    <div class="app-logo">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="1" y="1" width="6" height="6" rx="1" fill="currentColor" opacity="0.9"/>
+        <rect x="9" y="1" width="6" height="6" rx="1" fill="currentColor" opacity="0.5"/>
+        <rect x="1" y="9" width="6" height="6" rx="1" fill="currentColor" opacity="0.5"/>
+        <rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" opacity="0.7"/>
+      </svg>
+      the site service ADMIN
+    </div>
+    <div class="titlebar-center">Example Site — DC01 / DC01</div>
+    <div class="titlebar-right">
+      <!-- Session status pills -->
+      <div class="session-pill">
+        <div class="dot-status dot-ok"></div>
+        .20 EDU001
+      </div>
+      <div class="session-pill">
+        <div class="dot-status dot-ok"></div>
+        .21 EDU002
+      </div>
+      <!-- the site service context -->
+      <div class="site-pill">
+        <span class="label">the site service</span>
+        <span class="name">Example Site</span>
+        <span class="arrow">▾</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SIDEBAR ─────────────────────────────── -->
+  <div class="sidebar">
+    <!-- Site Profile card -->
+    <div class="site-card">
+      <div class="site-id">SITE01 · DEPLOY SHARE</div>
+      <div class="site-name">Example Site</div>
+      <div class="site-meta">
+        <div class="meta-item">
+          <span class="meta-label">DC</span>
+          <span class="meta-value ok">DC01</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">DC</span>
+          <span class="meta-value ok">DC01</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Admin subnet</span>
+          <span class="meta-value subnet">10.165.207.0/24</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Curric subnet</span>
+          <span class="meta-value subnet">10.122.192.0/20</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav">
+      <div class="nav-section-label">Overview</div>
+      <div class="nav-item">
+        <span class="nav-icon">⊞</span> Dashboard
+      </div>
+
+      <div class="nav-section-label">Active Directory</div>
+      <div class="nav-item expandable open" onclick="toggleSub('ou-sub',this)">
+        <span class="nav-icon">🗂</span> OU Browser
+      </div>
+      <div class="nav-sub open" id="ou-sub">
+        <div class="nav-item">Service Accounts</div>
+        <div class="nav-item">Wireless Certs</div>
+        <div class="nav-item active">Computers Managed</div>
+        <div class="nav-item">Servers</div>
+        <div class="nav-item">Groups</div>
+      </div>
+
+      <div class="nav-item">
+        <span class="nav-icon">👤</span> Staff &amp; Contacts
+        <span class="nav-badge ok">77</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">🔑</span> Service Accounts
+        <span class="nav-badge">58</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">📶</span> Wireless Certs
+        <span class="nav-badge warn">63</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">🖥</span> Computers
+        <span class="nav-badge">71</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">🗄</span> Servers
+        <span class="nav-badge">18</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">🌐</span> IP Schema
+      </div>
+
+      <div class="nav-section-label">the site service</div>
+      <div class="nav-item">
+        <span class="nav-icon">📋</span> Distribution Lists
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">🔏</span> Certificates
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon">📝</span> Site Notes
+      </div>
+
+      <div class="nav-section-label">Tools</div>
+      <div class="nav-item">
+        <span class="nav-icon">📊</span> NPS Log Viewer
+      </div>
+    </div>
+
+    <!-- User footer -->
+    <div class="sidebar-footer">
+      <div class="user-avatar">CH</div>
+      <div class="user-info">
+        <div class="user-name">Craig Hair</div>
+        <div class="user-role">RST · EDU002\st00447</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── MAIN CONTENT ─────────────────────────── -->
+  <div class="main">
+
+    <!-- Panel toolbar -->
+    <div class="panel-toolbar">
+      <div>
+        <div class="panel-title">Computers — Managed</div>
+        <div class="panel-subtitle">OU=Computers Managed · DC01 · EDU002</div>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <div class="search-box">
+        <span style="color:var(--text3);font-size:11px">⌕</span>
+        <input placeholder="Filter by name, OS..." />
+      </div>
+      <button class="toolbar-btn">⟳ Refresh</button>
+      <button class="toolbar-btn">↓ Export CSV</button>
+    </div>
+
+    <!-- Sub-tabs -->
+    <div class="tab-bar">
+      <div class="tab">Managed <span style="font-family:var(--mono);font-size:9px;color:var(--green);margin-left:4px">67</span></div>
+      <div class="tab active">Managed <span style="font-family:var(--mono);font-size:9px;color:var(--accent2);margin-left:4px">67</span></div>
+      <div class="tab">Unmanaged <span style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-left:4px">1</span></div>
+      <div class="tab">Admin <span style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-left:4px">3</span></div>
+      <div class="tab">Servers <span style="font-family:var(--mono);font-size:9px;color:var(--text3);margin-left:4px">18</span></div>
+    </div>
+
+    <!-- Content flex row -->
+    <div class="content-flex">
+
+      <!-- Table area -->
+      <div class="table-area">
+        <!-- Status chips -->
+        <div class="status-row">
+          <div class="status-chip ok"><span class="dot-status dot-ok" style="width:5px;height:5px;border-radius:50%;background:var(--green)"></span><span class="label">Session:</span> <span class="val">DC01 Connected</span></div>
+          <div class="status-chip ok"><span class="label">Objects:</span> <span class="val">67</span></div>
+          <div class="status-chip warn"><span class="label">Disabled:</span> <span class="val">4</span></div>
+          <div class="status-chip ok"><span class="label">Last sync:</span> <span class="val">just now</span></div>
+        </div>
+
+        <!-- Table -->
+        <div class="data-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name ↕</th>
+                <th>DNS Hostname</th>
+                <th>Operating System</th>
+                <th>Created</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="td-mono">DPS-LAP-001</td>
+                <td class="td-dim">dk-lap-001.example.local</td>
+                <td>Windows 11 Pro</td>
+                <td class="td-dim">2024-03-14</td>
+                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
+              </tr>
+              <tr class="selected">
+                <td class="td-mono">DPS-LAP-002</td>
+                <td class="td-dim">dk-lap-002.example.local</td>
+                <td>Windows 11 Pro</td>
+                <td class="td-dim">2024-03-14</td>
+                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
+              </tr>
+              <tr>
+                <td class="td-mono">DPS-LAP-003</td>
+                <td class="td-dim">dk-lap-003.example.local</td>
+                <td>Windows 10 Pro</td>
+                <td class="td-dim">2023-11-01</td>
+                <td><span class="status-badge badge-warn">⚠ Disabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button><button class="row-btn">Enable</button></div></td>
+              </tr>
+              <tr>
+                <td class="td-mono">DPS-DESK-001</td>
+                <td class="td-dim">dk-desk-001.example.local</td>
+                <td>Windows 11 Pro</td>
+                <td class="td-dim">2024-01-22</td>
+                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
+              </tr>
+              <tr>
+                <td class="td-mono">DPS-DESK-002</td>
+                <td class="td-dim">dk-desk-002.example.local</td>
+                <td>Windows 11 Pro</td>
+                <td class="td-dim">2024-01-22</td>
+                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
+              </tr>
+              <tr>
+                <td class="td-mono">DPS-DESK-003</td>
+                <td class="td-dim">dk-desk-003.example.local</td>
+                <td>Windows 10 Pro</td>
+                <td class="td-dim">2023-08-15</td>
+                <td><span class="status-badge badge-err">✕ Locked</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button><button class="row-btn">Unlock</button></div></td>
+              </tr>
+              <tr>
+                <td class="td-mono">DPS-LAP-010</td>
+                <td class="td-dim">dk-lap-010.example.local</td>
+                <td>Windows 11 Pro</td>
+                <td class="td-dim">2024-06-01</td>
+                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
+              </tr>
+              <tr>
+                <td class="td-mono">DPS-LAP-011</td>
+                <td class="td-dim">dk-lap-011.example.local</td>
+                <td>Windows 11 Pro</td>
+                <td class="td-dim">2024-06-01</td>
+                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
+              </tr>
+              <tr>
+                <td class="td-mono">DPS-LAP-012</td>
+                <td class="td-dim">dk-lap-012.example.local</td>
+                <td>Windows 11 Pro</td>
+                <td class="td-dim">2024-06-02</td>
+                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
+              </tr>
+              <tr>
+                <td class="td-mono">DPS-LAP-013</td>
+                <td class="td-dim">dk-lap-013.example.local</td>
+                <td>Windows 10 Pro</td>
+                <td class="td-dim">2022-09-12</td>
+                <td><span class="status-badge badge-warn">⚠ Disabled</span></td>
+                <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div><!-- /table-area -->
+
+      <!-- Detail pane -->
+      <div class="detail-pane">
+        <div class="detail-header">
+          <div class="detail-name">DPS-LAP-002</div>
+          <div class="detail-sub">Computer Object · EDU002</div>
+        </div>
+        <div class="detail-body">
+
+          <div>
+            <div class="detail-section-label">Identity</div>
+            <div class="detail-row"><span class="detail-key">CN</span><span class="detail-val">DPS-LAP-002</span></div>
+            <div class="detail-row"><span class="detail-key">sAMAccountName</span><span class="detail-val">DPS-LAP-002$</span></div>
+            <div class="detail-row"><span class="detail-key">DNS</span><span class="detail-val accent">dk-lap-002.SITE01<br>example.local</span></div>
+          </div>
+
+          <div>
+            <div class="detail-section-label">System</div>
+            <div class="detail-row"><span class="detail-key">OS</span><span class="detail-val">Windows 11 Pro</span></div>
+            <div class="detail-row"><span class="detail-key">OS Ver</span><span class="detail-val">10.0.22631</span></div>
+          </div>
+
+          <div>
+            <div class="detail-section-label">Status</div>
+            <div class="detail-row"><span class="detail-key">Account</span><span class="detail-val green">Enabled</span></div>
+            <div class="detail-row"><span class="detail-key">Locked</span><span class="detail-val green">No</span></div>
+          </div>
+
+          <div>
+            <div class="detail-section-label">Timestamps</div>
+            <div class="detail-row"><span class="detail-key">Created</span><span class="detail-val">2024-03-14</span></div>
+            <div class="detail-row"><span class="detail-key">Modified</span><span class="detail-val">2025-11-02</span></div>
+            <div class="detail-row"><span class="detail-key">Last logon</span><span class="detail-val amber">2025-04-18</span></div>
+          </div>
+
+          <div>
+            <div class="detail-section-label">OU Path</div>
+            <div class="detail-row"><span class="detail-val" style="font-size:9px;color:var(--text3);font-family:var(--mono)">OU=Computers Managed,<br>OU=Example Site - SITE01,<br>OU=South-Western Victoria Region,<br>OU=Sites,DC=services,...</span></div>
+          </div>
+
+        </div>
+        <div class="detail-actions">
+          <button class="action-btn primary-action">⟳ Refresh Object</button>
+          <button class="action-btn">📋 Copy DN</button>
+          <button class="action-btn danger-action">⊘ Disable Account</button>
+        </div>
+      </div><!-- /detail-pane -->
+
+    </div><!-- /content-flex -->
+  </div><!-- /main -->
+
+</div><!-- /app -->
+
+<div class="mockup-label">UI Concept — WinDeployKit App — v0.1 sketch</div>
+
+<script>
+function toggleSub(id, el) {
+  const sub = document.getElementById(id);
+  if (sub) {
+    sub.classList.toggle('open');
+    el.classList.toggle('open');
+  }
+}
+</script>
+</body>
+</html>

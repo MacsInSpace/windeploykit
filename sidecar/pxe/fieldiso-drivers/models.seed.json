@@ -1,0 +1,154 @@
+{
+  "schema": 1,
+  "os": "Win11x64",
+  "notes": [
+    "folder = flat OOBD layout under <ISO & driver root>/Drivers/<folder>/ (served at /drivers/<folder>/); folder name matches Win32_ComputerSystem.Model so ImageDeployer finds it.",
+    "Store vendor SCCM packs as downloaded (.cab, .exe, .7z, .zip) — FieldIso WinPE extracts with 7z at boot.",
+    "nsspCatalogLabels = Notebook NSSP fleet display names — tranche/catalog text like (2024 GS) is NOT a hardware model number and must never be a folder name.",
+    "wmiPatterns = Win32_ComputerSystem.Model substrings in WinPE (e.g. P414-51, TravelMate P414-51)."
+  ],
+  "vendors": {
+    "Acer": {
+      "models": [
+        {
+          "folder": "TravelMate P214-53",
+          "nsspCatalogLabels": [
+            "Acer Travelmate P214 (2023 GS)",
+            "Acer TravelMate P214 (22.2)"
+          ],
+          "wmiPatterns": ["TravelMate P214-53", "P214-53"]
+        },
+        {
+          "folder": "TravelMate P214-54",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["TravelMate P214-54", "P214-54"]
+        },
+        {
+          "folder": "TravelMate P214-55",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["TravelMate P214-55", "P214-55"]
+        },
+        {
+          "folder": "TravelMate P215-54",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["TravelMate P215-54", "P215-54"]
+        },
+        {
+          "folder": "TravelMate P216-51",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["TravelMate P216-51", "P216-51"]
+        },
+        {
+          "folder": "TravelMate P414-51",
+          "nsspCatalogLabels": [
+            "Acer TravelMate Spin P414 (2024 GS)",
+            "Acer TravelMate Spin P414 (2024 NS)",
+            "Acer TravelMate Spin P414 (23.1)",
+            "Acer TravelMate Spin P414 (23.2)"
+          ],
+          "wmiPatterns": ["TravelMate P414-51", "P414-51"]
+        },
+        {
+          "folder": "TravelMate P414-52",
+          "nsspCatalogLabels": [
+            "Acer TravelMate Spin P414 (2025 GS)",
+            "Acer TravelMate Spin P414 (2025 NS)",
+            "Acer TravelMate Spin P414 (24.1)",
+            "Acer TravelMate Spin P414 (24.2)"
+          ],
+          "wmiPatterns": ["TravelMate P414-52", "P414-52"]
+        },
+        {
+          "folder": "TravelMate P414RN-53",
+          "nsspCatalogLabels": [
+            "Acer TravelMate Spin P414 (2026 GS)",
+            "Acer TravelMate Spin P414 (2026 NS)",
+            "Acer TravelMate Spin P414 (25.1)",
+            "Acer TravelMate Spin P414 (25.2)"
+          ],
+          "wmiPatterns": [
+            "TravelMate P414RN-53",
+            "P414RN-53",
+            "414RN-53",
+            "TMP414RN-53",
+            "TMP414-53",
+            "TravelMate P414-53",
+            "P414-53"
+          ]
+        },
+        {
+          "folder": "TravelMate P414-54",
+          "nsspCatalogLabels": [
+            "Acer TravelMate Spin P414 (26.1)",
+            "Acer TravelMate Ultra P4 Spin 14 (25.1)"
+          ],
+          "wmiPatterns": ["TravelMate P414-54", "P414-54", "Ultra P4 Spin 14"]
+        },
+        {
+          "folder": "TravelMate P416-51",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["TravelMate P416-51", "P416-51"]
+        },
+        {
+          "folder": "TravelMate P416-52",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["TravelMate P416-52", "P416-52"]
+        },
+        {
+          "folder": "TravelMate P416-72",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["TravelMate P416-72", "P416-72"]
+        }
+      ]
+    },
+    "LENOVO": {
+      "models": [
+        {
+          "folder": "20L",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["20L"]
+        },
+        {
+          "folder": "20S",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["20S"]
+        },
+        {
+          "folder": "21F",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["21F"]
+        },
+        {
+          "folder": "82V",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": ["82V"],
+          "lenovoSccmFallbackPage": "https://support.lenovo.com/au/en/downloads/ds555902"
+        }
+      ]
+    },
+    "Proxmox": {
+      "models": [
+        {
+          "folder": "VirtIO Q35",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": [
+            "Standard PC (Q35 + ICH9, 2009)",
+            "Standard PC (Q35 + ICH9",
+            "Q35 + ICH9"
+          ],
+          "notes": "Default Proxmox/KVM machine type (OVMF). Win32_ComputerSystem.Model in WinPE."
+        },
+        {
+          "folder": "VirtIO i440FX",
+          "nsspCatalogLabels": [],
+          "wmiPatterns": [
+            "Standard PC (i440FX + PIIX, 1996)",
+            "Standard PC (i440FX + PIIX",
+            "i440FX + PIIX"
+          ],
+          "notes": "Legacy SeaBIOS / i440fx machine type."
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,14 @@
+#!ipxe
+# Rebuild snponly.efi from ipxeboot with this embedded script (see sidecar/pxe/README.md).
+# TFTP boot.ipxe first so the local Field PXE menu loads even when HTTP is slow to answer.
+echo DeployKit field PXE — loading boot menu...
+set buildsign ${buildsign}
+chain tftp://${next-server}/boot.ipxe?t=${buildsign} \
+  || chain tftp://${next-server}/boot.ipxe \
+  || chain http://${next-server}:8080/boot.ipxe?t=${buildsign} \
+  || chain http://${next-server}:8080/boot.ipxe \
+  || goto failed
+:failed
+echo Could not fetch PXE menu from this workstation (TFTP/HTTP).
+echo Enable HTTP + TFTP in Netboot, add boot WIMs or ISOs, and check router option 66.
+shell

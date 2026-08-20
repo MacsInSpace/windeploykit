@@ -1,0 +1,36 @@
+# Reference clone (FriendsOfMDT/PSD) — format reference only, not part of this product
+/PSD/
+
+# Dependencies / build output
+node_modules/
+dist/
+app/src-tauri/target/
+app/src-tauri/gen/
+packaging/staged/
+*.tsbuildinfo
+
+# Secrets / local config
+.env.local
+
+# --- Not for public distribution (repo is public) ---
+# Microsoft boot binaries harvested from an MDT share (bootmgfw.efi, BCD, boot.sdi)
+vendor/binaries/pxe-mdt-boot/
+sidecar/pxe/mdt-boot-x64/
+# WinPE system files + registry hives from the ADK (EULA-scoped) — move to private artifact host
+sidecar/pxe/fieldiso/wim-inject/
+# Torrents/infohashes of DE-licensed SOE images + internal tracker hostnames
+packaging/torrents/
+packaging/aria2-tracker.json
+# 7-Zip/curl WinPE tools (re-fetch via scripts/fetch-fieldiso-tools.ps1)
+sidecar/pxe/fieldiso/tools/*.exe
+sidecar/pxe/fieldiso/tools/*.dll
+
+# OS junk
+.DS_Store
+._*
+
+# USM originals kept locally for reference — never push (contain internal DE details)
+usm-reference/
+
+# Orphaned USM binaries kept locally for reference (Intune packager — feature removed)
+usm-reference/orphaned-binaries/
