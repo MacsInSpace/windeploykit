@@ -7514,7 +7514,7 @@ function Get-AppPxeBootRouterInstructions {
         option67Label = 'Bootfile Name'
         notes         = @(
             'On the site router or DHCP server — leave client leases unchanged; add PXE boot options only.'
-            'Option 66 = this laptop IPv4 on the curric LAN (same subnet as targets).'
+            'Option 66 = this laptop IPv4 on the deployment LAN (same subnet as targets).'
             "Option 67 = $bootFile (path relative to tftp/ on this host)."
             if ($sb) {
                 'Secure Boot: Option 67 must be shimx64.efi (shim loads ipxe/snponly from x86_64-sb/). Do not use x86_64-sb/ipxe.efi as Option 67.'

@@ -292,84 +292,12 @@ function Write-SidecarLogVerbose {
     Write-SidecarLog -Message $Message -Flush:$Flush
 }
 
-$script:SidecarBootstrapPhaseStartedAt = $null
-
-function Reset-SidecarBootstrapPhaseTimer {
-    $script:SidecarBootstrapPhaseStartedAt = [datetime]::UtcNow
-}
-
-function Write-SidecarBootProgress {
-    <#
-    .SYNOPSIS
-        Operator-facing boot stage for the startup overlay (always emitted).
-    #>
-    param(
-        [Parameter(Mandatory)][string]$Message,
-        [Parameter(Mandatory)][int]$Step,
-        [int]$Total = 14
-    )
-    if (Get-Command Write-SidecarEvent -ErrorAction SilentlyContinue) {
-        Write-SidecarEvent -EventName 'bootstrap-phase' -Data @{
-            message = $Message
-            step    = $Step
-            total   = $Total
-        }
-    }
-}
-
-function Get-SidecarBootstrapPhasePresentation {
-    param([Parameter(Mandatory)][string]$Name)
-    switch -Regex ($Name) {
-        '^Start-SidecarBootstrap$' {
-            return @{ message = 'Starting up…'; step = 1 }
-        }
-        '^network precheck' {
-            return @{ message = 'Checking department network and internet…'; step = 2 }
-        }
-        '^Import-AppModules$' {
-            return @{ message = 'Loading connection modules…'; step = 3 }
-        }
-        '^credential precheck' {
-            return @{ message = 'Checking saved sign-in…'; step = 4 }
-        }
-        '^NPS mount early' {
-            return @{ message = 'Preparing log file access…'; step = 5 }
-        }
-        '^dispatch loop starting' {
-            return @{ message = 'Waiting for sign-in…'; step = 1 }
-        }
-        default { return $null }
-    }
-}
-
-function Write-SidecarBootstrapPhase {
-    <#
-    .SYNOPSIS
-        Timestamped bootstrap checkpoint for the Sidecar Log panel (stderr).
-    #>
-    param([Parameter(Mandatory)][string]$Name)
-    $suffix = ''
-    if ($script:SidecarBootstrapPhaseStartedAt) {
-        $ms = ([datetime]::UtcNow - $script:SidecarBootstrapPhaseStartedAt).TotalMilliseconds
-        $suffix = " (+$([int]$ms)ms)"
-        $script:SidecarBootstrapPhaseStartedAt = [datetime]::UtcNow
-    }
-    Write-SidecarLogVerbose "Bootstrap > $Name$suffix" -Flush
-    $presentation = Get-SidecarBootstrapPhasePresentation -Name $Name
-    if ($presentation) {
-        Write-SidecarBootProgress -Message $presentation.message -Step $presentation.step
-    }
-}
-
 function Test-AppSidecarIpcPollCommand {
     param([Parameter(Mandatory)][string]$Cmd)
     # UI live polls — skip IPC begin/ok lines even when Debug is ON (errors and SLOW still log).
     return $Cmd -in @(
         'GetPxeBootPluginStatus'
         'GetPxeBootLogTail'
-        'GetNpsMountStatus'
-        'GetNpsLogRecords'
-        'GetCiscoPrimeMappingStatus'
     )
 }
 
@@ -482,43 +410,4 @@ function Write-SidecarIpcErrorLog {
             if ($trimmed) { Write-SidecarLogVerbose "  $trimmed" }
         }
     }
-}
-
-$script:AppSystemStartReadyLogged = $false
-
-function Reset-AppSystemStartReadyLog {
-    $script:AppSystemStartReadyLogged = $false
-}
-
-function Test-AppSystemStartNpsGateComplete {
-    <#
-    .SYNOPSIS
-        True when NPS is not blocking the boot-complete log (not mounting).
-        idle = mount never queued; ready/failed/skipped = terminal.
-    #>
-    if (-not $script:AppState) { return $false }
-    return $script:AppState.NpsMountStatus -ne 'mounting'
-}
-
-function Try-Write-AppSystemStartReadyLog {
-    <#
-    .SYNOPSIS
-        One operational line when standard boot is complete: IPC dispatch is up and
-        NPS is not still mounting. Call from Start-SidecarDispatchLoop and after
-        NPS mount/sync when IsReady.
-    #>
-    if ($script:AppSystemStartReadyLogged) { return }
-    if (-not $script:AppState -or -not $script:AppState.IsReady) { return }
-    if (-not (Test-AppSystemStartNpsGateComplete)) { return }
-
-    $script:AppSystemStartReadyLogged = $true
-
-    $suffix = switch ($script:AppState.NpsMountStatus) {
-        'ready'   { ', NPS LogFiles$ ready' }
-        'failed'  { '; NPS mount failed' }
-        'skipped' { '; NPS skipped' }
-        default   { '' }
-    }
-
-    Write-SidecarLog "System start ready (sessions open$suffix)." -Flush
 }

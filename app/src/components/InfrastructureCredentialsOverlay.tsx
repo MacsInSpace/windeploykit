@@ -20,7 +20,7 @@ import type {
   LocalMachineCredentialStatus,
 } from "../lib/types";
 
-const INFRA_LOGIN_USERNAME_PLACEHOLDER = `SSH / RDP / web username (e.g. CURRIC\\eduadmin)`;
+const INFRA_LOGIN_USERNAME_PLACEHOLDER = `Username for this device (e.g. DOMAIN\\deployadmin)`;
 const LOCAL_ADMIN_USERNAME_PLACEHOLDER = "Local admin username (e.g. st00447)";
 
 interface InfrastructureCredentialsOverlayProps {

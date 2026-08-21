@@ -1,0 +1,9 @@
+# Build output
+dist/
+node_modules/
+
+# tsc -b emits these next to vite.config.ts (composite project); they are build
+# artifacts, not sources — `npm run build` would otherwise dirty the tree.
+vite.config.js
+vite.config.d.ts
+*.tsbuildinfo

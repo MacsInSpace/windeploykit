@@ -231,6 +231,31 @@ a cache description, correctly left alone.
 - **Gateway `catch { }`** in `Get-AppPxeBootNetworkAdapters` (line ~4639) now
   logs instead of discarding — the bug that cost the original "No LAN IP" hunt.
 
+### Scope sweep, 2026-08-21 — removed what is not an MDT/PXE replacement
+
+Craig: *"All we are doing is MDT/WDS and PXE imaging."* Everything below was
+upstream tooling with no path to a WinDeployKit feature, and all of it was
+verified unreachable before removal.
+
+| Removed | Size | Why it was dead |
+| --- | --- | --- |
+| `sidecar/lib/AppLazyPlugins.ps1` | 140 lines | A lazy **plug-in registry** for 11 upstream plug-ins (Mist, Meraki, SolarWinds, PaperCut, ServiceNow, WMS, Oliver, MDM, ASM, Arcade, SiteBuild). **None of those files exist here** and nothing wired the loader. Directly contradicted §2.9 |
+| `app/src/lib/cacheTtls.ts` | 200 lines | Cache catalog for staff/students/groups/MDM device lists. Not imported anywhere |
+| `Ipc.ps1` boot ladder + NPS gate | ~110 lines | Bootstrap-phase overlay and an NPS-mount boot gate. Nothing called `Write-SidecarBootstrapPhase`; there is no NPS feature here |
+| `SidecarParams.ps1` group parser | 32 lines | `Read-AppSchoolGroupMembershipSidecarParams`, no callers |
+| `sidecar.rs` timeout table | ~30 lines | Per-command timeouts for WLC probes, switch CLI/audit bundles, ServiceNow and SiteBuild — none of which have handlers |
+| `index.css` | **544 lines** | Theme-package system, skin audio, the animated startup experience (orbs, circuit art, brand glow), boot-progress dots, the site-switcher/site card, drag-reorderable nav. §2.9 and §10 say these were deleted; the CSS had survived |
+| `AppIcon.tsx` | 43 lines | 30+ glyphs for AD/staff/student/printer/wireless panels. Trimmed to the 12 the console tree can actually reach, plus the fallback |
+| `types.ts` | 36 lines | 14 event names nothing emits or consumes, and the LDAP/sites-catalog half of `ApplyRuntimeConfigParams` |
+
+**Kept deliberately**, despite being unused: `badge-*`, `data-card`, `detail-pane*`,
+`btn-*` and the nav primitives. `docs/WINDEPLOYKIT_App_StyleGuide.md` §5–§6 specifies
+them as the design system — unused is not the same as unwanted.
+
+Also kept, because they are genuinely Windows deployment and not upstream residue:
+the `Intune`/Autopilot clean-OOBE task-sequence option, VPN/Tailscale adapter
+guidance, `GPO-disable` step sets, and the vendor SCCM driver catalogs.
+
 ### Panels
 
 | Node | State |
@@ -246,6 +271,20 @@ a cache description, correctly left alone.
 | Site Profile | **Placeholder — needed**, see §5 |
 | Sidecar Log | Placeholder |
 | Deployment Share (root) | Placeholder |
+
+### Unwired — code exists, nothing reaches it (found 2026-08-21)
+
+These are **incomplete ports, not residue**. Do not delete them; finish them.
+
+| Gap | Evidence | Consequence |
+| --- | --- | --- |
+| **Deploy$ base cannot be set** | `DownloadSettingsSection.tsx` is the only caller of `pushImageLibraryRoot()` and `SETTING_IMAGE_LIBRARY_DIR`, and it is mounted in **no** panel | The sidecar honours a user-chosen image library root, but nothing can set one, so it always uses the default. **This is what makes §3b's storage split real** — wire it before claiming the Deploy$ base is user-selectable |
+| **Credentials overlay is non-functional** | All 7 IPC commands it invokes (`ListInfraSshCredentials`, `SetInfraSshCredential`, `GetLocalMachineCredential`, …) have **no `Handle-*` anywhere** | The "Credentials" button in Netboot opens a dialog where every action fails. The vault lib exists and `PxeBootPlugin` reads it for the `vault:<id>` Deploy$ credential — but nothing can populate it |
+| **Runtime config never pushed** | `buildSidecarSpawnEnv()` / `buildRuntimeConfigForSidecar()` in `runtimeConfig.ts` have no callers | Verbose logging and TLS-skip settings never reach the sidecar |
+
+12 of the 67 commands in `types.ts` have no handler: the 7 credential ones above,
+`ClearMacOsAdminCredentialCache`, `PrefetchMacOsAdminCredential`,
+`DeleteInfraSshCredential`, and `GetSiteProfile`/`SetSiteProfile` (expected — §5).
 
 ### Not built yet
 

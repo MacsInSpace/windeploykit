@@ -13,17 +13,17 @@
  *
  * To add a setting:
  *   const MY_THING = defineSetting({
- *     id: "ttl.staffMin",          // dotted, stable storage key
- *     group: "Cache TTLs (minutes)",
- *     label: "Staff list",
+ *     id: "ttl.driverCatalogHours", // dotted, stable storage key
+ *     group: "Cache TTLs (hours)",
+ *     label: "Vendor driver catalogs",
  *     description: "How long...",
  *     type: "number",
- *     defaultValue: 30,
- *     unit: "min",                 // optional UI suffix
- *     min: 1, max: 24 * 60,        // optional clamp
- *     envVar: "VITE_TTL_STAFF_MIN",// optional env fallback
+ *     defaultValue: 168,
+ *     unit: "h",                   // optional UI suffix
+ *     min: 1, max: 24 * 30,        // optional clamp
+ *     envVar: "VITE_TTL_DRIVER_CATALOG_HOURS", // optional env fallback
  *   });
- *   const ms = getSetting(MY_THING) * 60_000;
+ *   const ms = getSetting(MY_THING) * 3_600_000;
  *
  * Subscribe via `subscribeSettings(fn)` to react to overlay changes
  * mid-session (the overlay component does this). The Proxy returned

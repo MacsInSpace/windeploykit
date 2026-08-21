@@ -3,18 +3,21 @@
  *
  * Why this exists
  * ----------------
- * Panels in this app fetch fairly heavy lists from LDAP (staff,
- * groups, group members -- the latter can be 2000+ students). The
- * default behaviour was "fetch on every mount", so switching from
- * Staff -> Groups -> Staff caused three full re-polls of AD. This
- * module caches results by key with a TTL so common navigation
- * patterns stay instant.
+ * Some panels fetch genuinely heavy lists -- the bundled vendor driver
+ * catalogs are ~1,500 rows. The default behaviour was "fetch on every
+ * mount", so moving between nodes and back re-polled the same list every
+ * time. This module caches results by key with a TTL so common navigation
+ * stays instant.
+ *
+ * Note the house rule in docs/DATA_FRESHNESS.md: panels are LIVE by
+ * default. Caching here is for a paint buffer (ttlMs: 0 + pollMs) or for
+ * genuinely static remote data such as the vendor catalogs -- never for
+ * machine state that can change without the app knowing.
  *
  * Design notes
  * ------------
- * - Memory-only. No localStorage / IndexedDB. Logging in and out
- *   wipes everything (see `invalidateAll` from appStore's
- *   needs-credentials handler).
+ * - Memory-only. No localStorage / IndexedDB. Logging out
+ *   wipes everything (see `invalidateAll`).
  * - Stale-while-revalidate: when a key is fetched while a stale
  *   entry exists, the stale `data` stays accessible to consumers
  *   until the fresh fetch resolves. UI shows the old list +
@@ -23,9 +26,9 @@
  *   same time, only one fetcher runs; both share the same promise.
  * - Pub/sub: useSyncExternalStore can hook into a per-key
  *   subscription list so re-renders are scoped tight.
- * - Hierarchical keys ('ad:staff:5573', 'ad:groupMembers:<dn>')
- *   let `invalidatePrefix('ad:')` nuke a whole namespace, e.g.
- *   after a domain change.
+ * - Hierarchical keys ('pxe:wims', 'drivers:lenovo:<model>') let
+ *   `invalidatePrefix('drivers:')` nuke a whole namespace, e.g. after a
+ *   catalog refresh.
  */
 
 export type QueryStatus = "idle" | "pending" | "success" | "error";

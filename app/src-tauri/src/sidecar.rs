@@ -45,50 +45,11 @@ const EVENT_CHANNEL: &str = "sidecar://event";
 const LOG_CHANNEL: &str = "sidecar://log";
 // Hard ceiling so a stuck sidecar can't trap a UI request forever.
 const REQUEST_TIMEOUT_SECS: u64 = 120;
-/// WLC SSH probe runs 8 serial CLI commands; busy sites need several minutes.
-const PROBE_WLC_INSIGHTS_TIMEOUT_SECS: u64 = 600;
-const PROBE_WLC_AP_CLIENTS_TIMEOUT_SECS: u64 = 300;
-/// Per-command SSH wait; successful curric show commands usually finish in ~5s.
-const FETCH_SWITCH_RUNNING_CONFIG_TIMEOUT_SECS: u64 = 180;
-const FETCH_SWITCH_ERROR_LOG_TIMEOUT_SECS: u64 = 45;
-/// Connect + paging init + up to three 20s command attempts (PoE module fallbacks).
-const FETCH_SWITCH_CLI_TIMEOUT_SECS: u64 = 75;
-/// One Network Topology bundle reuses one SSH session for neighbours plus seven read-only audit families.
-const FETCH_SWITCH_AUDIT_BUNDLE_TIMEOUT_SECS: u64 = 240;
-/// Up to 64 bounded switch bundles can occupy a 1-4 worker queue. Every worker
-/// has its own command deadlines and the discovery splash provides cancellation.
-const FETCH_SWITCH_AUDIT_BUNDLE_BATCH_TIMEOUT_SECS: u64 = 18_000;
-/// AireOS 3504: platform precheck + one slow show command (up to 90s) per diagnostic.
-const FETCH_WLC_CLI_TIMEOUT_SECS: u64 = 150;
-/// First GPO settings load may read Registry.pol + GPP XML over SMB.
-/// Microsoft SAML SSO + SP page can exceed 120s on slow links.
-const SERVICENOW_PLUGIN_TIMEOUT_SECS: u64 = 240;
-/// Host and Guest Site Build runs can legitimately take hours while Windows setup,
-/// Hyper-V, WDS content, and first-boot role configuration complete.
-const RUN_SITE_BUILD_RUNNER_TIMEOUT_SECS: u64 = 8 * 60 * 60;
-
 fn request_timeout_secs(cmd: &str) -> u64 {
     match cmd {
-        "ProbeWlcInsights" => PROBE_WLC_INSIGHTS_TIMEOUT_SECS,
-        "ProbeWlcApClients" | "ProbeWlcApClientIps" => PROBE_WLC_AP_CLIENTS_TIMEOUT_SECS,
-        "FetchSwitchRunningConfig" => FETCH_SWITCH_RUNNING_CONFIG_TIMEOUT_SECS,
-        "FetchSwitchErrorLog" => FETCH_SWITCH_ERROR_LOG_TIMEOUT_SECS,
-        "FetchSwitchCdpNeighbors" | "FetchSwitchVlanSummary" | "FetchSwitchCliOutput" => {
-            FETCH_SWITCH_CLI_TIMEOUT_SECS
-        }
-        "FetchSwitchAuditBundle" => FETCH_SWITCH_AUDIT_BUNDLE_TIMEOUT_SECS,
-        "FetchSwitchAuditBundleBatch" => FETCH_SWITCH_AUDIT_BUNDLE_BATCH_TIMEOUT_SECS,
-        "FetchWlcCliOutput" => FETCH_WLC_CLI_TIMEOUT_SECS,
-        "TestServiceNowPluginConnection"
-        | "GetServiceNowMyRequests"
-        | "GetServiceNowRequestDetail" => SERVICENOW_PLUGIN_TIMEOUT_SECS,
-        // Stages ~25 MB of Cisco IOS images over the site WAN; the default 120 s
-        // timeout would free the UI while the single-threaded sidecar is still blocked,
-        // queueing every later command behind it.
-        // Line-at-a-time config push: ~760 ms fixed overhead per line, so a 300-line
-        // config runs ~4 min on a LAN and ~10 min on a slow link. At the default 120 s
-        // the UI gave up while the sidecar kept writing config to the switch.
-        "SendSwitchConfigCommands" => 900,
+        // Long-running imaging work: WIM/ISO import and asset fetches move GBs, and
+        // the sidecar is single-threaded, so a UI timeout would free the caller while
+        // the sidecar stays blocked and every later command queues behind it.
         "ImportPxeBootWim" => 1800,
         "ImportPxeBootWimFromIso" => 1800,
         "ListPxeBootIsoWims" => 600,
@@ -101,7 +62,6 @@ fn request_timeout_secs(cmd: &str) -> u64 {
         "GetPxeBootPluginConfig" | "SetPxeBootPluginConfig" => 180,
         "GetPxeBootPluginStatus" => 90,
         "EnsureAria2Binary" => 600,
-        "RunSiteBuildRunner" => RUN_SITE_BUILD_RUNNER_TIMEOUT_SECS,
         _ => REQUEST_TIMEOUT_SECS,
     }
 }

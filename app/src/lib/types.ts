@@ -4,30 +4,16 @@
 // copying blocks back in.
 
 export type SidecarEventName =
-  | "starting"
-  | "needs-credentials"
-  | "needs-site-selection"
-  | "credentials-saved"
-  | "operator-identity"
-  | "initializing"
   | "ready"
   | "error"
   | "log"
   | "disconnected"
-  | "reconnected"
-  | "nps-mount"
-  | "mini-player-tools"
   | "pxe-caddy"
   | "pxe-tftpd64"
   | "aria2-tools"
   | "driver-download-progress"
   | "vendor-catalog-refresh"
   | "aria2-promote"
-  | "site-build-output"
-  | "site-directory-refreshed"
-  | "papercut-balances-ready"
-  | "wlc-ap-client-ip"
-  | "bootstrap-phase"
   | "exited";
 
 export interface SidecarEvent<T = unknown> {
@@ -547,7 +533,7 @@ export interface PxeBootTaskSequencesPayload {
   joinDomainOptions?: string[];
   /** Site machine OUs from the Site Profile, labelled by first RDN. */
   machineOuOptions?: { dn: string; label: string }[];
-  /** Reversed curric-wan DN suggestion (CN=Computers,DC=…) for local-domain joins. */
+  /** Reversed DN suggestion (CN=Computers,DC=…) for local-domain joins. */
   curricOuSuggestion?: string | null;
   /** GSV KMS client-setup key catalog (label = edition). */
   kmsKeyOptions?: { label: string; key: string }[];
@@ -810,34 +796,12 @@ export interface LocalMachineCredentialStatus {
 }
 
 export interface ApplyRuntimeConfigParams {
-  /** auto | sites-catalog (whoami is deprecated, mapped to auto) */
-  locationSource?: string;
-  sitesCatalogPath?: string;
-  sitesCatalogTtlDays?: number;
-  /** the Site Profile / boot warmup cache max age (days). */
-  /** Comma-separated hosts/IPs, e.g. "10.10.22.11,10.10.22.12" */
-  corpLdapHostsCsv?: string;
-  /** Comma-separated servers, e.g. "10.10.22.11,10.10.22.12" */
-  dnsResolversCsv?: string;
-  /** Comma-separated pre-auth DNS servers for corp bootstrap. */
-  preAuthDnsResolversCsv?: string;
-  /** Comma-separated ports, e.g. "636,389,3268" */
-  ldapPortsCsv?: string;
-  preferLocalDcAfterLocate?: boolean;
-  reconnectRediscoverDefault?: boolean;
-  /** Settings → Diagnostics → Debug — bootstrap/IPC/DNS timing logs. */
+  /** Settings → Diagnostics → Debug — bootstrap/IPC timing logs. */
   verboseLogging?: boolean;
   /** Settings → Diagnostics → Verbose PowerShell — native pwsh verbose/debug streams. */
   verbosePowershell?: boolean;
   /** Skip TLS cert validation for outbound HTTP (default true on macOS). */
   skipHttpCertificateCheck?: boolean;
-  /**
-   * Generic plug-in gates: pluginId → enabled, with per-site overrides already
-   * resolved for the active site (lib/pluginSiteOverrides.ts). Sent in full on
-   * every push. Includes the `local-domain-gpo-viewer` pseudo-entry (follows the
-   * Local Site Domain toggle). The sidecar acts on proactive plug-ins only
-   * (cisco-prime, edu/local GPO viewers, pxe-boot, aria2, notebook-nssp); see
-   * docs/core/plugins/AGENT_NOTES_PLUGIN_ARCHITECTURE.md.
-   */
+  /** Node gates: nodeId → enabled. Sent in full on every push (pxe-boot, aria2). */
   enabledPlugins?: Record<string, boolean>;
 }

@@ -24,7 +24,7 @@ interface DataTableProps<R> {
   onRowClick?: (row: R) => void;
   rowActions?: (row: R) => ReactNode;
   emptyMessage?: string;
-  /** Full-width spacer row (e.g. between staff and student sections). */
+  /** Full-width spacer row (e.g. between grouped sections). */
   isSeparatorRow?: (row: R) => boolean;
   /**
    * Opt-in multi-select. When true a checkbox column is rendered as the

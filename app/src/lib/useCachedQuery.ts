@@ -34,7 +34,7 @@ export interface UseCachedQueryOptions {
   enabled?: boolean;
   /**
    * When false, refetch() keeps the previous data visible until the new fetch
-   * completes (stale-while-revalidate). Use for live polling (e.g. NPS logs).
+   * completes (stale-while-revalidate). Use for live polling (e.g. the PXE log).
    */
   invalidateOnRefetch?: boolean;
   /**

@@ -1,7 +1,7 @@
 /**
  * Minimal app state for WinDeployKit.
  *
- * The USM original was an 815-line store built around site context, LDAP
+ * The upstream original was an 815-line store built around site context, directory
  * sessions and no sign-in. None of that applies here: WinDeployKit has no
  * directory session and no sign-in gate. What survives is the Site Profile —
  * the small set of site-wide values task sequences and the deploy share need.
