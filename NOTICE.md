@@ -11,6 +11,13 @@ WinDeployKit invokes the following as **separate processes**; it does not link t
 | [iPXE](https://ipxe.org/) / wimboot | GPLv2 | Vendored EFI binaries |
 | [p7zip](https://p7zip.sourceforge.net/) | LGPL | Downloaded at runtime (macOS) |
 | [Tftpd64](https://pjo2.github.io/tftpd64/) | GPLv2 | Downloaded at runtime (Windows) |
+| [Microsoft.PowerShell.SecretManagement](https://github.com/PowerShell/SecretManagement) | MIT | Vendored unmodified (`vendor/psmodules/`), pinned in `vendor/psmodules.lock.json` |
+| [Microsoft.PowerShell.SecretStore](https://github.com/PowerShell/SecretStore) | MIT | Vendored unmodified (`vendor/psmodules/`), pinned in `vendor/psmodules.lock.json` |
+
+The two PowerShell modules are vendored rather than installed at runtime because
+PSGallery is not reachable in every deployment environment. They are redistributed
+byte-for-byte as published, which is why the vendor tree keeps every file from the
+package including symbols - the lockfile asserts unmodified redistribution.
 
 **Source offer:** corresponding source for the GPL binaries above is available
 from each upstream project. Where a vendored binary differs from an upstream

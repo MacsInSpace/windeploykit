@@ -250,3 +250,128 @@ proposal does not map onto this tree. Our rows are padding-derived; the 26px
 literals are all on `.input-box` **controls**, which appear at three heights
 (26px x15, 24px x3, 22px x7), all within `PxeWorkspace.tsx`. That may be deliberate
 density in nested editors rather than drift. No change made - flagged for Craig.
+
+---
+
+# 2026-08-21 (later) - SHARED_SECRET_VAULT_CONTRACT: four findings before section 6 closes
+
+We vendored both modules and ran the section 4 bootstrap end to end on macOS 15
+with the exact versions you measured (SecretManagement 1.1.2, SecretStore 1.0.6),
+against vendored copies rather than gallery-installed ones. Four things came out
+that the contract does not cover. **Three of them are implementation-blocking for
+Option A, and one is a data-loss risk that argues for Option B.**
+
+Nothing in USM was modified.
+
+## 1 - `Register-SecretVault -ModuleName` cannot see a vendored module
+
+**Blocking. Sections 4 and 5 are incompatible as written.**
+
+Section 5 says vendor both modules; section 4 says
+`Register-SecretVault -ModuleName Microsoft.PowerShell.SecretStore`. Those two
+cannot both hold, because `Register-SecretVault` resolves the module **by name off
+`PSModulePath`** rather than using an already-imported one. Importing by full path
+first does not help:
+
+```
+Register-SecretVault: Could not load and retrieve module information for module:
+Microsoft.PowerShell.SecretStore with error : The specified module
+'Microsoft.PowerShell.SecretStore' was not loaded because no valid module file
+was found in any module directory.
+```
+
+**Fix, verified:** prepend the vendor root to `PSModulePath` *before* the imports,
+then import by name. After that, `Register-SecretVault` succeeds and reports
+version 1.1.2 / 1.0.6 from the vendored copies.
+
+```powershell
+$env:PSModulePath = $vendorRoot + [IO.Path]::PathSeparator + $env:PSModulePath
+Import-Module Microsoft.PowerShell.SecretManagement -ErrorAction Stop
+Import-Module Microsoft.PowerShell.SecretStore -ErrorAction Stop
+```
+
+Suggest folding that into the section 4 snippet, since every kit vendors.
+
+## 2 - The storefile does not exist until the first `Set-Secret`
+
+**Measured.** `Reset-SecretStore` + `Register-SecretVault` leaves no storefile:
+
+```
+after Reset+Register   : False
+after first Set-Secret : True
+```
+
+So the section 4 guard (`if (-not (Test-Path $storeFile)) { Reset }`) re-runs
+`Reset-SecretStore` on **every** startup until some kit writes its first secret.
+While the store is genuinely empty that is harmless, so this alone is not the
+problem - finding 3 is what makes it one.
+
+## 3 - The guard's failure mode is "wipe", and it depends on a path you flagged as unverified
+
+**This is the one to act on.**
+
+You already note the Windows storefile path was never checked on a PC. Put that
+together with finding 2 and the failure mode is not benign:
+
+- guard sees no storefile -> calls `Reset-SecretStore`
+- `Reset-SecretStore` wipes every secret for every kit (we re-measured: 1 -> 0)
+
+If the Windows path is wrong, the guard is **always** false, so every kit start
+wipes every other kit's secrets, silently, forever. "Unverified path" turns into
+guaranteed data loss rather than a small risk.
+
+**Fix, verified: stop depending on the path at all.** Probe the store in a
+subprocess with `-NonInteractive` and stdin closed:
+
+```powershell
+# fresh store  -> NOT-CONFIGURED in 0s, no hang
+# configured   -> CONFIGURED, secrets intact
+pwsh -NoProfile -NonInteractive -File probe.ps1 < /dev/null
+```
+
+where `probe.ps1` is `try { Get-SecretStoreConfiguration -ErrorAction Stop; 'CONFIGURED' } catch { 'NOT-CONFIGURED' }`.
+
+That is platform-independent, needs no hardcoded path, and cannot hang.
+
+## 4 - The prompt hazard is wider than `Set-SecretStoreConfiguration`
+
+Section 4 warns that `Set-SecretStoreConfiguration` prompts on a fresh store.
+**`Get-SecretStoreConfiguration` does too** - we hung a probe on it in-process:
+
+```
+Creating a new Microsoft.PowerShell.SecretStore vault. A password is required by
+the current store configuration.
+Enter password:
+```
+
+So the rule is not "avoid one cmdlet"; it is **any SecretStore cmdlet touching an
+unconfigured store prompts**, and a console-less sidecar hangs with no log line.
+Hence finding 3's subprocess containment: `-NonInteractive` plus closed stdin turns
+the prompt into a fast, catchable failure instead of a hang.
+
+## What this means for section 6
+
+Findings 1, 3 and 4 are all Option A implementation hazards. Option B has none of
+them: no `Reset-SecretStore`, so no wipe path, so no dependence on the unverified
+Windows storefile location, and no prompt to contain. That is on top of the
+"copied dir readable" result you already measured.
+
+**We are not implementing the vault while section 6 is open** - your summary says
+so and, having now hit these, we agree it would be building on sand.
+
+What we have done, because it is needed either way (Option B still registers into
+SecretManagement):
+
+- `vendor/psmodules/` carries both modules, unmodified, MIT.
+- `vendor/psmodules.lock.json` pins exact versions plus a SHA-256 per file and
+  per nupkg.
+- `scripts/sync-secret-vault-modules.ps1` fetches and pins;
+  `-VerifyOnly` is the CI drift check. Verified it catches a single tampered byte
+  in a .psd1 and exits non-zero naming the file.
+
+If section 6 lands on B, the only thing that changes here is the `-ModuleName`
+argument and we drop the SecretStore vendoring.
+
+One note on our own naming, for section 3: WinDeployKit will use
+`netboot/join/<id>` and read `local-machine/admin` as listed. We have no other
+domains to add.
