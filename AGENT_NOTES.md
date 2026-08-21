@@ -206,7 +206,17 @@ a cache description, correctly left alone.
 
 - `npm run tauri:dev` launches; Rust and frontend both build clean; `tsc --noEmit`
   is clean.
-- Sidecar starts, and **all 10 panel commands return ok**:
+- **Until 2026-08-21 the app never started the sidecar.** The Rust host
+  deliberately defers the spawn to a `sidecar_restart` call from JS (lib.rs);
+  upstream's sign-in flow made that call, the extraction removed the flow, and
+  nothing replaced it. Every panel starved behind `Sidecar is not running`,
+  which Netboot reported as "No LAN IP". The claims below were verified over
+  **stdio**, which is why they were true and the app was still empty. Fixed:
+  `app/src/lib/sidecarBoot.ts` starts it at mount, pushes `ApplyRuntimeConfig`
+  and the image-library root once it is ready, and shows a clickable
+  `SIDECAR STOPPED - RESTART` badge when it is not. Verify in the **app**, not
+  just over stdio, before claiming a panel works.
+- Sidecar starts, and **all 10 panel commands return ok** (over stdio):
   `GetPxeBootPluginStatus`, `GetPxeBootPluginConfig`, `GetPxeBootWimLibrary`,
   `GetPxeBootTaskSequences`, `GetAria2TrackerCatalog`, `GetAria2PluginConfig`,
   `GetPxeBootImagingClients`, `GetPxeBootLogTail`, `GetEvalIsoCatalog`,
@@ -343,7 +353,6 @@ These are **incomplete ports, not residue**. Do not delete them; finish them.
 
 | Gap | Evidence | Consequence |
 | --- | --- | --- |
-| **Runtime config never pushed** | `buildSidecarSpawnEnv()` / `buildRuntimeConfigForSidecar()` in `runtimeConfig.ts` have no callers | Verbose logging and TLS-skip settings never reach the sidecar |
 
 12 of the 67 commands in `types.ts` have no handler: the 7 credential ones above,
 `ClearMacOsAdminCredentialCache`, `PrefetchMacOsAdminCredential`,
@@ -438,6 +447,8 @@ app/src/components/MenuBar.tsx        File / Action / View / Help   (from PSOpen
 app/src/components/ContextMenu.tsx    MenuItem, SEP, MenuSurface     (from PSOpenAD-FE)
 app/src/components/navConfig.ts       the console tree data (a plain array - no registry)
 app/src/state/consoleActions.ts       the ONE home for a node's verbs
+app/src/lib/sidecarBoot.ts            the ONE place the sidecar is started (singleton,
+                                      StrictMode-safe); lifecycle for the title-bar badge
 app/src/components/PanelShell.tsx     result-pane frame: 32px header, optional tabs, body
 app/src/panels/<Node>Panel.tsx        one thin file per node
 app/src/workspaces/                   shared state containers; panels render sections

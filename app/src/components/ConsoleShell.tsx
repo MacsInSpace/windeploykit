@@ -20,6 +20,7 @@ import { findNavNode, findParentId, flattenNav, type NavNode } from "./navConfig
 import { APP_VERSION } from "../lib/buildInfo";
 import { sidecar } from "../lib/ipc";
 import { isTauri } from "../lib/tauriEnv";
+import { restartSidecarNow, useSidecarBootState } from "../lib/sidecarBoot";
 import {
   getConsoleActions,
   useConsoleActionsSnapshot,
@@ -179,39 +180,24 @@ export function ConsoleShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [actions]);
 
-  /* -- title-bar status: vault ------------------------------------------- */
+  /* -- title-bar status: sidecar lifecycle + vault ------------------------- */
+  const boot = useSidecarBootState();
   const [vault, setVault] = useState<VaultStatus | null>(null);
   useEffect(() => {
     if (!isTauri()) return;
+    if (boot.lifecycle !== "ready") {
+      setVault(null);
+      return;
+    }
     let live = true;
-    let unlisten: (() => void) | undefined;
-    const probeVault = () => {
-      void sidecar
-        .invoke<VaultStatus>("GetSecretVaultStatus", {})
-        .then((v) => live && setVault(v))
-        .catch(() => live && setVault(null));
-    };
     void sidecar
-      .onEvent((ev) => {
-        if (!live) return;
-        if (ev.event === "ready") probeVault();
-      })
-      .then((fn) => {
-        unlisten = fn;
-      });
-    void sidecar
-      .status()
-      .then((s) => {
-        if (!live) return;
-        const running = (s as { running?: boolean }).running;
-        if (running) probeVault();
-      })
-      .catch(() => undefined);
+      .invoke<VaultStatus>("GetSecretVaultStatus", {})
+      .then((v) => live && setVault(v))
+      .catch(() => live && setVault(null));
     return () => {
       live = false;
-      unlisten?.();
     };
-  }, []);
+  }, [boot.lifecycle]);
 
   /* -- status bar ---------------------------------------------------------- */
   const toasts = useToasts();
@@ -281,6 +267,25 @@ export function ConsoleShell({
     [actions, activeNode, nodeVerbs, expandAll, collapseAll, navigate],
   );
 
+  // Only a sidecar that is NOT fine earns a badge - steady state is silent.
+  const sidecarBadge =
+    boot.lifecycle === "ready" || boot.lifecycle === "idle" || !isTauri()
+      ? null
+      : boot.lifecycle === "checking" || boot.lifecycle === "starting"
+        ? { cls: "badge-dim", text: "SIDECAR STARTING", title: "Starting the PowerShell sidecar", click: false }
+        : boot.lifecycle === "missing-pwsh"
+          ? {
+              cls: "badge-err",
+              text: "POWERSHELL 7 MISSING",
+              title: `${boot.detail ?? ""}${boot.installCommand ? ` Install: ${boot.installCommand}` : ""}`,
+              click: false,
+            }
+          : {
+              cls: "badge-err",
+              text: "SIDECAR STOPPED - RESTART",
+              title: `${boot.detail ?? "The sidecar is not running."} Click to restart.`,
+              click: true,
+            };
   const vaultBadge = !vault
     ? null
     : vault.ready
@@ -295,6 +300,21 @@ export function ConsoleShell({
         <span className="brand-mark" aria-hidden />
         <span className="brand">WinDeployKit</span>
         <div className="titlebar-right">
+          {sidecarBadge &&
+            (sidecarBadge.click ? (
+              <button
+                type="button"
+                className={`badge ${sidecarBadge.cls} titlebar-badge-button`}
+                title={sidecarBadge.title}
+                onClick={() => void restartSidecarNow()}
+              >
+                {sidecarBadge.text}
+              </button>
+            ) : (
+              <span className={`badge ${sidecarBadge.cls}`} title={sidecarBadge.title}>
+                {sidecarBadge.text}
+              </span>
+            ))}
           {vaultBadge && (
             <span className={`badge ${vaultBadge.cls}`} title={vaultBadge.title}>
               {vaultBadge.text}

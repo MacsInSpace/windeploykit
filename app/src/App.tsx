@@ -23,12 +23,19 @@ import { SidecarLogPanel } from "./panels/SidecarLogPanel";
 import { SETTING_SETUP_COMPLETED } from "./lib/setupSettings";
 import { getSetting } from "./lib/settings";
 import { pushImageLibraryRoot } from "./lib/imageLibrary";
+import { ensureSidecarStarted } from "./lib/sidecarBoot";
 
 export default function App() {
   const [setupOpen, setSetupOpen] = useState(() => !getSetting(SETTING_SETUP_COMPLETED));
 
+  // Start the sidecar. The Rust host waits for this call; nothing else makes it.
+  useEffect(() => {
+    void ensureSidecarStarted();
+  }, []);
+
   // The sidecar keys promote, import, Caddy routes and the SMB share off the
   // image library root, and only learns it when the frontend pushes it.
+  // sidecarBoot repeats this once the sidecar is actually ready.
   useEffect(() => {
     if (setupOpen) return;
     void pushImageLibraryRoot();

@@ -14,12 +14,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelShell } from "../components/PanelShell";
 import { sidecar } from "../lib/ipc";
 import { isTauri } from "../lib/tauriEnv";
+import { restartSidecarNow, useSidecarBootState } from "../lib/sidecarBoot";
 import { useConsoleActions, type ConsoleNodeActions } from "../state/consoleActions";
 
 const MAX_LINES = 2000;
 
 export function SidecarLogPanel() {
   const [lines, setLines] = useState<string[]>([]);
+  const boot = useSidecarBootState();
   const [paused, setPaused] = useState(false);
   const [filter, setFilter] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -67,6 +69,8 @@ export function SidecarLogPanel() {
       items: [
         { label: paused ? "Resume" : "Pause", onSelect: togglePause },
         { label: "Clear", disabled: lines.length === 0, onSelect: clear },
+        { label: "-" },
+        { label: "Restart Sidecar", disabled: !isTauri(), onSelect: () => void restartSidecarNow() },
       ],
       status: `${lines.length} line(s)${errors ? `, ${errors} flagged` : ""}${paused ? " - paused" : ""}`,
     }),
@@ -79,6 +83,7 @@ export function SidecarLogPanel() {
       title="Sidecar Log"
       subtitle={<span>{shown.length === lines.length ? `${lines.length} lines` : `${shown.length} of ${lines.length}`}</span>}
       details={[
+        { label: "Sidecar", value: boot.lifecycle + (boot.detail ? ` - ${boot.detail}` : ""), tone: boot.lifecycle === "ready" || boot.lifecycle === "starting" || boot.lifecycle === "checking" ? "normal" : "bad" },
         { label: "Source", value: "sidecar stderr, live" },
         { label: "Buffer", value: `last ${MAX_LINES} lines` },
         errors > 0 && { label: "Flagged", value: `${errors} line(s)`, tone: "warn" },

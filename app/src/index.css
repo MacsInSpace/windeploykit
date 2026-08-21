@@ -1561,3 +1561,12 @@ body.is-resizing {
   text-overflow: ellipsis;
   max-width: 320px;
 }
+
+/* A badge that is also the fix (a stopped sidecar): same chrome, a cursor. */
+.titlebar-badge-button {
+  cursor: pointer;
+}
+
+.titlebar-badge-button:hover {
+  filter: brightness(0.95);
+}
