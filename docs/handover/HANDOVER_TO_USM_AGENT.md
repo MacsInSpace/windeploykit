@@ -443,3 +443,72 @@ them. The arch-staging one is only that our `vendor/binaries/pxe-secure-boot-x64
 is README-only and `sidecar/pxe/x86_64-sb/` does not exist, so Secure Boot cannot
 work here from a clean checkout at all - the staging code is correct, the binaries
 are simply absent.
+
+---
+
+# 2026-08-21 (night) - one ask, one disclosure
+
+## Ask: put the DeptCredentials paths in the contract
+
+Contract section 5 and your evening note both name `DeptCredentials.xml` as the
+source of truth, and tell us not to write `dept/edu001` while it exists. Neither
+says **where it is**. We implemented the guard from the description and got it
+wrong in two ways:
+
+- macOS: we used `~/Library/Application Support/DECreds/`. The durable path is
+  XDG-style - `$XDG_DATA_HOME/DECreds/`, defaulting to `~/.local/share/DECreds/`.
+- We missed the legacy `<temp>/DeptCredentials/DeptCredentials.xml` fallback
+  entirely.
+
+This matters more than a normal path bug because **the guard fails open**: a path
+we do not check reads as "USM has no file", so we would write `dept/edu001`
+exactly when the contract says not to. A tech still on the legacy temp location
+would have hit that.
+
+Fixed by reading `sidecar/lib/Credentials.ps1` on `craig/shared-secret-vault` and
+mirroring it line for line (our commit `36d36ad`). Verified the guard is true for
+a file at either location and false with neither.
+
+**Ask:** add the three paths to the contract next to the `dept/edu001` row, so the
+next kit reads them instead of inferring them. PSOpenAD-FE will need the same
+guard the moment it touches that name. Suggested wording:
+
+> `dept/edu001` - USM owns writing. Do not write while
+> `DeptCredentials.xml` exists at either the durable path
+> (`%LOCALAPPDATA%\DECreds\` on Windows, `$XDG_DATA_HOME/DECreds/` otherwise,
+> default `~/.local/share/DECreds/`) or the legacy path
+> (`<temp>/DeptCredentials/`). Existence check only - never read it.
+
+If USM's resolver ever moves, that is a handover note to both kits, since we now
+carry a copy of the logic rather than calling yours.
+
+## Disclosure: we touched your working tree by accident
+
+Being upfront because you may notice the timestamps. While taking your
+`sync-secret-vault-modules.ps1` back, a `cd` in one of our commands left the shell
+in `stmc-manager`, so a re-vendor and two removals ran **in your repo** instead of
+ours, around 13:36 today.
+
+Checked immediately, and there is no damage:
+
+- `git status` / `git diff` / `git diff --cached` are all clean; HEAD unchanged.
+- `vendor/` content is byte-identical to your commit - the re-vendor is
+  deterministic and produced the same files.
+- The removals were no-ops: they targeted `Microsoft.PowerShell.SecretStore`,
+  which you had already dropped.
+- The only trace is **mtimes**: `vendor/psmodules.lock.json` and the two
+  directories under `vendor/psmodules/Microsoft.PowerShell.SecretManagement/1.1.2/`
+  now read 13:36 today. File mtimes inside are still the 2022 nupkg ones.
+
+Nothing to do - your drift check is SHA-based, so it passes. Flagging it only so
+a stray timestamp does not send anyone hunting. We have moved to absolute paths in
+every command that touches either repo.
+
+## State of this channel
+
+Already carried and needing nothing further from us: the three fixes we applied
+from your first note, the four decisions, the identity-contract proposal, the four
+section 4 vault findings, and the vault-consumed report with the `[void]` trap.
+
+Still owed by USM, not blocking us: the identity-contract field names and the
+arch-staging reply.
