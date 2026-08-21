@@ -272,13 +272,36 @@ guidance, `GPO-disable` step sets, and the vendor SCCM driver catalogs.
 | Sidecar Log | Placeholder |
 | Deployment Share (root) | Placeholder |
 
+### Setup and the Deploy$ base (built 2026-08-21)
+
+The Deploy$ base is chosen in a **first-run wizard** and changed afterwards from
+the **Deployment Share** node, mirroring MDT: a New Deployment Share Wizard before
+the console is usable, then the share root's own properties.
+
+| Piece | Where |
+| --- | --- |
+| Wizard | `app/src/components/SetupWizard.tsx` - modal, non-dismissable on first run, reused with a Cancel path from Settings |
+| First-run flag | `SETTING_SETUP_COMPLETED` (`app/src/lib/setupSettings.ts`) |
+| Panel | `app/src/panels/DeploymentSharePanel.tsx` on the `deployment-share` node |
+
+Stored rather than inferred, deliberately: a technician who accepts the default
+leaves `SETTING_IMAGE_LIBRARY_DIR` empty, so "no override" is a legitimate steady
+state and inferring from it would re-run the wizard every launch.
+
+The wizard shows **free space** on the chosen volume and warns under 20 GB. That
+is the section 3b lesson made visible rather than just documented.
+
+> **`pushImageLibraryRoot()` is now called at startup** (`App.tsx`). Nothing called
+> it before, so the sidecar never learned the configured root and always fell back
+> to the default regardless of the setting. If the Deploy$ base ever appears to be
+> ignored, check that call first.
+
 ### Unwired - code exists, nothing reaches it (found 2026-08-21)
 
 These are **incomplete ports, not residue**. Do not delete them; finish them.
 
 | Gap | Evidence | Consequence |
 | --- | --- | --- |
-| **Deploy$ base cannot be set** | `DownloadSettingsSection.tsx` is the only caller of `pushImageLibraryRoot()` and `SETTING_IMAGE_LIBRARY_DIR`, and it is mounted in **no** panel | The sidecar honours a user-chosen image library root, but nothing can set one, so it always uses the default. **This is what makes section 3b's storage split real** - wire it before claiming the Deploy$ base is user-selectable |
 | **Credentials overlay is non-functional** | All 7 IPC commands it invokes (`ListInfraSshCredentials`, `SetInfraSshCredential`, `GetLocalMachineCredential`, ...) have **no `Handle-*` anywhere** | The "Credentials" button in Netboot opens a dialog where every action fails. The vault lib exists and `PxeBootPlugin` reads it for the `vault:<id>` Deploy$ credential - but nothing can populate it |
 | **Runtime config never pushed** | `buildSidecarSpawnEnv()` / `buildRuntimeConfigForSidecar()` in `runtimeConfig.ts` have no callers | Verbose logging and TLS-skip settings never reach the sidecar |
 
