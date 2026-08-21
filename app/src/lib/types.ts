@@ -33,9 +33,9 @@ export type SidecarErrorCode =
   /** Request dropped because the sidecar was restarted (user cancel / kill SSH). */
   | "CANCELLED";
 
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 // Command catalogue. Grouped by source/family. Order matches the sidecar.
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 export type SidecarCommand =
   | "AddAria2Download"
   | "ApplyRuntimeConfig"
@@ -106,9 +106,9 @@ export type SidecarCommand =
   | "SubmitAcerSccmCatalogHarvest"
   | "harvest_acer_sccm_urls";
 
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 // Bootstrap + session shapes
-// ────────────────────────────────────────────────────────────────────────────
+// ----------------------------------------------------------------------------
 export type SessionState =
   | "connected"
   | "connecting"
@@ -117,7 +117,7 @@ export type SessionState =
   | "skipped"
   | "unknown";
 
-/** Deployment service readiness — the title-bar status dots. */
+/** Deployment service readiness - the title-bar status dots. */
 export interface SessionStatus {
   http: SessionState;
   tftp: SessionState;
@@ -140,7 +140,7 @@ export interface InfrastructureProbeResult {
   message?: string;
 }
 
-/** Field PXE boot plug-in — local TFTP + HTTP for onsite imaging. */
+/** Field PXE boot plug-in - local TFTP + HTTP for onsite imaging. */
 export interface PxeBootPluginConfig {
   httpPort: number;
   interfaceId?: string | null;
@@ -150,9 +150,9 @@ export interface PxeBootPluginConfig {
   tftpd64Path?: string | null;
   tftpMode?: "router" | "standalone" | "proxy" | string;
   defaultBootWim?: string | null;
-  /** When FieldIso.wim is default boot WIM — auto-boot this local ISO (else ISO catalog menu). */
+  /** When FieldIso.wim is default boot WIM - auto-boot this local ISO (else ISO catalog menu). */
   defaultBootIso?: string | null;
-  /** DHCP Option 67 — path relative to tftp/ (e.g. snponly.efi or x86_64-sb/shimx64.efi). */
+  /** DHCP Option 67 - path relative to tftp/ (e.g. snponly.efi or x86_64-sb/shimx64.efi). */
   tftpBootFile?: string | null;
   /** When true, PXE clients skip the menu and chain straight to defaultBootWim / defaultBootIso. */
   autoBootDefault?: boolean;
@@ -326,7 +326,7 @@ export interface PxeBootPluginStatus {
   config: PxeBootPluginConfig;
   adapters: PxeBootNetworkAdapter[];
   lanIp?: string | null;
-  /** Set when lanIp is missing — explains VPN-only, unplugged Ethernet, etc. */
+  /** Set when lanIp is missing - explains VPN-only, unplugged Ethernet, etc. */
   lanIpHint?: string | null;
   httpRunning: boolean;
   httpPid?: number | null;
@@ -353,7 +353,7 @@ export interface PxeBootPluginStatus {
   defaultBootWim?: string | null;
   defaultBootWimUrl?: string | null;
   defaultBootIso?: string | null;
-  /** wimboot:ImageDeployer.wim | fieldiso-catalog | fieldiso-iso:… | deploy-iso */
+  /** wimboot:ImageDeployer.wim | fieldiso-catalog | fieldiso-iso:... | deploy-iso */
   bootChainMode?: string | null;
   /** e.g. " index=1 gui" for default WIM local wimboot line */
   defaultWimbootKernelOptions?: string | null;
@@ -444,7 +444,7 @@ export interface VendorSccmCatalogRefreshResult {
   count: number;
   /** CI-era minimum-count guard rail for this vendor. */
   floor: number;
-  /** Refreshed but suspiciously small — source may have broken. */
+  /** Refreshed but suspiciously small - source may have broken. */
   belowFloor: boolean;
   fetchedAt?: string;
   error?: string | null;
@@ -491,7 +491,7 @@ export interface PxeBootImagingClientsResponse {
 
 /** One ordered first-boot step (specialize RunSynchronous). */
 export interface PxeBootTaskSequenceStep {
-  /** UI-only stable identity for React list keys (not persisted — the sidecar's
+  /** UI-only stable identity for React list keys (not persisted - the sidecar's
    * step normaliser drops unknown fields on save). */
   _key?: string;
   type: "reg" | "cmd" | "pwsh" | string;
@@ -506,7 +506,7 @@ export interface PxeBootTaskSequenceStep {
   command?: string;
 }
 
-/** One Netboot task sequence — generates a first-boot unattend.xml on the share. */
+/** One Netboot task sequence - generates a first-boot unattend.xml on the share. */
 export interface PxeBootTaskSequence {
   id: string;
   name: string;
@@ -533,11 +533,11 @@ export interface PxeBootTaskSequencesPayload {
   joinDomainOptions?: string[];
   /** Site machine OUs from the Site Profile, labelled by first RDN. */
   machineOuOptions?: { dn: string; label: string }[];
-  /** Reversed DN suggestion (CN=Computers,DC=…) for local-domain joins. */
+  /** Reversed DN suggestion (CN=Computers,DC=...) for local-domain joins. */
   curricOuSuggestion?: string | null;
   /** GSV KMS client-setup key catalog (label = edition). */
   kmsKeyOptions?: { label: string; key: string }[];
-  /** Role-default product keys (server-resolved — the frontend keeps no GVLK copy). */
+  /** Role-default product keys (server-resolved - the frontend keeps no GVLK copy). */
   roleDefaults?: { client?: string; server?: string };
   /** Admin-group choices ({{SITE}} token form + corp groups). */
   adminGroupOptions?: string[];
@@ -641,7 +641,7 @@ export interface Aria2TrackerTorrentRow {
   assetKind: "iso" | "wim" | "driver" | "other" | string;
   catalogGroup?: "soe" | "oem" | string | null;
   torrentPath?: string | null;
-  /** Size of the .torrent file itself — never show as the image size. */
+  /** Size of the .torrent file itself - never show as the image size. */
   sizeBytes: number;
   /** Real payload size parsed from the torrent (0 when the manifest predates it). */
   contentSizeBytes?: number;
@@ -678,7 +678,7 @@ export interface Aria2TrackerDriverRow {
   catalogFamily?: "thinkpad" | "yoga" | "11e" | "other" | string | null;
   catalogOnly?: boolean;
   expectedArchive?: string | null;
-  /** Catalog-published pack hash (Dell/HP SHA-256, Acer MD5) — verified while streaming. */
+  /** Catalog-published pack hash (Dell/HP SHA-256, Acer MD5) - verified while streaming. */
   expectedHash?: string | null;
   expectedHashAlgorithm?: string | null;
   relPath?: string;
@@ -772,7 +772,7 @@ export interface InfraSshCredentialSummary {
   configured: boolean;
   isDefault?: boolean;
   siteId?: string;
-  /** App-provided virtual entry (e.g. app-de-signin, the signed-in DE account) —
+  /** App-provided virtual entry (e.g. app-de-signin, the signed-in DE account) -
    * site-agnostic, always offered, not editable/deletable in the manager. */
   builtIn?: boolean;
 }
@@ -796,12 +796,12 @@ export interface LocalMachineCredentialStatus {
 }
 
 export interface ApplyRuntimeConfigParams {
-  /** Settings → Diagnostics → Debug — bootstrap/IPC timing logs. */
+  /** Settings -> Diagnostics -> Debug - bootstrap/IPC timing logs. */
   verboseLogging?: boolean;
-  /** Settings → Diagnostics → Verbose PowerShell — native pwsh verbose/debug streams. */
+  /** Settings -> Diagnostics -> Verbose PowerShell - native pwsh verbose/debug streams. */
   verbosePowershell?: boolean;
   /** Skip TLS cert validation for outbound HTTP (default true on macOS). */
   skipHttpCertificateCheck?: boolean;
-  /** Node gates: nodeId → enabled. Sent in full on every push (pxe-boot, aria2). */
+  /** Node gates: nodeId -> enabled. Sent in full on every push (pxe-boot, aria2). */
   enabledPlugins?: Record<string, boolean>;
 }

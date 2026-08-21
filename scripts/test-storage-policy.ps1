@@ -38,7 +38,7 @@ $appData = Get-AppDataRoot
 $paths = Get-AppPxeBootLayoutPaths
 $lib = Get-AppImageLibraryPaths
 
-# Small, fixed, machine-local — belongs in app data.
+# Small, fixed, machine-local - belongs in app data.
 $mustBeAppData = [ordered]@{
     'tftpRoot'      = $paths.tftpRoot
     'bootWimDir'    = $paths.wimDir
@@ -46,7 +46,7 @@ $mustBeAppData = [ordered]@{
     'snponlyEfi'    = $paths.snponlyEfi
 }
 
-# Multi-GB — must never touch the system-drive app-data tree.
+# Multi-GB - must never touch the system-drive app-data tree.
 $mustNotBeAppData = [ordered]@{
     'isoDir'          = $paths.isoDir
     'imageWimsDir'    = $paths.imageWimsDir

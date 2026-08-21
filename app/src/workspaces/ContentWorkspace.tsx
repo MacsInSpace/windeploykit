@@ -55,13 +55,13 @@ function acerCatalogFamilyLabel(family?: string | null): string {
     case "x514":
       return "X514";
     default:
-      return family ?? "—";
+      return family ?? "-";
   }
 }
 
 
 function dellCatalogFamilyLabel(family?: string | null): string {
-  if (!family) return "—";
+  if (!family) return "-";
   return family.charAt(0).toUpperCase() + family.slice(1);
 }
 
@@ -79,7 +79,7 @@ function microsoftCatalogFamilyLabel(family?: string | null): string {
     case "surface-studio":
       return "Studio/Hub";
     default:
-      return family ?? "—";
+      return family ?? "-";
   }
 }
 
@@ -95,7 +95,7 @@ function hpCatalogFamilyLabel(family?: string | null): string {
     case "thin-clients":
       return "Thin client";
     default:
-      return family ?? "—";
+      return family ?? "-";
   }
 }
 
@@ -111,7 +111,7 @@ async function aria2SidecarParams(extra?: Record<string, unknown>) {
 }
 
 function formatBytes(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (!Number.isFinite(n) || n <= 0) return "-";
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   if (n >= 1024) return `${Math.round(n / 1024)} KB`;
@@ -119,12 +119,12 @@ function formatBytes(n: number): string {
 }
 
 function formatSpeed(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "—";
+  if (!Number.isFinite(n) || n <= 0) return "-";
   return `${formatBytes(n)}/s`;
 }
 
 function basename(path?: string | null): string {
-  if (!path) return "—";
+  if (!path) return "-";
   const parts = path.split(/[/\\]/);
   return parts[parts.length - 1] || path;
 }
@@ -141,7 +141,7 @@ function tabBtn(active: boolean): CSSProperties {
 }
 
 function formatPeerCount(n?: number | null): string {
-  if (n == null || !Number.isFinite(n)) return "—";
+  if (n == null || !Number.isFinite(n)) return "-";
   return String(n);
 }
 
@@ -174,9 +174,9 @@ function isDirectDriverHttpDownload(params: {
 
 /**
  * Content acquisition. Mounted three ways, one per MDT node:
- *   tabs=["drivers"]           → Out-of-Box Drivers
- *   tabs=["images"]            → Operating Systems
- *   default (all)              → Transfers
+ *   tabs=["drivers"]           -> Out-of-Box Drivers
+ *   tabs=["images"]            -> Operating Systems
+ *   default (all)              -> Transfers
  */
 export function ContentWorkspace({
   tabs,
@@ -205,8 +205,8 @@ export function ContentWorkspace({
   const [installBusy, setInstallBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   // Active direct pack downloads, keyed by row key ({0,0} = connecting). Several
-  // can run at once — each has its own sidecar runspace. A failed entry stays,
-  // flagged, until the user retries (no auto-retry — the sidecar already purged
+  // can run at once - each has its own sidecar runspace. A failed entry stays,
+  // flagged, until the user retries (no auto-retry - the sidecar already purged
   // the bad file so the row can never read as Downloaded).
   const [driverDownloads, setDriverDownloads] = useState<
     Record<string, { bytesDone: number; totalBytes: number; failed?: boolean; message?: string; queued?: boolean }>
@@ -253,7 +253,7 @@ export function ContentWorkspace({
   }, []);
 
   /**
-   * USM-side vendor catalog refresh — all four vendors, one action (replaces the retired
+   * USM-side vendor catalog refresh - all four vendors, one action (replaces the retired
    * GitLab CI job). Dell/HP/Lenovo refresh via sidecar curl; Acer needs a real browser
    * engine (its discovery pages fingerprint-block curl from any network), so a hidden app
    * webview harvests the community-KB links and the sidecar validates + stores them.
@@ -261,13 +261,13 @@ export function ContentWorkspace({
   const refreshVendorCatalogs = useCallback(async () => {
     setCatalogRefreshBusy(true);
     try {
-      // Background child pwsh in the sidecar — the call returns immediately and
+      // Background child pwsh in the sidecar - the call returns immediately and
       // the 'vendor-catalog-refresh' event finishes the flow (busy stays on).
       const res = await sidecar.invoke<{ accepted?: boolean; alreadyRunning?: boolean }>(
         "RefreshVendorSccmCatalogs",
       );
       if (res?.alreadyRunning) {
-        toast.info("Vendor catalogs", "A refresh is already running — hang tight.");
+        toast.info("Vendor catalogs", "A refresh is already running - hang tight.");
       }
     } catch (e) {
       toast.error("Vendor catalogs", e instanceof Error ? e.message : String(e));
@@ -317,7 +317,7 @@ export function ContentWorkspace({
         if (failures > 0) {
           toast.error("Vendor catalogs", summary);
         } else if (harvestFailed) {
-          // All five catalogs refreshed — only the optional B/X-series top-up failed.
+          // All five catalogs refreshed - only the optional B/X-series top-up failed.
           toast.warn("Vendor catalogs refreshed", summary);
         } else {
           toast.success("Vendor catalogs refreshed", summary);
@@ -381,7 +381,7 @@ export function ContentWorkspace({
         if (data?.key) {
           const key = data.key;
           if (data.done && data.cancelled) {
-            // User cancel — release the row back to its plain state.
+            // User cancel - release the row back to its plain state.
             setDriverDownloads((prev) => {
               const { [key]: _gone, ...rest } = prev;
               return rest;
@@ -394,17 +394,17 @@ export function ContentWorkspace({
               [key]: { bytesDone: 0, totalBytes: 0, queued: true },
             }));
           } else if (data.done && data.failed) {
-            // Terminal failure — keep the row flagged so it reads "Failed", not
+            // Terminal failure - keep the row flagged so it reads "Failed", not
             // "Download"; the user retries deliberately (no auto-retry).
             setDriverDownloads((prev) => ({
               ...prev,
               [key]: { bytesDone: 0, totalBytes: 0, failed: true, message: data.message ?? "download error" },
             }));
             const label = driverLabelsRef.current[key] ?? data.fileName ?? key;
-            toast.error("Driver pack", `${label} failed — ${data.message ?? "download error"}`);
+            toast.error("Driver pack", `${label} failed - ${data.message ?? "download error"}`);
           } else {
             // Live progress, or done: the transfer finished but the pack is
-            // still promoting — hold the bar at 100% until aria2-promote.
+            // still promoting - hold the bar at 100% until aria2-promote.
             setDriverDownloads((prev) => ({
               ...prev,
               [key]: { bytesDone: data.bytesDone ?? 0, totalBytes: data.totalBytes ?? 0 },
@@ -432,7 +432,7 @@ export function ContentWorkspace({
           | { ok?: boolean; assetKind?: string; message?: string; direct?: boolean; key?: string; fileName?: string }
           | undefined;
         if (data?.direct && data.key) {
-          // Direct driver pack landed (or promote failed) — release its row.
+          // Direct driver pack landed (or promote failed) - release its row.
           const key = data.key;
           setDriverDownloads((prev) => {
             const { [key]: _gone, ...rest } = prev;
@@ -556,14 +556,14 @@ export function ContentWorkspace({
         if (info.freeBytes != null && info.freeBytes < LOW_SPACE_BYTES) {
           toast.warn(
             "Low disk space",
-            `Only ${formatBytes(info.freeBytes)} free at the ISO & driver root — large downloads may fail. Change it in Settings → Downloads.`,
+            `Only ${formatBytes(info.freeBytes)} free at the ISO & driver root - large downloads may fail. Change it in Settings -> Downloads.`,
           );
         }
       }
 
       if (directDriver && progress) {
         // Optimistic connecting spinner; the event stream takes over from here
-        // (progress → bar, promote → success toast + release, failure → error).
+        // (progress -> bar, promote -> success toast + release, failure -> error).
         driverLabelsRef.current[progress.driverKey] = progress.label;
         setDriverDownloads((prev) => ({ ...prev, [progress.driverKey]: { bytesDone: 0, totalBytes: 0 } }));
       } else {
@@ -588,12 +588,12 @@ export function ContentWorkspace({
           if (result.alreadyRunning) {
             toast.info("Driver pack", `${progress?.label ?? result.fileName ?? "Pack"} is already downloading.`);
           } else if (!progress) {
-            // Manual Add-tab driver URL — no row to watch, so say it started.
+            // Manual Add-tab driver URL - no row to watch, so say it started.
             if (result.key && result.fileName) driverLabelsRef.current[result.key] = result.fileName;
             toast.info("Driver pack", `${result.fileName ?? "Download"} started.`);
           }
         } else {
-          toast.success("aria2", "Download queued — progress shows under OS images.");
+          toast.success("aria2", "Download queued - progress shows under OS images.");
           await refreshDownloads();
           setTab("images");
         }
@@ -743,7 +743,7 @@ export function ContentWorkspace({
         label: "Kind",
         width: 70,
         sortValue: (r) => r.assetKind ?? "",
-        render: (r) => r.assetKind ?? "—",
+        render: (r) => r.assetKind ?? "-",
       },
       {
         key: "promote",
@@ -751,8 +751,8 @@ export function ContentWorkspace({
         width: 90,
         sortValue: (r) => r.promoteStatus ?? "",
         render: (r) => {
-          if (!r.promoteStatus) return "—";
-          if (r.promoteStatus === "promoted") return "✓ Netboot";
+          if (!r.promoteStatus) return "-";
+          if (r.promoteStatus === "promoted") return "OK Netboot";
           if (r.promoteStatus === "failed") return r.promoteError ?? "failed";
           return r.promoteStatus;
         },
@@ -937,10 +937,10 @@ export function ContentWorkspace({
     [tableRows],
   );
   // With no catalog tab mounted (the Transfers node), there is nowhere else for
-  // image transfers to appear — so list everything here.
+  // image transfers to appear - so list everything here.
   const showsCatalogs = visibleTabs.includes("images") || visibleTabs.includes("drivers");
   const listedTransfers = showsCatalogs ? otherTransfers : tableRows;
-  /** Live transfer for a catalog row — matched by the catalogRowId the job store
+  /** Live transfer for a catalog row - matched by the catalogRowId the job store
    * records at add time. (Name equality never matched: aria2 row names are file
    * paths / torrent info names, not the manifest display string.) */
   const findImageTransfer = useCallback(
@@ -974,7 +974,7 @@ export function ContentWorkspace({
         width: 90,
         // contentSizeBytes is the image; sizeBytes is only the .torrent file.
         sortValue: (r) => r.contentSizeBytes || 0,
-        render: (r) => (r.contentSizeBytes ? formatBytes(r.contentSizeBytes) : "—"),
+        render: (r) => (r.contentSizeBytes ? formatBytes(r.contentSizeBytes) : "-"),
       },
       {
         key: "seeders",
@@ -1001,7 +1001,7 @@ export function ContentWorkspace({
             return (
               <span
                 className="inline-flex items-center gap-1.5"
-                title={`${formatBytes(live.completedLength)} of ${formatBytes(live.totalLength)} · ${formatSpeed(live.downloadSpeed)}`}
+                title={`${formatBytes(live.completedLength)} of ${formatBytes(live.totalLength)} | ${formatSpeed(live.downloadSpeed)}`}
               >
                 <span
                   aria-hidden
@@ -1078,7 +1078,7 @@ export function ContentWorkspace({
             return (
               <span
                 className="inline-flex items-center gap-1.5"
-                title={`${formatBytes(live.completedLength)} of ${formatBytes(live.totalLength)} · ${formatSpeed(live.downloadSpeed)}`}
+                title={`${formatBytes(live.completedLength)} of ${formatBytes(live.totalLength)} | ${formatSpeed(live.downloadSpeed)}`}
               >
                 <span
                   aria-hidden
@@ -1115,7 +1115,7 @@ export function ContentWorkspace({
         label: "Model",
         sortValue: (r) => r.modelName ?? r.folder,
         render: (r) => (
-          <span title={[r.modelName, r.nsspLabels?.join(", ")].filter(Boolean).join(" · ") || undefined}>
+          <span title={[r.modelName, r.nsspLabels?.join(", ")].filter(Boolean).join(" | ") || undefined}>
             {r.modelName ? (
               <>
                 {r.modelName}
@@ -1131,7 +1131,7 @@ export function ContentWorkspace({
         key: "aliases",
         label: "Aliases",
         sortValue: (r) => (r.aliases ?? []).join(","),
-        render: (r) => (r.aliases?.length ? r.aliases.join(", ") : "—"),
+        render: (r) => (r.aliases?.length ? r.aliases.join(", ") : "-"),
       },
       {
         key: "ready",
@@ -1144,8 +1144,8 @@ export function ContentWorkspace({
           if (p) {
             if (p.failed) {
               return (
-                <span style={{ color: "var(--red, #c33)" }} title={p.message ?? "Download failed — the bad file was removed"}>
-                  ✕ failed
+                <span style={{ color: "var(--red, #c33)" }} title={p.message ?? "Download failed - the bad file was removed"}>
+                  x failed
                 </span>
               );
             }
@@ -1176,22 +1176,22 @@ export function ContentWorkspace({
               );
             }
             if (p.bytesDone > 0) {
-              return <span title="Size unknown — bytes received">{formatBytes(p.bytesDone)}</span>;
+              return <span title="Size unknown - bytes received">{formatBytes(p.bytesDone)}</span>;
             }
             return (
-              <span className="inline-flex items-center gap-1" title="Connecting…">
+              <span className="inline-flex items-center gap-1" title="Connecting...">
                 <span className="animate-spin inline-block" aria-hidden>
-                  ⟳
+                  +
                 </span>
               </span>
             );
           }
           return r.archiveReady ? (
             <span style={{ color: "var(--green)" }} title={`Pack is in the driver store (Drivers/${r.vendor}/${r.folder}/)`}>
-              ✓
+              OK
             </span>
           ) : (
-            "—"
+            "-"
           );
         },
       },
@@ -1231,7 +1231,7 @@ export function ContentWorkspace({
               onClick={() => void downloadTrackerRow(r)}
               title={
                 entry?.failed
-                  ? (entry.message ?? "Download failed — retry when ready")
+                  ? (entry.message ?? "Download failed - retry when ready")
                   : r.archiveReady
                     ? "Replace the stored pack with a fresh copy"
                     : undefined
@@ -1315,7 +1315,7 @@ export function ContentWorkspace({
           <button type="button" className="btn" disabled={loadingConfig} onClick={() => void loadConfig()}>
             Refresh
           </button>
-          {/* Daemon lifecycle and the download folder belong to Transfers — the
+          {/* Daemon lifecycle and the download folder belong to Transfers - the
               catalog panels only queue work, they don't manage the client. */}
           {!showsCatalogs && (
             <>
@@ -1331,17 +1331,17 @@ export function ContentWorkspace({
                 <button
                   type="button"
                   className="btn"
-                  title="Download the aria2 binary — needed once before any transfer can start"
+                  title="Download the aria2 binary - needed once before any transfer can start"
                   disabled={installBusy || config?.binary?.installing}
                   onClick={() => void ensureBinary()}
                 >
-                  {installBusy || config?.binary?.installing ? "Installing aria2…" : "Install aria2"}
+                  {installBusy || config?.binary?.installing ? "Installing aria2..." : "Install aria2"}
                 </button>
               )}
               <button
                 type="button"
                 className="btn"
-                title="Opens the ISO & driver root — where images and driver packs land (set under Settings → Downloads)"
+                title="Opens the ISO & driver root - where images and driver packs land (set under Settings -> Downloads)"
                 onClick={() => void openDownloadFolder()}
               >
                 Open download folder
@@ -1384,16 +1384,16 @@ export function ContentWorkspace({
                   onChange={(e) => setAssetKind(e.target.value as AssetKind)}
                 >
                   <option value="auto">Auto (from URL / extension)</option>
-                  <option value="iso">ISO → http/iso</option>
-                  <option value="wim">WIM → http/wim</option>
-                  <option value="driver">Driver pack → fieldiso/drivers</option>
+                  <option value="iso">ISO -&gt; http/iso</option>
+                  <option value="wim">WIM -&gt; http/wim</option>
+                  <option value="driver">Driver pack -&gt; fieldiso/drivers</option>
                   <option value="other">Other (Settings download folder)</option>
                 </select>
               </div>
               {(assetKind === "driver" || assetKind === "auto") && (
                 <div className="flex flex-wrap gap-2 items-center">
                   <label className="text-[10px] uppercase cond w-full" style={{ color: "var(--text3)" }}>
-                    Model alias (drivers — e.g. P414-53)
+                    Model alias (drivers - e.g. P414-53)
                   </label>
                   <div className="input-box flex-1 min-w-[12rem]">
                     <input
@@ -1412,7 +1412,7 @@ export function ContentWorkspace({
                     className="text-[11px] w-full"
                     value={uriInput}
                     onChange={(e) => setUriInput(e.target.value)}
-                    placeholder="magnet:?… or https://…"
+                    placeholder="magnet:?... or https://..."
                     disabled={!config?.daemonRunning || adding}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") void addUri();
@@ -1433,7 +1433,7 @@ export function ContentWorkspace({
                   disabled={!config?.daemonRunning || adding}
                   onClick={() => void addTorrentFile()}
                 >
-                  Add .torrent…
+                  Add .torrent...
                 </button>
               </div>
               <div
@@ -1441,9 +1441,9 @@ export function ContentWorkspace({
                 style={{ color: "var(--text3)" }}
                 title={imageRootPreview}
               >
-                <span>Downloading to →</span>
+                <span>Downloading to -&gt;</span>
                 <span className="mono" style={{ color: "var(--text2)" }}>
-                  {imageRootPreview || "(resolving…)"}
+                  {imageRootPreview || "(resolving...)"}
                 </span>
                 {imageFreeBytes != null && (
                   <span
@@ -1494,7 +1494,7 @@ export function ContentWorkspace({
                         className="text-[11px]"
                         style={{ color: "var(--text2)" }}
                       >
-                        DE tracker ↗
+                        Tracker &gt;
                       </a>
                     )}
                     {tracker.siteStatsUrl && (
@@ -1505,7 +1505,7 @@ export function ContentWorkspace({
                         className="text-[11px]"
                         style={{ color: "var(--text2)" }}
                       >
-                        Site tracker ↗
+                        Site tracker &gt;
                       </a>
                     )}
                   </span>
@@ -1516,14 +1516,14 @@ export function ContentWorkspace({
                   className="text-[11px] w-full"
                   value={imagesFilter}
                   onChange={(e) => setImagesFilter(e.target.value)}
-                  placeholder="Filter image name…"
+                  placeholder="Filter image name..."
                 />
               </div>
               {imagesView === "soe" ? (
                 <DataTable columns={torrentColumns} rows={soeRows} rowKey={(r) => r.id} />
               ) : oemRows.length === 0 ? (
                 <p style={{ color: "var(--text2)" }}>
-                  No OEM ISO entries yet — add to <code>oemIsos</code> in the tracker manifest.
+                  No OEM ISO entries yet - add to <code>oemIsos</code> in the tracker manifest.
                 </p>
               ) : (
                 <DataTable columns={oemColumns} rows={oemRows} rowKey={(r) => r.id} />
@@ -1569,7 +1569,7 @@ export function ContentWorkspace({
                     title={`Refresh all vendor SCCM catalogs on this workstation. Acer opens a short-lived browser window when its coverage needs topping up.${tracker?.acerCatalogAt ? ` Last refresh ${tracker.acerCatalogAt.slice(0, 10)}.` : ""}${tracker?.acerCatalogStale || tracker?.dellCatalogStale || tracker?.hpCatalogStale || tracker?.lenovoCatalogStale || tracker?.microsoftCatalogStale ? " A catalog is serving from stale cache." : ""}`}
                     onClick={() => void refreshVendorCatalogs()}
                   >
-                    {catalogRefreshBusy ? "Refreshing catalogs…" : "Refresh catalogs"}
+                    {catalogRefreshBusy ? "Refreshing catalogs..." : "Refresh catalogs"}
                   </button>
                 </span>
               </div>
@@ -1580,14 +1580,14 @@ export function ContentWorkspace({
                   onChange={(e) => setDriversFilter(e.target.value)}
                   placeholder={
                     driversView === "acer"
-                      ? "Filter model, line (B1/B3/X3/P2…), alias…"
+                      ? "Filter model, line (B1/B3/X3/P2...), alias..."
                       : driversView === "dell"
-                        ? "Filter Dell model, system ID, line…"
+                        ? "Filter Dell model, system ID, line..."
                         : driversView === "hp"
-                          ? "Filter HP model, line, SoftPaq…"
+                          ? "Filter HP model, line, SoftPaq..."
                           : driversView === "microsoft"
-                            ? "Filter Surface model, SKU…"
-                            : "Filter ThinkPad / Yoga model, type code…"
+                            ? "Filter Surface model, SKU..."
+                            : "Filter ThinkPad / Yoga model, type code..."
                   }
                 />
               </div>
@@ -1632,7 +1632,7 @@ export function ContentWorkspace({
                   Extension routes
                 </h3>
                 <p className="mb-2 text-[11px]" style={{ color: "var(--text2)" }}>
-                  First match wins — maps file extensions to asset kinds for auto-detect on Add.
+                  First match wins - maps file extensions to asset kinds for auto-detect on Add.
                 </p>
                 <div className="flex flex-col gap-2">
                   {extensionRoutes.map((route, i) => (

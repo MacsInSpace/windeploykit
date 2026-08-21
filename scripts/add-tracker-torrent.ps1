@@ -4,7 +4,7 @@
     Add a SOE .torrent to the bundled tracker catalog (packaging/aria2-tracker.json
     + packaging/torrents/), parsing the torrent for its real content size.
 
-    Maintainer tool — DE releases SOE torrents roughly every 6 months. After adding,
+    Maintainer tool - DE releases SOE torrents roughly every 6 months. After adding,
     run scripts/publish-aria2-torrents.ps1 to push the torrent + manifest to GitLab
     (the app prefers the hosted manifest over the bundled fallback).
 
@@ -18,7 +18,7 @@
 .EXAMPLE
     # Reshare prep: add the Schools tracker to a DE-released torrent (in place, or
     # -OutPath elsewhere). The info dict is spliced through byte-for-byte, so the
-    # info-hash — and therefore the swarm — is unchanged; both copies' clients meet
+    # info-hash - and therefore the swarm - is unchanged; both copies' clients meet
     # via the tracker(s) they share. Follows the existing reshare convention of one
     # announce tier holding every tracker. Idempotent.
     pwsh -File ./scripts/add-tracker-torrent.ps1 -TorrentPath School-SOE-Win11-26H1.torrent -AddAnnounce 'http://deploy.example.com/announce'
@@ -140,7 +140,7 @@ function Write-BencodeTo {
 
 function Get-TorrentTopLevel {
     # Parses the top-level dict, recording each value's byte span so 'info' can be
-    # spliced through untouched (its bytes define the info-hash — the swarm identity).
+    # spliced through untouched (its bytes define the info-hash - the swarm identity).
     param([Parameter(Mandatory)][byte[]]$Data)
     if ([char]$Data[0] -ne 'd') { throw 'Not a torrent (top level is not a dict).' }
     $pos = [ref]1
@@ -177,7 +177,7 @@ function Add-TorrentAnnounce {
         }
     }
     if ($existing.Contains($Url)) {
-        Write-Host "  '$Url' already announced — nothing to do."
+        Write-Host "  '$Url' already announced - nothing to do."
         if ($Destination -ne $Path) { Copy-Item -LiteralPath $Path -Destination $Destination -Force }
         return
     }
@@ -218,14 +218,14 @@ function Add-TorrentAnnounce {
     $sha = [System.Security.Cryptography.SHA1]::Create()
     $hashIn = [Convert]::ToHexString($sha.ComputeHash($raw, $inSpan[0], $inSpan[1] - $inSpan[0]))
     $hashOut = [Convert]::ToHexString($sha.ComputeHash($out, $outSpan[0], $outSpan[1] - $outSpan[0]))
-    if ($hashIn -ne $hashOut) { throw 'info-hash changed — refusing to write.' }
+    if ($hashIn -ne $hashOut) { throw 'info-hash changed - refusing to write.' }
 
     [IO.File]::WriteAllBytes($Destination, $out)
     $tierText = @($checkTop.entries['announce-list'] | ForEach-Object {
             '[' + (@($_ | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([byte[]]$_) }) -join ', ') + ']'
         }) -join ' '
     Write-Host "  wrote $Destination"
-    Write-Host "  info-hash $($hashIn.ToLowerInvariant()) (unchanged) · announce-list: $tierText"
+    Write-Host "  info-hash $($hashIn.ToLowerInvariant()) (unchanged) | announce-list: $tierText"
 }
 
 function Get-InferredAssetKind {
@@ -282,7 +282,7 @@ if ([string]::IsNullOrWhiteSpace($AssetKind)) {
 
 $existing = @($manifest.torrents | Where-Object { [string]$_.id -eq $Id })
 if ($existing.Count -gt 0 -and -not $Force) {
-    throw "Entry '$Id' already exists — pass -Force to replace it."
+    throw "Entry '$Id' already exists - pass -Force to replace it."
 }
 
 $dest = Join-Path $torrentsDir $leaf

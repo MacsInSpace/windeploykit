@@ -81,7 +81,7 @@ comm -23 "$WORK/id-list/packages.txt" "$WORK/fi-list/packages.txt" >"$WORK/delta
 DELTA_COUNT="$(wc -l <"$WORK/delta-packages.txt" | tr -d ' ')"
 
 if [ "$DELTA_COUNT" -eq 0 ]; then
-	echo "No missing driver packages — FieldIso already contains ImageDeployer's FileRepository set."
+	echo "No missing driver packages - FieldIso already contains ImageDeployer's FileRepository set."
 	exit 0
 fi
 
@@ -96,7 +96,7 @@ while IFS= read -r pkg; do
 	"$WIMLIB" extract "$IMAGEDEPLOYER_WIM" 1 \
 		"$DRIVER_REPO_PATH/$pkg" \
 		--dest-dir="$dest" --no-acls >/dev/null
-	# wimlib creates $dest/$pkg/ — flatten to $dest/
+	# wimlib creates $dest/$pkg/ - flatten to $dest/
 	if [ -d "$dest/$pkg" ]; then
 		mv "$dest/$pkg"/* "$dest/" 2>/dev/null || true
 		rmdir "$dest/$pkg" 2>/dev/null || true
@@ -136,12 +136,12 @@ echo "==> Updating FieldIso.wim (this may take a few minutes)..."
 )
 AFTER_SIZE="$(wc -c <"$FIELDISO_WIM" | tr -d ' ')"
 
-# New WIM content — drop overlay marker so sidecar re-patches Mount-IsoFromUrl.cmd (cmd /k + pnputil).
+# New WIM content - drop overlay marker so sidecar re-patches Mount-IsoFromUrl.cmd (cmd /k + pnputil).
 MARKER_DIR="$(dirname "$FIELDISO_WIM")"
 rm -f "$MARKER_DIR/.fieldiso-overlay-v"[0-9]* 2>/dev/null || true
 
 echo "==> Done."
 echo "    Packages added: $DELTA_COUNT"
 echo "    Size: $BEFORE_SIZE -> $AFTER_SIZE bytes"
-echo "    Removed .fieldiso-overlay-v* marker — Start field PXE to patch Mount-IsoFromUrl.cmd overlay v4."
+echo "    Removed .fieldiso-overlay-v* marker - Start field PXE to patch Mount-IsoFromUrl.cmd overlay v4."
 echo "    Or publish it: pwsh -File ./scripts/publish-pxe-fieldiso.ps1 -WimPath $FIELDISO_WIM"

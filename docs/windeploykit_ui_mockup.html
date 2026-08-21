@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WinDeployKit — UI Concept</title>
+<title>WinDeployKit - UI Concept</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap" rel="stylesheet">
 <style>
@@ -43,7 +43,7 @@
     overflow: hidden;
   }
 
-  /* ── APP SHELL ─────────────────────────── */
+  /* -- APP SHELL --------------------------- */
   .app {
     display: grid;
     grid-template-rows: 44px 1fr;
@@ -52,7 +52,7 @@
     gap: 0;
   }
 
-  /* ── TITLE BAR ─────────────────────────── */
+  /* -- TITLE BAR --------------------------- */
   .titlebar {
     grid-column: 1 / -1;
     background: #0a0d14;
@@ -153,7 +153,7 @@
   .site-pill .name  { color: var(--accent2); font-weight: 500; }
   .site-pill .arrow { color: var(--text3); font-size: 9px; }
 
-  /* ── LEFT SIDEBAR ──────────────────────── */
+  /* -- LEFT SIDEBAR ------------------------ */
   .sidebar {
     background: var(--surface);
     border-right: 1px solid var(--border);
@@ -279,7 +279,7 @@
   .nav-badge.ok   { background: rgba(34,197,94,0.12);  border-color: var(--green-dim);  color: var(--green); }
 
   .nav-item.expandable::after {
-    content: '›';
+    content: '>';
     margin-left: auto;
     color: var(--text3);
     font-size: 14px;
@@ -325,7 +325,7 @@
   .user-name { color: var(--text2); font-weight: 500; font-size: 11.5px; }
   .user-role { font-family: var(--mono); font-size: 9px; color: var(--accent); }
 
-  /* ── MAIN CONTENT ──────────────────────── */
+  /* -- MAIN CONTENT ------------------------ */
   .main {
     display: flex;
     flex-direction: column;
@@ -522,7 +522,7 @@
   .row-btn:hover { background: var(--accent-dim); border-color: var(--accent); color: white; }
   .row-btn.danger:hover { background: rgba(239,68,68,0.2); border-color: var(--red); color: var(--red); }
 
-  /* Detail pane (right panel — shown as overlay hint) */
+  /* Detail pane (right panel - shown as overlay hint) */
   .detail-pane {
     width: 280px;
     flex-shrink: 0;
@@ -738,7 +738,7 @@
 
 <div class="app">
 
-  <!-- ── TITLE BAR ───────────────────────────── -->
+  <!-- -- TITLE BAR ----------------------------- -->
   <div class="titlebar">
     <div class="titlebar-dots">
       <div class="dot dot-red"></div>
@@ -755,7 +755,7 @@
       </svg>
       the site service ADMIN
     </div>
-    <div class="titlebar-center">Example Site — DC01 / DC01</div>
+    <div class="titlebar-center">Example Site - DC01 / DC01</div>
     <div class="titlebar-right">
       <!-- Session status pills -->
       <div class="session-pill">
@@ -770,16 +770,16 @@
       <div class="site-pill">
         <span class="label">the site service</span>
         <span class="name">Example Site</span>
-        <span class="arrow">▾</span>
+        <span class="arrow">v</span>
       </div>
     </div>
   </div>
 
-  <!-- ── SIDEBAR ─────────────────────────────── -->
+  <!-- -- SIDEBAR ------------------------------- -->
   <div class="sidebar">
     <!-- Site Profile card -->
     <div class="site-card">
-      <div class="site-id">SITE01 · DEPLOY SHARE</div>
+      <div class="site-id">SITE01 | DEPLOY SHARE</div>
       <div class="site-name">Example Site</div>
       <div class="site-meta">
         <div class="meta-item">
@@ -805,12 +805,12 @@
     <div class="nav">
       <div class="nav-section-label">Overview</div>
       <div class="nav-item">
-        <span class="nav-icon">⊞</span> Dashboard
+        <span class="nav-icon">#</span> Dashboard
       </div>
 
       <div class="nav-section-label">Active Directory</div>
       <div class="nav-item expandable open" onclick="toggleSub('ou-sub',this)">
-        <span class="nav-icon">🗂</span> OU Browser
+        <span class="nav-icon"></span> OU Browser
       </div>
       <div class="nav-sub open" id="ou-sub">
         <div class="nav-item">Service Accounts</div>
@@ -821,43 +821,43 @@
       </div>
 
       <div class="nav-item">
-        <span class="nav-icon">👤</span> Staff &amp; Contacts
+        <span class="nav-icon">[user]</span> Staff &amp; Contacts
         <span class="nav-badge ok">77</span>
       </div>
       <div class="nav-item">
-        <span class="nav-icon">🔑</span> Service Accounts
+        <span class="nav-icon">[key]</span> Service Accounts
         <span class="nav-badge">58</span>
       </div>
       <div class="nav-item">
-        <span class="nav-icon">📶</span> Wireless Certs
+        <span class="nav-icon">[net]</span> Wireless Certs
         <span class="nav-badge warn">63</span>
       </div>
       <div class="nav-item">
-        <span class="nav-icon">🖥</span> Computers
+        <span class="nav-icon">[host]</span> Computers
         <span class="nav-badge">71</span>
       </div>
       <div class="nav-item">
-        <span class="nav-icon">🗄</span> Servers
+        <span class="nav-icon">[store]</span> Servers
         <span class="nav-badge">18</span>
       </div>
       <div class="nav-item">
-        <span class="nav-icon">🌐</span> IP Schema
+        <span class="nav-icon">[web]</span> IP Schema
       </div>
 
       <div class="nav-section-label">the site service</div>
       <div class="nav-item">
-        <span class="nav-icon">📋</span> Distribution Lists
+        <span class="nav-icon"></span> Distribution Lists
       </div>
       <div class="nav-item">
-        <span class="nav-icon">🔏</span> Certificates
+        <span class="nav-icon">[lock]</span> Certificates
       </div>
       <div class="nav-item">
-        <span class="nav-icon">📝</span> Site Notes
+        <span class="nav-icon">[edit]</span> Site Notes
       </div>
 
       <div class="nav-section-label">Tools</div>
       <div class="nav-item">
-        <span class="nav-icon">📊</span> NPS Log Viewer
+        <span class="nav-icon">[chart]</span> NPS Log Viewer
       </div>
     </div>
 
@@ -866,27 +866,27 @@
       <div class="user-avatar">CH</div>
       <div class="user-info">
         <div class="user-name">Craig Hair</div>
-        <div class="user-role">RST · EDU002\st00447</div>
+        <div class="user-role">RST | EDU002\st00447</div>
       </div>
     </div>
   </div>
 
-  <!-- ── MAIN CONTENT ─────────────────────────── -->
+  <!-- -- MAIN CONTENT --------------------------- -->
   <div class="main">
 
     <!-- Panel toolbar -->
     <div class="panel-toolbar">
       <div>
-        <div class="panel-title">Computers — Managed</div>
-        <div class="panel-subtitle">OU=Computers Managed · DC01 · EDU002</div>
+        <div class="panel-title">Computers - Managed</div>
+        <div class="panel-subtitle">OU=Computers Managed | DC01 | EDU002</div>
       </div>
       <div class="toolbar-spacer"></div>
       <div class="search-box">
-        <span style="color:var(--text3);font-size:11px">⌕</span>
+        <span style="color:var(--text3);font-size:11px">?</span>
         <input placeholder="Filter by name, OS..." />
       </div>
-      <button class="toolbar-btn">⟳ Refresh</button>
-      <button class="toolbar-btn">↓ Export CSV</button>
+      <button class="toolbar-btn">+ Refresh</button>
+      <button class="toolbar-btn">v Export CSV</button>
     </div>
 
     <!-- Sub-tabs -->
@@ -916,7 +916,7 @@
           <table>
             <thead>
               <tr>
-                <th>Name ↕</th>
+                <th>Name ^v</th>
                 <th>DNS Hostname</th>
                 <th>Operating System</th>
                 <th>Created</th>
@@ -930,7 +930,7 @@
                 <td class="td-dim">dk-lap-001.example.local</td>
                 <td>Windows 11 Pro</td>
                 <td class="td-dim">2024-03-14</td>
-                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><span class="status-badge badge-ok">* Enabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
               </tr>
               <tr class="selected">
@@ -938,7 +938,7 @@
                 <td class="td-dim">dk-lap-002.example.local</td>
                 <td>Windows 11 Pro</td>
                 <td class="td-dim">2024-03-14</td>
-                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><span class="status-badge badge-ok">* Enabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
               </tr>
               <tr>
@@ -946,7 +946,7 @@
                 <td class="td-dim">dk-lap-003.example.local</td>
                 <td>Windows 10 Pro</td>
                 <td class="td-dim">2023-11-01</td>
-                <td><span class="status-badge badge-warn">⚠ Disabled</span></td>
+                <td><span class="status-badge badge-warn">! Disabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button><button class="row-btn">Enable</button></div></td>
               </tr>
               <tr>
@@ -954,7 +954,7 @@
                 <td class="td-dim">dk-desk-001.example.local</td>
                 <td>Windows 11 Pro</td>
                 <td class="td-dim">2024-01-22</td>
-                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><span class="status-badge badge-ok">* Enabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
               </tr>
               <tr>
@@ -962,7 +962,7 @@
                 <td class="td-dim">dk-desk-002.example.local</td>
                 <td>Windows 11 Pro</td>
                 <td class="td-dim">2024-01-22</td>
-                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><span class="status-badge badge-ok">* Enabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
               </tr>
               <tr>
@@ -970,7 +970,7 @@
                 <td class="td-dim">dk-desk-003.example.local</td>
                 <td>Windows 10 Pro</td>
                 <td class="td-dim">2023-08-15</td>
-                <td><span class="status-badge badge-err">✕ Locked</span></td>
+                <td><span class="status-badge badge-err">x Locked</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button><button class="row-btn">Unlock</button></div></td>
               </tr>
               <tr>
@@ -978,7 +978,7 @@
                 <td class="td-dim">dk-lap-010.example.local</td>
                 <td>Windows 11 Pro</td>
                 <td class="td-dim">2024-06-01</td>
-                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><span class="status-badge badge-ok">* Enabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
               </tr>
               <tr>
@@ -986,7 +986,7 @@
                 <td class="td-dim">dk-lap-011.example.local</td>
                 <td>Windows 11 Pro</td>
                 <td class="td-dim">2024-06-01</td>
-                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><span class="status-badge badge-ok">* Enabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
               </tr>
               <tr>
@@ -994,7 +994,7 @@
                 <td class="td-dim">dk-lap-012.example.local</td>
                 <td>Windows 11 Pro</td>
                 <td class="td-dim">2024-06-02</td>
-                <td><span class="status-badge badge-ok">● Enabled</span></td>
+                <td><span class="status-badge badge-ok">* Enabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
               </tr>
               <tr>
@@ -1002,7 +1002,7 @@
                 <td class="td-dim">dk-lap-013.example.local</td>
                 <td>Windows 10 Pro</td>
                 <td class="td-dim">2022-09-12</td>
-                <td><span class="status-badge badge-warn">⚠ Disabled</span></td>
+                <td><span class="status-badge badge-warn">! Disabled</span></td>
                 <td><div class="row-actions"><button class="row-btn">Details</button></div></td>
               </tr>
             </tbody>
@@ -1014,7 +1014,7 @@
       <div class="detail-pane">
         <div class="detail-header">
           <div class="detail-name">DPS-LAP-002</div>
-          <div class="detail-sub">Computer Object · EDU002</div>
+          <div class="detail-sub">Computer Object | EDU002</div>
         </div>
         <div class="detail-body">
 
@@ -1051,9 +1051,9 @@
 
         </div>
         <div class="detail-actions">
-          <button class="action-btn primary-action">⟳ Refresh Object</button>
-          <button class="action-btn">📋 Copy DN</button>
-          <button class="action-btn danger-action">⊘ Disable Account</button>
+          <button class="action-btn primary-action">+ Refresh Object</button>
+          <button class="action-btn"> Copy DN</button>
+          <button class="action-btn danger-action">x Disable Account</button>
         </div>
       </div><!-- /detail-pane -->
 
@@ -1062,7 +1062,7 @@
 
 </div><!-- /app -->
 
-<div class="mockup-label">UI Concept — WinDeployKit App — v0.1 sketch</div>
+<div class="mockup-label">UI Concept - WinDeployKit App - v0.1 sketch</div>
 
 <script>
 function toggleSub(id, el) {

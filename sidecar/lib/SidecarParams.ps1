@@ -3,7 +3,7 @@
 function Get-AppSidecarParam {
     <#
     .SYNOPSIS
-        Safe param read — JSON deserializes to PSCustomObject; strict mode throws on missing properties.
+        Safe param read - JSON deserializes to PSCustomObject; strict mode throws on missing properties.
     #>
     param(
         $Params,

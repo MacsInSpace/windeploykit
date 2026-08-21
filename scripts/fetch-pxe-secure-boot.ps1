@@ -59,7 +59,7 @@ if (-not $SourceDir) {
 
 if (-not $SourceDir -or -not (Test-Path -LiteralPath $SourceDir -PathType Container)) {
     $lines = @(
-        'Secure Boot TFTP source not found (needs shimx64.efi). Unlike wimboot, this tree is built from ipxeboot — it is not downloaded from the internet.'
+        'Secure Boot TFTP source not found (needs shimx64.efi). Unlike wimboot, this tree is built from ipxeboot - it is not downloaded from the internet.'
         ''
         'Checked:'
     ) + @($checked | ForEach-Object { "  - $_" }) + @(

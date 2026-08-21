@@ -15,7 +15,7 @@
 
     WINDOWS ONLY: offline driver servicing requires DISM. macOS wimlib can copy files into a WIM
     but cannot register a driver. Run this on a Windows box (Admin): copy the WIM over from the
-    Mac's PXE store (…/pxe-boot/http/wim/FieldIso.wim), bake, copy it back, then Start field PXE.
+    Mac's PXE store (.../pxe-boot/http/wim/FieldIso.wim), bake, copy it back, then Start field PXE.
 
     NOTE: this services the BOOT image (so WinPE sees the disk). It is separate from the OOBD
     pack (scripts/build-virtio-win-fieldiso-pack.ps1), which drivers the DEPLOYED Windows so it
@@ -75,7 +75,7 @@ if (-not (Get-Command Mount-WindowsImage -ErrorAction SilentlyContinue)) {
 }
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
-    throw "Run this in an elevated (Administrator) PowerShell — DISM mount/commit requires it."
+    throw "Run this in an elevated (Administrator) PowerShell - DISM mount/commit requires it."
 }
 if (-not (Test-Path -LiteralPath $WimPath)) {
     throw "WIM not found: $WimPath"
@@ -115,7 +115,7 @@ try {
         if ($inf) {
             [void]$driverFolders.Add($inf.DirectoryName)
         } else {
-            Write-Warning "Could not find driver '$drv' for $OsFlavor/$Arch under $virtioRoot — skipping."
+            Write-Warning "Could not find driver '$drv' for $OsFlavor/$Arch under $virtioRoot - skipping."
         }
     }
     if ($driverFolders.Count -eq 0) {
@@ -145,7 +145,7 @@ try {
         $committed = $true
     } finally {
         if (-not $committed) {
-            Write-Warning "Servicing failed — discarding changes so the WIM is left intact."
+            Write-Warning "Servicing failed - discarding changes so the WIM is left intact."
             try { $null = Dismount-WindowsImage -Path $mountDir -Discard -ErrorAction SilentlyContinue } catch { }
         }
         Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue

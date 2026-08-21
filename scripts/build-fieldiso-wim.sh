@@ -1,16 +1,16 @@
 #!/bin/sh
-# Build FieldIso.wim — HTTP bootstrap WinPE with PowerShell + curl + 7z in the WIM.
+# Build FieldIso.wim - HTTP bootstrap WinPE with PowerShell + curl + 7z in the WIM.
 #
 # Prerequisites:
 #   brew install wimlib   (or vendor/binaries/pxe-macos/wimlib-imagex-universal)
 #   winpe.wim               ADK stock WinPE amd64, in the pxe-boot store's http/wim/
 #                           (or point BASE_WIM= at it anywhere)
-#   sidecar/pxe/fieldiso/wim-inject/Windows/…  from prepare-fieldiso-wim-inject.ps1 (Windows + ADK)
+#   sidecar/pxe/fieldiso/wim-inject/Windows/...  from prepare-fieldiso-wim-inject.ps1 (Windows + ADK)
 #   sidecar/pxe/fieldiso/tools/curl.exe + 7z.exe  from fetch-fieldiso-tools.ps1
 #
 # Usage:
 #   pwsh -File ./scripts/fetch-fieldiso-tools.ps1
-#   # On Windows: pwsh -File ./scripts/prepare-fieldiso-wim-inject.ps1 -BaseWinPeWim …\winpe.wim
+#   # On Windows: pwsh -File ./scripts/prepare-fieldiso-wim-inject.ps1 -BaseWinPeWim ...\winpe.wim
 #   ./scripts/build-fieldiso-wim.sh
 #   OUT=~/Desktop/FieldIso.wim ./scripts/build-fieldiso-wim.sh
 
@@ -18,7 +18,7 @@ set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Canonical pxe-boot store (AppPaths.ps1), same as
-# inject-fieldiso-drivers-from-imagedeployer.sh. Deliberately NOT apis/ — that is a
+# inject-fieldiso-drivers-from-imagedeployer.sh. Deliberately NOT apis/ - that is a
 # scratch drop-off folder that gets deleted, so nothing here may depend on it.
 if [ "$(uname)" = "Darwin" ]; then
   DEFAULT_PXE_STORE="$HOME/Library/Application Support/WinDeployKit/plugins/pxe-boot"
@@ -64,7 +64,7 @@ FIELDISO_TOOL_FILES="curl.exe 7z.exe 7za.dll 7zxa.dll"
 missing_tools=0
 for tool in $FIELDISO_TOOL_FILES; do
 	if [ ! -f "$TOOLS_DIR/$tool" ]; then
-		echo "Missing $TOOLS_DIR/$tool — run: pwsh -File ./scripts/fetch-fieldiso-tools.ps1" >&2
+		echo "Missing $TOOLS_DIR/$tool - run: pwsh -File ./scripts/fetch-fieldiso-tools.ps1" >&2
 		missing_tools=1
 	fi
 done
@@ -73,7 +73,7 @@ if [ "$missing_tools" -ne 0 ]; then exit 1; fi
 if [ ! -d "$INJECT_ROOT/Windows/System32/WindowsPowerShell" ]; then
 	echo "Missing PowerShell tree: $INJECT_ROOT/Windows/System32/WindowsPowerShell" >&2
 	echo "On Windows + ADK run:" >&2
-	echo "  pwsh -File ./scripts/prepare-fieldiso-wim-inject.ps1 -BaseWinPeWim …\\winpe.wim" >&2
+	echo "  pwsh -File ./scripts/prepare-fieldiso-wim-inject.ps1 -BaseWinPeWim ...\\winpe.wim" >&2
 	exit 1
 fi
 

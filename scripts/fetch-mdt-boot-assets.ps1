@@ -58,7 +58,7 @@ Copy-Item -LiteralPath (Join-Path $destDir 'boot.sdi') -Destination (Join-Path $
 Copy-Item -LiteralPath (Join-Path $destDir 'bootmgfw.efi') -Destination (Join-Path $sidecarDir 'bootmgfw.efi') -Force
 
 $hashes = @(
-    "# MDT LiteTouch boot assets — source: $srcRoot"
+    "# MDT LiteTouch boot assets - source: $srcRoot"
     (Get-FileHash (Join-Path $destDir 'BCD') -Algorithm SHA256).Hash.ToLowerInvariant() + '  x64/BCD'
     (Get-FileHash (Join-Path $destDir 'boot.sdi') -Algorithm SHA256).Hash.ToLowerInvariant() + '  x64/boot.sdi'
     (Get-FileHash (Join-Path $destDir 'bootmgfw.efi') -Algorithm SHA256).Hash.ToLowerInvariant() + '  x64/bootmgfw.efi'

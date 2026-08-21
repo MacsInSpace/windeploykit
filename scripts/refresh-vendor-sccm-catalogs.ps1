@@ -1,10 +1,10 @@
 #!/usr/bin/env pwsh
 # Refresh vendor SCCM driver catalogs and write packaging/*.json (the bundled fallbacks
-# shipped with releases). LOCAL/MAINTAINER USE ONLY — the GitLab CI job was retired
+# shipped with releases). LOCAL/MAINTAINER USE ONLY - the GitLab CI job was retired
 # 2026-08-18; day-to-day refresh now lives in the app (aria2 Tracker -> Refresh catalogs).
 # Acer resolves via AcerCatalog.xml (curl-friendly CDN) merged over the cached KB-harvest
 # list; the legacy HTML scrape only runs as a last resort and fails from any curl client
-# (fingerprint bot wall) — the stale-cache tolerance covers that path.
+# (fingerprint bot wall) - the stale-cache tolerance covers that path.
 
 param(
     [switch]$ForceRefresh,
@@ -43,7 +43,7 @@ function Copy-AppVendorSccmCatalogCacheToPackaging {
         [Parameter(Mandatory)][string]$VendorLabel
     )
     if (-not (Test-Path -LiteralPath $CachePath)) {
-        throw "$VendorLabel cache missing at $CachePath — run with -ForceRefresh."
+        throw "$VendorLabel cache missing at $CachePath - run with -ForceRefresh."
     }
     Copy-Item -LiteralPath $CachePath -Destination $DestPath -Force
     Write-Host "Wrote $DestPath"
@@ -93,7 +93,7 @@ function Assert-AppVendorSccmLiveCatalog {
 }
 
 if (-not $ForceRefresh) {
-    Write-Warning 'Live scrape skipped — pass -ForceRefresh (required for CI).'
+    Write-Warning 'Live scrape skipped - pass -ForceRefresh (required for CI).'
 } else {
     Test-AppVendorSccmRefreshPrerequisites
 }
@@ -113,7 +113,7 @@ $acerUrls = @([string[]]$acerCatalog.urls)
 $acerSummary = Get-AppAcerSccmCatalogSummary -Urls $acerUrls
 $acerModels = if ($acerSummary.total) { [int]$acerSummary.total } else { [int]$acerSummary.travelmate }
 
-Write-Host "Acer URLs: $($acerUrls.Count) · models: $acerModels (P2 $($acerSummary.p2xx), P4 $($acerSummary.p4xx), P6 $($acerSummary.p6xx), legacy $($acerSummary.legacyP), B1 $($acerSummary.b1xx), B3 $($acerSummary.b3xx), X3 $($acerSummary.x3xx))"
+Write-Host "Acer URLs: $($acerUrls.Count) | models: $acerModels (P2 $($acerSummary.p2xx), P4 $($acerSummary.p4xx), P6 $($acerSummary.p6xx), legacy $($acerSummary.legacyP), B1 $($acerSummary.b1xx), B3 $($acerSummary.b3xx), X3 $($acerSummary.x3xx))"
 Write-Host "Fetched: $($acerCatalog.fetchedAt)"
 
 if ($acerUrls.Count -lt $MinAcerUrls) {

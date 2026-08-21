@@ -1,4 +1,4 @@
-// Nav id → icon role for the console tree. Plain map, no theme packages.
+// Nav id -> icon role for the console tree. Plain map, no theme packages.
 // Values must be keys of the PATHS table in components/AppIcon.tsx.
 
 export const NAV_ICON_ROLES = {

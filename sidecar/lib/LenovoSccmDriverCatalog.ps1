@@ -1,4 +1,4 @@
-# Lenovo ThinkPad SCCM driver pack catalog — parse catalogv2.xml + support-page fallbacks.
+# Lenovo ThinkPad SCCM driver pack catalog - parse catalogv2.xml + support-page fallbacks.
 # Primary: https://download.lenovo.com/cdrt/td/catalogv2.xml
 # Fallback support pages when a machine type is not listed in the XML (scrape when reachable).
 
@@ -6,7 +6,7 @@ $script:AppLenovoSccmCatalogUrl = 'https://download.lenovo.com/cdrt/td/catalogv2
 $script:AppLenovoSccmCatalogCacheHours = 168
 $script:AppLenovoSccmCatalogLastError = $null
 
-# Support download pages — machine types from page titles; offlineWin11Url is last-resort when scrape fails.
+# Support download pages - machine types from page titles; offlineWin11Url is last-resort when scrape fails.
 $script:AppLenovoSccmSupportFallbackPages = @(
     @{
         id             = 'ds555902'
@@ -100,8 +100,8 @@ function Test-AppLenovoSccmModelIncluded {
     # catalogv2.xml lists Yoga + 11e under the ThinkPad product line (e.g. ThinkPad Yoga 11e).
     if ($Name -match '(?i)\bThinkPad\b') { return $true }
     # Education models without a ThinkPad prefix. [ew] matters: the Windows EDU
-    # convertibles are w-suffix (100w/300w/500w) — the old e-only list dropped them
-    # even when the source listed them (AGENT_NOTES_PXE_DRIVERS §3.3).
+    # convertibles are w-suffix (100w/300w/500w) - the old e-only list dropped them
+    # even when the source listed them (AGENT_NOTES_PXE_DRIVERS section 3.3).
     if ($Name -match '(?i)\b(Yoga|11e|[1-6]00[ew])\b') { return $true }
     return $false
 }
@@ -512,7 +512,7 @@ function Get-AppLenovoSccmDriverCatalog {
         $script:AppLenovoSccmCatalogLastError = $_.Exception.Message
         $cached = Read-AppLenovoSccmCatalogCache
         if ($cached -and $cached.models) {
-            Write-SidecarLog "Lenovo SCCM catalog: live fetch failed — $($_.Exception.Message); using stale cache."
+            Write-SidecarLog "Lenovo SCCM catalog: live fetch failed - $($_.Exception.Message); using stale cache."
             return @{
                 sourceUrl = if ($cached.sourceUrl) { [string]$cached.sourceUrl } else { $script:AppLenovoSccmCatalogUrl }
                 fetchedAt = [string]$cached.fetchedAt

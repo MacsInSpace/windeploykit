@@ -1,4 +1,4 @@
-# IPC helpers — stdout is JSON-only; diagnostics go to stderr.
+# IPC helpers - stdout is JSON-only; diagnostics go to stderr.
 #
 # Depth notes:
 #  - PowerShell's default ConvertTo-Json depth is 2; we override to a large
@@ -11,6 +11,33 @@
 $script:IpcJsonDepth = 32
 $script:SidecarHostLogWritten = $false
 $script:SidecarStdoutUtf8 = [System.Text.UTF8Encoding]::new($false)
+
+function Get-AppSidecarJsonProp {
+    <#
+    .SYNOPSIS
+        Read a property that may be absent, safely under Set-StrictMode -Version Latest.
+
+    .DESCRIPTION
+        ConvertFrom-Json builds a PSCustomObject with only the keys the JSON actually
+        carried. Under StrictMode, reading an absent property THROWS rather than
+        returning $null, so every optional key must be read through here. This is the
+        single most common StrictMode fault in ported code - see README "StrictMode".
+
+        Returns $null when the item is null or the property is absent.
+    #>
+    param(
+        $Item,
+        [Parameter(Mandatory)][string]$Name
+    )
+    if ($null -eq $Item) { return $null }
+    if ($Item -is [System.Collections.IDictionary]) {
+        if ($Item.Contains($Name)) { return $Item[$Name] }
+        return $null
+    }
+    $prop = $Item.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $null }
+    return $prop.Value
+}
 
 function Write-SidecarStdoutLine {
     <#
@@ -30,13 +57,13 @@ function Write-SidecarStdoutLine {
 }
 
 # While Start-SidecarBootstrap runs on the main runspace thread, stdin is still
-# pumped into RequestLines — poll this scriptblock during bootstrap waits so
+# pumped into RequestLines - poll this scriptblock during bootstrap waits so
 # GetCredentialStatus / NOT_READY responses are not stuck behind a hung IWR.
 $script:SidecarBootstrapDispatchPoll = $null
 
 function Invoke-AppSidecarBootstrapPoll {
     if ($script:SidecarBootstrapDispatchPoll) {
-        # Dispatch returns $true/$false — must not leak to caller's output (StrictMode + bootstrap probes).
+        # Dispatch returns $true/$false - must not leak to caller's output (StrictMode + bootstrap probes).
         [void](& $script:SidecarBootstrapDispatchPoll)
     }
 }
@@ -51,7 +78,7 @@ function Wait-AppSidecarSecondsWithDispatch {
 
 # Runtime counterpart to the bootstrap poll: a long-running handler (streaming
 # driver download) can service queued IPC requests from inside its own loop so
-# the rest of the app stays responsive — without this, every panel's calls queue
+# the rest of the app stays responsive - without this, every panel's calls queue
 # behind the download and time out on the Rust side (blank panels). Depth-guarded:
 # a nested long-running handler dispatched from the pump runs blocking rather
 # than pumping again, which bounds re-entrancy at one level.
@@ -117,7 +144,7 @@ function Protect-AppSidecarLogText {
     .SYNOPSIS
         Redact passwords, tokens, and auth material before stderr / IPC error text is emitted.
         Detected values are replaced with the literal eight-asterisk marker ********.
-        Documented in docs/core/logging/AGENT_NOTES_SIDECAR_LOGGING.md § The ******** redaction marker.
+        Documented in docs/core/logging/AGENT_NOTES_SIDECAR_LOGGING.md section The ******** redaction marker.
     #>
     param([AllowNull()][string]$Text)
     if ($null -eq $Text -or $Text.Length -eq 0) { return $Text }
@@ -136,7 +163,7 @@ function Protect-AppSidecarLogText {
         '${1}********${2}'
     )
 
-    # JSON / assignment / header secret keys (word boundary avoids passwordCached=…)
+    # JSON / assignment / header secret keys (word boundary avoids passwordCached=...)
     $secretKeys = @(
         'password', 'passwd', 'pwd', 'passphrase', 'secret',
         'api[_-]?key', 'api[_-]?token', 'access[_-]?token', 'refresh[_-]?token',
@@ -168,7 +195,7 @@ function Write-SidecarLog {
     $safe = Protect-AppSidecarLogText -Text $Message
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     [Console]::Error.WriteLine("[$ts] $safe")
-    # Avoid Flush on every line — a full stderr pipe can block bootstrap on Windows.
+    # Avoid Flush on every line - a full stderr pipe can block bootstrap on Windows.
     if ($Flush) { [Console]::Error.Flush() }
 }
 
@@ -224,7 +251,7 @@ function Get-AppSidecarPackageVariant {
 function Write-SidecarHostLog {
     <#
     .SYNOPSIS
-        One operational line at sidecar bootstrap — app version/build/variant,
+        One operational line at sidecar bootstrap - app version/build/variant,
         host OS, CPU arch, and pwsh version (always visible when Debug is off).
     #>
     if ($script:SidecarHostLogWritten) { return }
@@ -243,7 +270,7 @@ function Write-SidecarHostLog {
 function Test-AppSidecarVerboseLogging {
     <#
     .SYNOPSIS
-        Settings → Diagnostics → Debug (ApplyRuntimeConfig → APP_VERBOSE_LOGGING).
+        Settings -> Diagnostics -> Debug (ApplyRuntimeConfig -> APP_VERBOSE_LOGGING).
         When unset before the first ApplyRuntimeConfig, defaults to disabled (quiet boot).
         The Tauri shell passes APP_VERBOSE_LOGGING at pwsh spawn from saved Settings.
     #>
@@ -262,7 +289,7 @@ function Test-AppSidecarVerboseLogging {
 function Test-AppSidecarVerbosePowershell {
     <#
     .SYNOPSIS
-        Settings → Diagnostics → Verbose PowerShell (ApplyRuntimeConfig → APP_VERBOSE_POWERSHELL).
+        Settings -> Diagnostics -> Verbose PowerShell (ApplyRuntimeConfig -> APP_VERBOSE_POWERSHELL).
         When unset before the first ApplyRuntimeConfig, defaults to disabled (very noisy).
     #>
     if ($null -ne $env:APP_VERBOSE_POWERSHELL -and $env:APP_VERBOSE_POWERSHELL -ne '') {
@@ -294,7 +321,7 @@ function Write-SidecarLogVerbose {
 
 function Test-AppSidecarIpcPollCommand {
     param([Parameter(Mandatory)][string]$Cmd)
-    # UI live polls — skip IPC begin/ok lines even when Debug is ON (errors and SLOW still log).
+    # UI live polls - skip IPC begin/ok lines even when Debug is ON (errors and SLOW still log).
     return $Cmd -in @(
         'GetPxeBootPluginStatus'
         'GetPxeBootLogTail'
@@ -353,21 +380,21 @@ function Get-AppSidecarIpcErrorPresentation {
     elseif ($line -match '(?i)^yt-dlp failed to discover a stream URL:\s*(.+)$') {
         $detail = ($Matches[1] -replace '(?i)^ERROR:\s*', '').Trim()
         if ($detail -match '(?i)timed out|unable to connect to proxy') {
-            $user = "Could not discover Lo-Fi live stream — $detail"
+            $user = "Could not discover Lo-Fi live stream - $detail"
         }
         else {
-            $user = "Could not discover Lo-Fi live stream — $detail"
+            $user = "Could not discover Lo-Fi live stream - $detail"
         }
         $code = 'MINI_PLAYER_YTDLP'
     }
     elseif ($line -match '(?i)^yt-dlp failed:\s*(.+)$') {
         $rest = ($Matches[1] -replace '(?i)^ERROR:\s*', '').Trim()
         if ($rest -match '(?i)unable to connect to proxy') {
-            $user = 'Zscaler proxy unreachable — enable ZCC or turn off Use Zscaler proxy in Settings'
+            $user = 'Zscaler proxy unreachable - enable ZCC or turn off Use Zscaler proxy in Settings'
             $code = 'MINI_PLAYER_PROXY'
         }
         elseif ($rest -match '(?i)timed out') {
-            $user = 'YouTube timed out — try Zscaler proxy or another network'
+            $user = 'YouTube timed out - try Zscaler proxy or another network'
             $code = 'YOUTUBE_UNREACHABLE'
         }
         else {
@@ -380,7 +407,7 @@ function Get-AppSidecarIpcErrorPresentation {
         $code = 'MINI_PLAYER_YTDLP'
     }
     elseif ($line -match '(?i)YouTube unreachable from the app') {
-        $user = 'YouTube unreachable — try Zscaler proxy or paste a watch URL in Settings'
+        $user = 'YouTube unreachable - try Zscaler proxy or paste a watch URL in Settings'
         $code = 'YOUTUBE_UNREACHABLE'
     }
 

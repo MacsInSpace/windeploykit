@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 /**
  * Hover / focus tooltip for detail that used to sit in a panel subtitle.
  *
- * Style guide § "Help text & tooltips": less is more — the header shows the one
+ * Style guide section "Help text & tooltips": less is more - the header shows the one
  * fact a technician scans for; everything else lives in here. Content is normal
  * React children, so live values update while the tip is open.
  *
@@ -14,7 +14,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 export interface InfoTipRow {
   label: string;
   value: ReactNode;
-  /** `warn` / `bad` tint the value for actionable conditions only (style guide §6). */
+  /** `warn` / `bad` tint the value for actionable conditions only (style guide section 6). */
   tone?: "normal" | "warn" | "bad";
 }
 
@@ -25,7 +25,7 @@ export interface InfoTipRow {
 export type MaybeInfoTipRow = InfoTipRow | false | null | undefined | "" | 0;
 
 interface InfoTipProps {
-  /** Structured rows — preferred. Falls back to `children` for free-form content. */
+  /** Structured rows - preferred. Falls back to `children` for free-form content. */
   rows?: MaybeInfoTipRow[];
   children?: ReactNode;
   /** Accessible name for the trigger. */

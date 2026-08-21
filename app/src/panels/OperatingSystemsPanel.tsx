@@ -1,5 +1,5 @@
 /**
- * Operating Systems — the OS image library and its acquisition sources
+ * Operating Systems - the OS image library and its acquisition sources
  * (Evaluation Center ISOs, torrent catalog, OEM ISOs, manual URL).
  */
 import { ContentWorkspace } from "../workspaces/ContentWorkspace";

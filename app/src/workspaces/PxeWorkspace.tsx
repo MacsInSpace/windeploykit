@@ -45,7 +45,7 @@ import { toast } from "../state/toastStore";
 
 const PLUGIN_TITLE = "Netboot";
 const BOOT_FILE_NAME = "x86_64-sb/shimx64.efi";
-const MENU_REBUILD_MESSAGE = "Rebuilding PXE menus…";
+const MENU_REBUILD_MESSAGE = "Rebuilding PXE menus...";
 /** Keep overlay visible long enough to read; fast default-only regen can finish in <100ms. */
 const MENU_REBUILD_MIN_MS = 1500;
 const MENU_REBUILD_PAINT_MS = 80;
@@ -60,8 +60,8 @@ const TS_FIELD_LABELS: Record<string, string> = {
   gateway: "Gateway",
   dns1: "DNS",
 };
-/** Canonical editor order (Craig, 2026-08-20): networking block reads IP →
- * Gateway → DNS; dns2/dns3 fold into the dns1 row's add/remove list. */
+/** Canonical editor order (Craig, 2026-08-20): networking block reads IP ->
+ * Gateway -> DNS; dns2/dns3 fold into the dns1 row's add/remove list. */
 const TS_FIELD_ORDER = [
   "computerName",
   "network",
@@ -123,7 +123,7 @@ async function pxeSidecarParams(extra?: Record<string, unknown>) {
   const imageLibraryRoot = await getImageLibraryRoot();
   return { ...(imageLibraryRoot ? { imageLibraryRoot } : {}), ...extra };
 }
-/** Live status poll — skip while tab hidden or fetch in flight. */
+/** Live status poll - skip while tab hidden or fetch in flight. */
 const STATUS_POLL_MS = 8_000;
 
 async function copyFieldValue(label: string, value: string) {
@@ -136,14 +136,14 @@ async function copyFieldValue(label: string, value: string) {
 }
 
 function formatFileSize(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "—";
+  if (!Number.isFinite(bytes) || bytes <= 0) return "-";
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 function formatModified(iso?: string): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   try {
     return new Date(iso).toLocaleString();
   } catch {
@@ -151,7 +151,7 @@ function formatModified(iso?: string): string {
   }
 }
 
-/** Suggested boot-WIM name when extracting from an ISO, e.g. "Win11_23H2" + "boot.wim" → "Win11_23H2-boot.wim". */
+/** Suggested boot-WIM name when extracting from an ISO, e.g. "Win11_23H2" + "boot.wim" -> "Win11_23H2-boot.wim". */
 function formatAge(ageSeconds: number): string {
   if (ageSeconds < 60) return `${ageSeconds}s`;
   if (ageSeconds < 3600) return `${Math.floor(ageSeconds / 60)}m`;
@@ -181,7 +181,7 @@ function safeWimFileName(pathOrName: string): string {
   return name;
 }
 
-/** PXE host settings edited in the panel — batched via Apply / Cancel (one menu rebuild). */
+/** PXE host settings edited in the panel - batched via Apply / Cancel (one menu rebuild). */
 type PxeHostFormSnapshot = {
   httpPort: string;
   interfaceId: string;
@@ -249,7 +249,7 @@ function serviceDotState(running: boolean): SessionState {
   return running ? "connected" : "unknown";
 }
 
-/** Which blocks this mount renders — one MDT node each. */
+/** Which blocks this mount renders - one MDT node each. */
 export type PxeSection = "host" | "pxeLog" | "imagingClients" | "bootImages" | "taskSequences";
 
 const ALL_SECTIONS: PxeSection[] = ["host", "pxeLog", "imagingClients", "bootImages", "taskSequences"];
@@ -316,17 +316,17 @@ export function PxeWorkspace({
   const [imagingLoading, setImagingLoading] = useState(false);
   const [tsExpanded, setTsExpanded] = useState(true);
   const [tsPayload, setTsPayload] = useState<PxeBootTaskSequencesPayload | null>(null);
-  // Editable working copy — Save publishes the whole set.
+  // Editable working copy - Save publishes the whole set.
   const [tsEdit, setTsEdit] = useState<PxeBootTaskSequence[] | null>(null);
   const [tsSelectedId, setTsSelectedId] = useState<string | null>(null);
   const [tsSaving, setTsSaving] = useState(false);
   const [tsNewName, setTsNewName] = useState("");
-  // Sequences whose local-domain machine OU is in "Custom…" free-text mode (the
+  // Sequences whose local-domain machine OU is in "Custom..." free-text mode (the
   // select alone can't tell "custom equals the suggestion" from "picked the suggestion").
   const [tsCustomOuIds, setTsCustomOuIds] = useState<Set<string>>(new Set());
   // Preselected ImageDeployer menu item ("" = tech picks at the device).
   const [tsDefaultId, setTsDefaultId] = useState("");
-  // Visible DNS rows per sequence (1–3; the values live in fields dns1..dns3).
+  // Visible DNS rows per sequence (1-3; the values live in fields dns1..dns3).
   const [tsDnsVisible, setTsDnsVisible] = useState<Record<string, number>>({});
   const [credentialsOpen, setCredentialsOpen] = useState(false);
 
@@ -359,7 +359,7 @@ export function PxeWorkspace({
   const reloadConfig = useCallback(() => {
     // Soft-invalidate: mark the cache stale (forces a real refetch past the TTL) but
     // keep the current data on screen so the whole panel doesn't blank out to
-    // "Loading Netboot status…" for a few seconds during a stop/start cycle.
+    // "Loading Netboot status..." for a few seconds during a stop/start cycle.
     revalidateQueryKey(PXE_BOOT_CONFIG_CACHE_KEY);
     refetchConfig();
   }, [refetchConfig]);
@@ -612,7 +612,7 @@ export function PxeWorkspace({
       const port = typeof portRaw === "number" ? portRaw : parseInt(String(portRaw), 10);
       if (!Number.isFinite(port) || port < 1 || port > 65535) {
         if (overrides?.httpPort === undefined) {
-          toast.error(PLUGIN_TITLE, "HTTP port must be 1–65535.");
+          toast.error(PLUGIN_TITLE, "HTTP port must be 1-65535.");
         }
         return false;
       }
@@ -625,7 +625,7 @@ export function PxeWorkspace({
           tftpMode: overrides?.tftpMode ?? tftpMode,
           skipMenuRegen: opts?.skipMenuRegen ?? overrides?.skipMenuRegen,
         };
-        // Only send when explicitly changed — Start PXE and other saves must not clobber Option 67.
+        // Only send when explicitly changed - Start PXE and other saves must not clobber Option 67.
         if (overrides?.tftpBootFile !== undefined) {
           params.tftpBootFile = overrides.tftpBootFile;
         }
@@ -742,7 +742,7 @@ export function PxeWorkspace({
     if (!hostFormDirty || busy || loading || menuRebuildMessage) return;
     const port = parseInt(httpPort.trim(), 10);
     if (!Number.isFinite(port) || port < 1 || port > 65535) {
-      toast.error(PLUGIN_TITLE, "HTTP port must be 1–65535.");
+      toast.error(PLUGIN_TITLE, "HTTP port must be 1-65535.");
       return;
     }
     const saved = savedFormRef.current;
@@ -835,7 +835,7 @@ export function PxeWorkspace({
     async (sourcePath: string, targetFileName: string, replaceExisting: boolean) => {
       setBusy(true);
       try {
-        toast.info(PLUGIN_TITLE, "Copying WIM into local store — large files may take several minutes.");
+        toast.info(PLUGIN_TITLE, "Copying WIM into local store - large files may take several minutes.");
         const result = await sidecar.invoke<ImportPxeBootWimResult>("ImportPxeBootWim", {
           sourcePath,
           targetFileName,
@@ -907,7 +907,7 @@ export function PxeWorkspace({
       const target = targetFileName ?? suggestedIsoWimName(isoPath, entry.name);
       setBusy(true);
       try {
-        toast.info(PLUGIN_TITLE, `Extracting ${entry.name} from ISO — large images may take several minutes.`);
+        toast.info(PLUGIN_TITLE, `Extracting ${entry.name} from ISO - large images may take several minutes.`);
         const result = await sidecar.invoke<ImportPxeBootWimResult>("ImportPxeBootWimFromIso", {
           isoPath,
           wimPath: entry.path,
@@ -951,7 +951,7 @@ export function PxeWorkspace({
     let listing: ListPxeBootIsoWimsResult;
     setBusy(true);
     try {
-      toast.info(PLUGIN_TITLE, "Inspecting ISO for boot images…");
+      toast.info(PLUGIN_TITLE, "Inspecting ISO for boot images...");
       listing = await sidecar.invoke<ListPxeBootIsoWimsResult>("ListPxeBootIsoWims", { isoPath: picked });
     } catch (e) {
       toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
@@ -1006,7 +1006,7 @@ export function PxeWorkspace({
     await withMenuRebuild(async () => {
       const library = await sidecar.invoke<PxeBootWimLibraryResponse>("SetPxeBootDefaultWim", { clear: true });
       applyLibrary(library, { retainStatus: true });
-      toast.info(PLUGIN_TITLE, "No default WIM — clients pick from the PXE menu. Menu updates immediately.");
+      toast.info(PLUGIN_TITLE, "No default WIM - clients pick from the PXE menu. Menu updates immediately.");
     });
   }, [applyLibrary, withMenuRebuild]);
 
@@ -1042,7 +1042,7 @@ export function PxeWorkspace({
       if (status?.platform === "macos" && !status?.macOsAdminCredentialCached) {
         toast.info(
           PLUGIN_TITLE,
-          "Enter your administrator password — boot setup continues in the background.",
+          "Enter your administrator password - boot setup continues in the background.",
         );
       }
       if (!(await persistConfig(undefined, { skipMenuRegen: true }))) return;
@@ -1061,7 +1061,7 @@ export function PxeWorkspace({
       if (s.httpRunning && s.tftpRunning) {
         toast.info(PLUGIN_TITLE, "TFTP + HTTP started.");
       } else if (s.httpRunning && s.tftpLastError) {
-        toast.info(PLUGIN_TITLE, "HTTP started. TFTP was not started — see TFTP section below.");
+        toast.info(PLUGIN_TITLE, "HTTP started. TFTP was not started - see TFTP section below.");
       } else if (s.httpRunning) {
         toast.info(PLUGIN_TITLE, "HTTP started.");
       } else if (s.tftpRunning) {
@@ -1086,7 +1086,7 @@ export function PxeWorkspace({
           if (status?.platform === "macos" && !status?.macOsAdminCredentialCached) {
             toast.info(
               PLUGIN_TITLE,
-              "Enter your administrator password — TFTP setup continues in the background.",
+              "Enter your administrator password - TFTP setup continues in the background.",
             );
           }
           if (!(await persistConfig(undefined, { skipMenuRegen: true }))) return;
@@ -1097,8 +1097,8 @@ export function PxeWorkspace({
             toast.info(
               PLUGIN_TITLE,
               s.tftpElevated
-                ? "TFTP server started (port 69 — administrator approved)."
-                : "TFTP server started (port 69 — snponly.efi).",
+                ? "TFTP server started (port 69 - administrator approved)."
+                : "TFTP server started (port 69 - snponly.efi).",
             );
           }
         } else {
@@ -1208,7 +1208,7 @@ export function PxeWorkspace({
         label: "IP",
         width: 110,
         sortValue: (r) => r.ip ?? "",
-        render: (r) => r.ip ?? "—",
+        render: (r) => r.ip ?? "-",
       },
       {
         key: "model",
@@ -1244,7 +1244,7 @@ export function PxeWorkspace({
             name="pxe-default-wim"
             checked={r.isDefault}
             disabled={busy || !!menuRebuildMessage}
-            title="Default — boots this WIM via wimboot at PXE"
+            title="Default - boots this WIM via wimboot at PXE"
             onChange={() => void setDefaultWim(r.fileName)}
           />
         ),
@@ -1301,11 +1301,11 @@ export function PxeWorkspace({
   const smbShareUnc = lanIp
     ? `\\\\${lanIp}\\${smbShareName}`
     : data?.smbShare?.unc ?? `\\\\<host>\\${smbShareName}`;
-  const smbShareTooltip = `${smbShareName} — hidden, read-only, shared when imaging services start.\n${smbSharePath} → ${smbShareUnc}\nImageDeployer maps it as Z: (WIMs\\, Drivers\\<model>)${
+  const smbShareTooltip = `${smbShareName} - hidden, read-only, shared when imaging services start.\n${smbSharePath} -> ${smbShareUnc}\nImageDeployer maps it as Z: (WIMs\\, Drivers\\<model>)${
     data?.smbShare?.authUser ? `. Auth: ${data.smbShare.authDomain ?? "WORKGROUP"}\\${data.smbShare.authUser}` : ""
   }`;
   const tftpBootFiles = status?.tftpBootFiles ?? [];
-  /** Saved Option 67 path — local form state, then config/status (never router poll alone). */
+  /** Saved Option 67 path - local form state, then config/status (never router poll alone). */
   const bootFileName =
     tftpBootFile ||
     data?.config?.tftpBootFile ||
@@ -1371,7 +1371,7 @@ export function PxeWorkspace({
                 title={hasLanIp ? undefined : "Connect Ethernet and select an adapter first"}
                 onClick={() => void startServices()}
               >
-                {busy ? "Working…" : "Start services"}
+                {busy ? "Working..." : "Start services"}
               </button>
               <button
                 className="btn"
@@ -1388,13 +1388,13 @@ export function PxeWorkspace({
         <div className="flex min-h-0 flex-1 flex-col gap-4 p-4">
           {loading && (
             <p className="text-[12px]" style={{ color: "var(--text2)" }}>
-              Loading Netboot status…
+              Loading Netboot status...
             </p>
           )}
 
           {refreshing && (
             <p className="text-[12px]" style={{ color: "var(--text3)" }}>
-              Refreshing…
+              Refreshing...
             </p>
           )}
 
@@ -1453,8 +1453,8 @@ export function PxeWorkspace({
                   <p className="mb-3 text-[12px] leading-snug" style={{ color: "var(--amber)" }}>
                     {status?.lanIpHint ??
                       (adapters.length > 0
-                        ? "Select the Ethernet adapter below — default route may be VPN (Tailscale is ignored for PXE)."
-                        : "No usable IPv4 — plug in Ethernet and wait for DHCP. VPN/Tailscale alone cannot be the PXE host IP.")}
+                        ? "Select the Ethernet adapter below - the default route is not a usable PXE address."
+                        : "No usable IPv4 - plug in Ethernet and wait for DHCP. PXE needs a real LAN address.")}
                   </p>
                 )}
 
@@ -1539,13 +1539,13 @@ export function PxeWorkspace({
                           TFTP
                         </span>
                         <span className="mono text-[10px]" style={{ color: "var(--text3)" }}>
-                          Port 69 · {bootFileName}
+                          Port 69 | {bootFileName}
                           {status?.platform === "macos" && !status?.tftpRunning
                             ? status?.macOsAdminCredentialCached
-                              ? " · admin cached"
+                              ? " | admin cached"
                               : status?.localMachineCredentialConfigured
-                                ? " · saved in Credentials"
-                                : " · admin for port 69"
+                                ? " | saved in Credentials"
+                                : " | admin for port 69"
                             : ""}
                         </span>
                       </span>
@@ -1594,7 +1594,7 @@ export function PxeWorkspace({
                       !status?.macOsAdminCredentialCached &&
                       status?.localMachineCredentialConfigured && (
                       <div className="px-0.5 text-[10px]" style={{ color: "var(--text3)" }}>
-                        Local administrator saved in Infrastructure credentials — loads automatically
+                        Local administrator saved in Infrastructure credentials - loads automatically
                         when TFTP starts, or use Load session in that dialog.
                       </div>
                     )}
@@ -1620,7 +1620,7 @@ export function PxeWorkspace({
                           HTTP
                         </span>
                         <span className="mono text-[10px]" style={{ color: "var(--text3)" }}>
-                          Port {httpPort.trim() || "8080"} · wimboot + WIMs
+                          Port {httpPort.trim() || "8080"} | wimboot + WIMs
                         </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
@@ -1663,7 +1663,7 @@ export function PxeWorkspace({
                         style={{ borderColor: "var(--amber)", background: "var(--surface)" }}
                       >
                         <p style={{ color: "var(--amber)" }}>
-                          HTTP is off — clients cannot load the local boot menu. Turn HTTP on before booting.
+                          HTTP is off - clients cannot load the local boot menu. Turn HTTP on before booting.
                         </p>
                       </div>
                     )}
@@ -1680,8 +1680,8 @@ export function PxeWorkspace({
                           SMB
                         </span>
                         <span className="mono text-[10px]" style={{ color: "var(--text3)" }}>
-                          {data?.smbShare?.shareName ?? "Deploy$"} · hidden, read-only
-                          {data?.smbShare?.authUser ? ` · ${data.smbShare.authDomain ?? "WORKGROUP"}\\${data.smbShare.authUser}` : ""}
+                          {data?.smbShare?.shareName ?? "Deploy$"} | hidden, read-only
+                          {data?.smbShare?.authUser ? ` | ${data.smbShare.authDomain ?? "WORKGROUP"}\\${data.smbShare.authUser}` : ""}
                         </span>
                       </span>
                       <span className="flex shrink-0 items-center gap-2">
@@ -1709,7 +1709,7 @@ export function PxeWorkspace({
                         style={{ borderColor: "var(--amber)", background: "var(--surface)" }}
                       >
                         <p style={{ color: "var(--amber)" }}>
-                          {data?.smbShare?.tccBlocked ? "⚠ " : null}
+                          {data?.smbShare?.tccBlocked ? "! " : null}
                           {data?.smbShare?.guidance || data?.smbShare?.error}
                         </p>
                         {data?.smbShare?.tccBlocked && (
@@ -1871,7 +1871,7 @@ export function PxeWorkspace({
                   <div className="mt-3">
                     <div className="mb-2 flex items-center gap-2">
                       <p className="text-[11px]" style={{ color: "var(--text3)" }}>
-                        Live TFTP requests from dnsmasq — which client fetched which boot file. Last{" "}
+                        Live TFTP requests from dnsmasq - which client fetched which boot file. Last{" "}
                         {logTail?.lines?.length ?? 0} lines.
                       </p>
                       <button
@@ -1880,7 +1880,7 @@ export function PxeWorkspace({
                         disabled={logLoading}
                         onClick={() => void refreshLog()}
                       >
-                        {logLoading ? "Refreshing…" : "Refresh"}
+                        {logLoading ? "Refreshing..." : "Refresh"}
                       </button>
                       <button
                         type="button"
@@ -1910,8 +1910,8 @@ export function PxeWorkspace({
                         {logTail && logTail.available
                           ? logTail.lines.length > 0
                             ? logTail.lines.join("\n")
-                            : "(log file is empty — start TFTP, then PXE-boot a client)"
-                          : '(no TFTP log yet — start TFTP under "PXE on this host")'}
+                            : "(log file is empty - start TFTP, then PXE-boot a client)"
+                          : '(no TFTP log yet - start TFTP under "PXE on this host")'}
                       </pre>
                     </div>
                   </div>
@@ -1946,7 +1946,7 @@ export function PxeWorkspace({
                   <div className="mt-3">
                     <div className="mb-2 flex items-center gap-2">
                       <p className="text-[11px]" style={{ color: "var(--text3)" }}>
-                        Devices running ImageDeployer push their deployment log here live — select one to tail it.
+                        Devices running ImageDeployer push their deployment log here live - select one to tail it.
                       </p>
                       <button
                         type="button"
@@ -1954,7 +1954,7 @@ export function PxeWorkspace({
                         disabled={imagingLoading}
                         onClick={() => void refreshImagingClients()}
                       >
-                        {imagingLoading ? "Refreshing…" : "Refresh"}
+                        {imagingLoading ? "Refreshing..." : "Refresh"}
                       </button>
                       <button
                         type="button"
@@ -1968,7 +1968,7 @@ export function PxeWorkspace({
                     </div>
                     {(imagingClients?.length ?? 0) === 0 ? (
                       <p className="px-1 py-4 text-center text-[12px]" style={{ color: "var(--text3)" }}>
-                        No imaging clients yet — devices appear here once ImageDeployer starts logging.
+                        No imaging clients yet - devices appear here once ImageDeployer starts logging.
                       </p>
                     ) : (
                       <DataTable
@@ -2003,7 +2003,7 @@ export function PxeWorkspace({
                                 ? imagingLog.lines.join("\n")
                                 : "(log is empty)"
                               : "(no log stored for this device)"
-                            : "Loading…"}
+                            : "Loading..."}
                         </pre>
                       </div>
                     ) : null}
@@ -2029,10 +2029,10 @@ export function PxeWorkspace({
                 </div>
                 <div className="mb-3 flex flex-wrap gap-2">
                   <button className="btn" type="button" disabled={busy || loading} onClick={() => void importWim()}>
-                    Add WIM…
+                    Add WIM...
                   </button>
                   <button className="btn" type="button" disabled={busy || loading} onClick={() => void extractWimFromIso()}>
-                    Extract WIM from ISO…
+                    Extract WIM from ISO...
                   </button>
                   <button className="btn" type="button" disabled={loading} onClick={() => void openWimFolder()}>
                     Open WIM folder
@@ -2040,7 +2040,7 @@ export function PxeWorkspace({
                 </div>
                 {wims.length === 0 ? (
                   <p className="text-[12px]" style={{ color: "var(--text2)" }}>
-                    No boot WIMs — use Add WIM… to import one.
+                    No boot WIMs - use Add WIM... to import one.
                   </p>
                 ) : (
                   <DataTable columns={wimColumns} rows={wims} rowKey={(r) => r.fileName} />
@@ -2074,7 +2074,7 @@ export function PxeWorkspace({
                         className="text-[11px]"
                         style={{ color: "var(--text3)" }}
                         title={
-                          "Published to TaskSequences/ in the deploy share — pick one in ImageDeployer's Task Sequence menu. " +
+                          "Published to TaskSequences/ in the deploy share - pick one in ImageDeployer's Task Sequence menu. " +
                           "{{SITE}}, {{SERIAL}} and the connect credentials fill on the device at deploy time, so no secrets are stored here."
                         }
                       >
@@ -2083,7 +2083,7 @@ export function PxeWorkspace({
                       <label
                         className="mono ml-auto flex items-center gap-1.5 text-[10px] uppercase tracking-wider"
                         style={{ color: "var(--text3)" }}
-                        title="Preselected in ImageDeployer's Task Sequence menu at Connect — set one for touch-free deployments. The tech can still change it on the device."
+                        title="Preselected in ImageDeployer's Task Sequence menu at Connect - set one for touch-free deployments. The tech can still change it on the device."
                       >
                         Default at boot
                         <select
@@ -2091,7 +2091,7 @@ export function PxeWorkspace({
                           value={tsDefaultId}
                           onChange={(e) => setTsDefaultId(e.target.value)}
                         >
-                          <option value="">(none — clean OOBE / Intune)</option>
+                          <option value="">(none - clean OOBE / Intune)</option>
                           {(tsEdit ?? [])
                             .filter((s) => s.enabled)
                             .map((s) => (
@@ -2111,7 +2111,7 @@ export function PxeWorkspace({
                         title={tsValidationError ?? undefined}
                         onClick={() => void saveTaskSequences()}
                       >
-                        {tsSaving ? "Saving…" : tsValidationError ? "Fix fields to save" : "Save & publish"}
+                        {tsSaving ? "Saving..." : tsValidationError ? "Fix fields to save" : "Save & publish"}
                       </button>
                     </div>
                     {(tsEdit ?? []).map((seq) => {
@@ -2170,7 +2170,7 @@ export function PxeWorkspace({
                               title={selected ? "Collapse" : "Edit fields"}
                               onClick={() => setTsSelectedId(selected ? null : seq.id)}
                             >
-                              {selected ? "▾" : "▸"}
+                              {selected ? "v" : ">"}
                             </button>
                             <button
                               type="button"
@@ -2180,7 +2180,7 @@ export function PxeWorkspace({
                                 setTsEdit((prev) => (prev ?? []).filter((s) => s.id !== seq.id))
                               }
                             >
-                              ✕
+                              x
                             </button>
                           </div>
                           {selected ? (
@@ -2237,9 +2237,9 @@ export function PxeWorkspace({
                                       style={{ color: "var(--text2)" }}
                                       title={
                                         key === "joinCredential"
-                                          ? "Join credentials are filled in on the device at deploy time, or taken from a stored credential when one is selected — never written into the published file."
+                                          ? "Join credentials are filled in on the device at deploy time, or taken from a stored credential when one is selected - never written into the published file."
                                           : key === "computerName"
-                                            ? "Always prefixed with the site id — servers as {{SITE}}…, everything else as {{SITE}}-… (enforced at publish)."
+                                            ? "Always prefixed with the site id - servers as {{SITE}}..., everything else as {{SITE}}-... (enforced at publish)."
                                             : undefined
                                       }
                                     >
@@ -2250,7 +2250,7 @@ export function PxeWorkspace({
                                         <span
                                           className="mono rounded border px-1.5 text-[11px] leading-[24px]"
                                           style={{ borderColor: "var(--border)", color: "var(--text3)", background: "var(--surface2)" }}
-                                          title="Site id prefix — locked; resolved on the device at deploy"
+                                          title="Site id prefix - locked; resolved on the device at deploy"
                                         >
                                           {(siteId ?? "{{SITE}}") + (seq.kind === "server" ? "" : "-")}
                                         </span>
@@ -2265,7 +2265,7 @@ export function PxeWorkspace({
                                       <select
                                         className="input-box mono h-[26px] text-[11px]"
                                         value={seq.fields[key]}
-                                        title="From the GSV KMS catalog — blank uses the role default"
+                                        title="From the GSV KMS catalog - blank uses the role default"
                                         onChange={(e) => setField(e.target.value)}
                                       >
                                         <option value="">(role default)</option>
@@ -2381,9 +2381,9 @@ export function PxeWorkspace({
                                                   }
                                                 }}
                                               >
-                                                <option value="">(none — AD default)</option>
+                                                <option value="">(none - AD default)</option>
                                                 {suggestion ? <option value={suggestion}>{suggestion}</option> : null}
-                                                <option value="__custom__">Custom…</option>
+                                                <option value="__custom__">Custom...</option>
                                               </select>
                                               {isCustom ? (
                                                 <input
@@ -2448,7 +2448,7 @@ export function PxeWorkspace({
                                                       setTsDnsVisible((prev) => ({ ...prev, [seq.id]: visible - 1 }));
                                                     }}
                                                   >
-                                                    −
+                                                    -
                                                   </button>
                                                 ) : null}
                                                 {i === visible - 1 && visible < 3 ? (
@@ -2504,7 +2504,7 @@ export function PxeWorkspace({
                                     );
                                   }}
                                 >
-                                  <option value="">+ add group…</option>
+                                  <option value="">+ add group...</option>
                                   {(tsPayload?.adminGroupOptions ?? [])
                                     .filter((g) => !(seq.adminGroups ?? []).includes(g))
                                     .map((g) => (
@@ -2516,7 +2516,7 @@ export function PxeWorkspace({
                               </div>
                               {(seq.adminGroups ?? []).length === 0 ? (
                                 <p className="text-[11px]" style={{ color: "var(--text3)" }}>
-                                  None — no domain groups added to Administrators.
+                                  None - no domain groups added to Administrators.
                                 </p>
                               ) : (
                                 <div className="flex flex-wrap gap-1.5">
@@ -2540,7 +2540,7 @@ export function PxeWorkspace({
                                           )
                                         }
                                       >
-                                        ✕
+                                        x
                                       </button>
                                     </span>
                                   ))}
@@ -2592,7 +2592,7 @@ export function PxeWorkspace({
                               </div>
                               {(seq.steps ?? []).length === 0 ? (
                                 <p className="text-[11px]" style={{ color: "var(--text3)" }}>
-                                  None — nothing runs at first boot beyond Windows setup itself.
+                                  None - nothing runs at first boot beyond Windows setup itself.
                                 </p>
                               ) : (
                                 (seq.steps ?? []).map((step, idx) => {
@@ -2636,16 +2636,16 @@ export function PxeWorkspace({
                                         </span>
                                         <input
                                           className="input-box mono h-[22px] flex-1 text-[10px]"
-                                          placeholder="Description…"
+                                          placeholder="Description..."
                                           value={step.description}
                                           spellCheck={false}
                                           onChange={(e) => updateStep({ description: e.target.value })}
                                         />
                                         <button type="button" className="mono text-[10px]" style={{ color: "var(--text3)" }} disabled={idx === 0} title="Move up" onClick={() => moveStep(-1)}>
-                                          ↑
+                                          ^
                                         </button>
                                         <button type="button" className="mono text-[10px]" style={{ color: "var(--text3)" }} disabled={idx === (seq.steps?.length ?? 0) - 1} title="Move down" onClick={() => moveStep(1)}>
-                                          ↓
+                                          v
                                         </button>
                                         <button
                                           type="button"
@@ -2662,7 +2662,7 @@ export function PxeWorkspace({
                                             )
                                           }
                                         >
-                                          ✕
+                                          x
                                         </button>
                                       </div>
                                       {step.type === "reg" ? (
@@ -2715,7 +2715,7 @@ export function PxeWorkspace({
                                       ) : (
                                         <input
                                           className="input-box mono h-[22px] w-full text-[10px]"
-                                          placeholder={step.type === "pwsh" ? "PowerShell command…" : "Command…"}
+                                          placeholder={step.type === "pwsh" ? "PowerShell command..." : "Command..."}
                                           value={step.command ?? ""}
                                           spellCheck={false}
                                           onChange={(e) => updateStep({ command: e.target.value })}
@@ -2733,7 +2733,7 @@ export function PxeWorkspace({
                     <div className="mt-2 flex items-center gap-2">
                       <input
                         className="input-box mono h-[26px] flex-1 text-[11px]"
-                        placeholder="New sequence name…"
+                        placeholder="New sequence name..."
                         value={tsNewName}
                         spellCheck={false}
                         onChange={(e) => setTsNewName(e.target.value)}

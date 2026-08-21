@@ -1,7 +1,7 @@
 /**
- * Monitoring — both deployment logs in one place.
- *   • PXE activity log   (dnsmasq/TFTP: which client fetched which boot file)
- *   • Imaging clients    (per-device log streamed back during deployment)
+ * Monitoring - both deployment logs in one place.
+ *   * PXE activity log   (dnsmasq/TFTP: which client fetched which boot file)
+ *   * Imaging clients    (per-device log streamed back during deployment)
  * Both are clearable.
  */
 import { PxeWorkspace } from "../workspaces/PxeWorkspace";

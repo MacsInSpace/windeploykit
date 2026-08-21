@@ -12,7 +12,7 @@
 # Prerequisites ON THE BUILD MACHINE ONLY:
 #   - Xcode CLT + Developer ID cert in Keychain (codesign + notarization)
 #   - Node 18+, Rust (./scripts/bootstrap-frontend.sh)
-#   - Network to http://timestamp.apple.com (Apple TSA — required for signing)
+#   - Network to http://timestamp.apple.com (Apple TSA - required for signing)
 #   - Network when using --bundle-pwsh (downloads portable PowerShell)
 #
 # Usage:
@@ -96,13 +96,13 @@ macos_signing_identity() {
 }
 
 # Vendored Mach-O helpers (dnsmasq, wimlib, Intune packager) must be signed with hardened
-# runtime + timestamp before Tauri bundles them — otherwise notarization rejects the .app.
+# runtime + timestamp before Tauri bundles them - otherwise notarization rejects the .app.
 sign_macos_staged_binaries() {
   local staged="${repo_root}/packaging/staged/binaries"
   local identity bin ft
   identity="$(macos_signing_identity)"
   if [[ -z "${identity}" ]]; then
-    log "WARN: no macOS signingIdentity — skipping staged binary codesign"
+    log "WARN: no macOS signingIdentity - skipping staged binary codesign"
     return 0
   fi
   if [[ ! -d "${staged}" ]]; then
@@ -120,7 +120,7 @@ sign_macos_staged_binaries() {
 
   # Vendored PSWSMan dylibs (macOS Remote PowerShell patch payload) ship inside
   # sidecar/vendor/pswsman/. Notarization rejects them unsigned. Signing happens on
-  # the STAGED copies only — the repo copies stay byte-identical to upstream PSWSMan
+  # the STAGED copies only - the repo copies stay byte-identical to upstream PSWSMan
   # (SHA256SUMS.txt). The in-app patched check compares staged copy vs $PSHOME, so
   # signed hashes stay consistent end-to-end.
   local pswsman="${repo_root}/packaging/staged/sidecar/vendor/pswsman"
@@ -196,7 +196,7 @@ write_install_readme() {
   local out_dir="$1"
   local artifact_arch="$2"
   cat > "${out_dir}/README-INSTALL.txt" <<EOF
-WinDeployKit ${version} — macOS install
+WinDeployKit ${version} - macOS install
 ============================================
 
 Built: $(date -u '+%Y-%m-%d %H:%M UTC')
@@ -223,14 +223,14 @@ INSTALL
 -------
 1. Install PowerShell 7+ if not already present (see above).
 2. Copy "WinDeployKit.app" to /Applications (or run from this folder).
-3. First launch: if Gatekeeper blocks the app, open System Settings →
-   Privacy & Security → Allow, or right-click the app → Open once.
+3. First launch: if Gatekeeper blocks the app, open System Settings ->
+   Privacy & Security -> Allow, or right-click the app -> Open once.
 4. Sign in with your EDU001 credentials when prompted.
 
 NETWORK
 -------
 You must reach school STADC/EDUDC (on-site or VPN). Off-WAN testing uses NPS_*
-env vars — see app/README.md (developers only).
+env vars - see app/README.md (developers only).
 
 UPDATES
 -------
@@ -385,7 +385,7 @@ ensure_rust_targets "${build_targets[@]}"
 tauri_target="${app_dir}/src-tauri/target"
 if [[ "${do_clean}" == "true" && -d "${tauri_target}" ]]; then
   if ! "${repo_root}/scripts/clean-tauri-target.sh" --check 2>/dev/null; then
-    log "Stale Cargo/Tauri target (paths from another folder) — cleaning"
+    log "Stale Cargo/Tauri target (paths from another folder) - cleaning"
   else
     log "Cleaning Cargo/Tauri target before release build"
   fi
@@ -396,7 +396,7 @@ export CARGO_TARGET_DIR="${tauri_target}"
 export VITE_BUILD_NUMBER="${git_sha}-${build_stamp}"
 export VITE_BUILD_STAMP="${build_stamp_date}"
 export VITE_APP_VERSION="$(cd "${app_dir}" && node -p "require('./package.json').version")"
-log "Frontend build id: ${VITE_APP_VERSION} · ${VITE_BUILD_NUMBER}"
+log "Frontend build id: ${VITE_APP_VERSION} | ${VITE_BUILD_NUMBER}"
 
 built_apps=()
 stage_intune_mac_packager() {
@@ -412,7 +412,7 @@ stage_intune_mac_packager() {
   elif command -v dotnet >/dev/null 2>&1; then
     log "Building ${name} (no vendored copy)"
   else
-    log "WARN: missing ${vendor} and dotnet not on PATH — Intune packaging unavailable in bundle"
+    log "WARN: missing ${vendor} and dotnet not on PATH - Intune packaging unavailable in bundle"
   fi
 }
 
@@ -424,7 +424,7 @@ stage_intune_mac_packager() {
 DEPLOYKIT_MACOS_SIGN_IDENTITY="$(macos_signing_identity)"
 export DEPLOYKIT_MACOS_SIGN_IDENTITY
 if [[ -z "${DEPLOYKIT_MACOS_SIGN_IDENTITY}" ]]; then
-  log "WARN: no macOS signingIdentity in tauri.conf.json — staged binaries stay adhoc (notarization will fail)"
+  log "WARN: no macOS signingIdentity in tauri.conf.json - staged binaries stay adhoc (notarization will fail)"
 fi
 
 for build_target in "${build_targets[@]}"; do
@@ -494,11 +494,11 @@ log "Done. Hand off:"
 for z in "${zip_paths[@]}"; do
   log "  ${z}"
 done
-log "NPS / macOS TCC: launch the .app above — tauri:dev does not reproduce network-volume prompts"
+log "NPS / macOS TCC: launch the .app above - tauri:dev does not reproduce network-volume prompts"
 
 if [[ "${do_sync}" == "true" ]]; then
   if command -v pwsh >/dev/null 2>&1; then
-# Correct — build a single comma-separated array value
+# Correct - build a single comma-separated array value
 extra_zips_arg=()
 if [[ "${#sync_extra_paths[@]}" -gt 0 ]]; then
   IFS=',' joined="${sync_extra_paths[*]}"
@@ -508,6 +508,6 @@ fi
     -Platform Mac -Version "${version}" -ZipPath "${primary_zip}" \
     "${extra_zips_arg[@]}" "${pkg_extra[@]}"
   else
-    log "pwsh not on PATH — skipping post-build git/release prompts (install PowerShell 7+)"
+    log "pwsh not on PATH - skipping post-build git/release prompts (install PowerShell 7+)"
   fi
 fi

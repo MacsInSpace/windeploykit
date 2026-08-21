@@ -1,12 +1,12 @@
-# Vendor SCCM catalog refresh — USM-side, all four vendors uniformly.
+# Vendor SCCM catalog refresh - USM-side, all four vendors uniformly.
 #
 # Replaces the GitLab CI job `refresh:vendor-sccm-catalogs` (removed 2026-08-18, Craig's
-# call: the catalogs should have ONE refresh path, and CI could no longer cover Acer —
+# call: the catalogs should have ONE refresh path, and CI could no longer cover Acer -
 # the discovery pages sit behind fingerprint-level bot mitigation that blocks curl from
-# any network, while a real browser passes; see AGENT_NOTES_PXE_DRIVERS §12).
+# any network, while a real browser passes; see AGENT_NOTES_PXE_DRIVERS section 12).
 #
-#   Dell / HP / Lenovo — sidecar curl via the existing catalog libs (verified curl-clean).
-#   Acer               — AcerCatalog.xml over curl (open CDN host; friendly model names +
+#   Dell / HP / Lenovo - sidecar curl via the existing catalog libs (verified curl-clean).
+#   Acer               - AcerCatalog.xml over curl (open CDN host; friendly model names +
 #                        per-pack MD5) merged into the cached URL list. The XML only covers
 #                        current TravelMate P-lines, so when the last full browser harvest
 #                        of the community KB is missing or >60 days old the response flags
@@ -14,7 +14,7 @@
 #                        hidden-webview harvest (Rust `harvest_acer_sccm_urls`).
 #
 # Floors mirror the retired CI guard rails: below-floor results are recorded and the
-# cache is still written (warn-inside-window house style) — the caller surfaces the
+# cache is still written (warn-inside-window house style) - the caller surfaces the
 # warning; genuine rot shows up as staleness, not silent absence.
 
 $script:AppVendorSccmCatalogFloors = @{
@@ -28,7 +28,7 @@ $script:AppVendorSccmCatalogFloors = @{
 function Invoke-AppVendorSccmCatalogRefresh {
     <#
     .SYNOPSIS
-        Force-refresh all four vendor catalogs live over curl (per-vendor isolation — one
+        Force-refresh all four vendor catalogs live over curl (per-vendor isolation - one
         vendor failing never blocks the others). Acer uses AcerCatalog.xml merged into the
         cached URL list; the response also says whether the app should top up coverage
         with a browser harvest of the KB page (Set-AppAcerSccmCatalogFromHarvest).
@@ -86,11 +86,11 @@ function Invoke-AppVendorSccmCatalogRefresh {
         $entry.floor = $floor
         if ($entry.ok -and $floor -gt 0 -and $entry.count -lt $floor) {
             $entry.belowFloor = $true
-            Write-SidecarLog "vendor catalogs: $vendor refreshed with $($entry.count) models — below the $floor floor (source may have broken)"
+            Write-SidecarLog "vendor catalogs: $vendor refreshed with $($entry.count) models - below the $floor floor (source may have broken)"
         } elseif ($entry.ok) {
             Write-SidecarLog "vendor catalogs: $vendor refreshed ($($entry.count) models)"
         } else {
-            Write-SidecarLog "vendor catalogs: $vendor refresh failed — $($entry.error)"
+            Write-SidecarLog "vendor catalogs: $vendor refresh failed - $($entry.error)"
         }
         [void]$results.Add($entry)
     }
@@ -108,7 +108,7 @@ function Invoke-AppVendorSccmCatalogRefresh {
 
 # --- Background refresh (child pwsh process) --------------------------------
 # The synchronous refresh curled five vendor catalogs inside the single-threaded
-# dispatch loop — every panel's IPC queued behind it for up to minutes (the exact
+# dispatch loop - every panel's IPC queued behind it for up to minutes (the exact
 # blocking pattern the runspace downloads fixed). An in-process runspace can't
 # safely re-load the catalog libs (they lean on much of the sidecar), but a child
 # pwsh PROCESS can: scripts/refresh-vendor-sccm-catalogs.ps1 already proves the
@@ -209,7 +209,7 @@ function Sync-AppVendorSccmCatalogRefreshJob {
 }
 
 function Stop-AppVendorSccmCatalogRefreshJob {
-    # Shutdown cleanup only — no event (the app is going away).
+    # Shutdown cleanup only - no event (the app is going away).
     $job = $script:AppVendorSccmCatalogRefreshJob
     if (-not $job) { return }
     $script:AppVendorSccmCatalogRefreshJob = $null
@@ -224,7 +224,7 @@ function Set-AppAcerSccmCatalogFromHarvest {
         Validate and store a browser-harvested Acer URL list as the live Acer catalog
         cache. Normalises hrefs (Acer's KB contains an http://https// typo link), keeps
         only global-download.acer.com pack files, and enforces the CI-era floors before
-        overwriting the cache — a bad harvest can never clobber a good catalog.
+        overwriting the cache - a bad harvest can never clobber a good catalog.
     #>
     param(
         [Parameter(Mandatory)][string[]]$Urls,

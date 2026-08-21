@@ -1,7 +1,7 @@
-# Field PXE boot helper — local HTTP (WIM/wimboot) + TFTP (snponly.efi).
+# Field PXE boot helper - local HTTP (WIM/wimboot) + TFTP (snponly.efi).
 # Optional WAN menu/catalog: deploy.example.com (hidden when local-HTTP-only). See docs/plugins/netboot/AGENT_NOTES_PXE_BOOT.md.
 
-# Laptop/workstation field PXE only — no deploy.example.com chains in menus or snponly fallback.
+# Laptop/workstation field PXE only - no deploy.example.com chains in menus or snponly fallback.
 # Set $false to re-enable WAN catalog items and deploy_base fallbacks.
 $script:AppPxeBootLocalHttpOnly = $true
 $script:AppPxeBootDefaultTftpBootFile = 'x86_64-sb/shimx64.efi'
@@ -31,12 +31,12 @@ $script:AppPxeBootState = @{
     # @{ Listener; Runspace; PowerShell; Port } while running, else $null.
     LogIngest            = $null
     # Last "user|mode" the overlay credential publish logged at info level (repeat
-    # publishes of the same identity log verbose — they fire on every menu regen).
+    # publishes of the same identity log verbose - they fire on every menu regen).
     LastOverlayCredPublishKey = $null
 }
 
 $script:AppPxeBootStoreInitializing = $false
-# Keep in sync with packaging/p7zip-tools.json (runtime install — not bundled in signed macOS pkg).
+# Keep in sync with packaging/p7zip-tools.json (runtime install - not bundled in signed macOS pkg).
 $script:AppPxeBootP7zipPinnedVersion = '17.06'
 $script:AppPxeBootP7zipInstallInProgress = $false
 $script:AppPxeBootFieldIsoManifestCache = $null
@@ -156,7 +156,7 @@ function Read-AppPxeBootConfig {
         }
         return [pscustomobject]$defaults
     } catch {
-        Write-SidecarLog "PXE boot: config read failed — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: config read failed - $($_.Exception.Message)"
         return [pscustomobject]$defaults
     }
 }
@@ -180,7 +180,7 @@ function Write-AppPxeBootConfig {
         [bool]$IsoMountServe
     )
     $existing = Read-AppPxeBootConfig
-    # Use a distinct name — PowerShell treats $TftpBootFile and $tftpBootFile as the same variable.
+    # Use a distinct name - PowerShell treats $TftpBootFile and $tftpBootFile as the same variable.
     $storedTftpBootFile = if ($existing.tftpBootFile) { [string]$existing.tftpBootFile } else { $script:AppPxeBootDefaultTftpBootFile }
     if ($PSBoundParameters.ContainsKey('TftpBootFile')) {
         if ([string]::IsNullOrWhiteSpace($TftpBootFile)) {
@@ -188,7 +188,7 @@ function Write-AppPxeBootConfig {
         } else {
             $storedTftpBootFile = Get-AppPxeBootSafeTftpBootFileName -FileName $TftpBootFile
             if (-not (Test-AppPxeBootTftpBootFileExists -RelativePath $storedTftpBootFile)) {
-                Write-SidecarLog "PXE boot: Option 67 boot file not on disk yet — saved tftp/$storedTftpBootFile to config"
+                Write-SidecarLog "PXE boot: Option 67 boot file not on disk yet - saved tftp/$storedTftpBootFile to config"
             }
         }
     }
@@ -364,10 +364,10 @@ function Set-AppPxeBootPluginRuntimeEnabled {
     $script:AppState['RuntimeConfig']['pxeBootPluginEnabled'] = $Enabled
     if ($Enabled) {
         if ($script:AppState -and -not [bool]$script:AppState['IsReady']) {
-            # Pre-login ApplyRuntimeConfig (bootstrap) — no disk work yet; store init runs
+            # Pre-login ApplyRuntimeConfig (bootstrap) - no disk work yet; store init runs
             # from Invoke-AppPostBootstrapPluginInit once the app is ready.
             $script:AppPxeBootState['StoreInitDeferred'] = $true
-            Write-SidecarLogVerbose 'Netboot: plug-in enabled — store init deferred until after bootstrap.'
+            Write-SidecarLogVerbose 'Netboot: plug-in enabled - store init deferred until after bootstrap.'
         } else {
             $script:AppPxeBootState['StoreInitDeferred'] = $false
             Ensure-AppPxeBootStoreLayoutLite | Out-Null
@@ -381,7 +381,7 @@ function Set-AppPxeBootPluginRuntimeEnabled {
         try {
             Stop-AppPxeBootServices -SkipAdminKill | Out-Null
         } catch {
-            Write-SidecarLog "Netboot: stop on plugin disable — $($_.Exception.Message)"
+            Write-SidecarLog "Netboot: stop on plugin disable - $($_.Exception.Message)"
         }
     }
 }
@@ -405,7 +405,7 @@ function Write-AppPxeBootStoreReadmeIfMissing {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string[]]$ReadmeLines
     )
-    # Refreshes on content change too — README text written once and never
+    # Refreshes on content change too - README text written once and never
     # updated left stale layout docs in the store (pre-image-library wording).
     $want = ($ReadmeLines -join "`n") + "`n"
     if (Test-Path -LiteralPath $Path) {
@@ -435,7 +435,7 @@ function Test-AppPxeBootFieldIsoDriverSyncDue {
 function Ensure-AppPxeBootStoreLayoutLite {
     <#
     .SYNOPSIS
-        Create store directories and default config only — no driver seeding, bundled sync, or menu writes.
+        Create store directories and default config only - no driver seeding, bundled sync, or menu writes.
         Used on plug-in enable and fast panel config reads.
     #>
     $paths = Get-AppPxeBootLayoutPaths
@@ -462,16 +462,16 @@ function Ensure-AppPxeBootStoreLayoutLite {
     }
 
     Write-AppPxeBootStoreReadmeIfMissing -Path (Join-Path $paths.isoDir 'README.txt') -ReadmeLines @(
-        'Source ISOs for Netboot (this is the active iso/ folder — normally the image'
+        'Source ISOs for Netboot (this is the active iso/ folder - normally the image'
         'library at Settings > Downloads location). Caddy serves it at /iso/.'
         'Each ISO is mounted read-only and its install.wim served live at'
-        '/iso-wim/<name>/install.wim — nothing is extracted or duplicated on disk.'
+        '/iso-wim/<name>/install.wim - nothing is extracted or duplicated on disk.'
         'Add ISOs via Netboot > Add ISO, or drop .iso files here.'
     )
     Write-AppPxeBootStoreReadmeIfMissing -Path (Join-Path $paths.isoCatalogDir 'README.txt') -ReadmeLines @(
         'Generated FieldIso ISO catalog - do not drop ISO files here.'
         'Source ISOs live in the image library iso/ folder (Settings > Downloads location).'
-        'urls/*.install.wim.url points at /iso-wim/<name>/install.wim — served live'
+        'urls/*.install.wim.url points at /iso-wim/<name>/install.wim - served live'
         'from the read-only ISO mount, never extracted.'
     )
     Write-AppPxeBootStoreReadmeIfMissing -Path (Join-Path $paths.brandingDir 'README.txt') -ReadmeLines @(
@@ -482,7 +482,7 @@ function Ensure-AppPxeBootStoreLayoutLite {
         '# Share (reserved)'
         ' '
         'Future: peer/torrent plug-in to seed OOBD driver archives and DE official ISOs to other'
-        'WinDeployKit laptops on the LAN. Not active yet — folder created when Netboot is enabled.'
+        'WinDeployKit laptops on the LAN. Not active yet - folder created when Netboot is enabled.'
     )
 
     if (-not (Test-Path -LiteralPath (Get-AppPxeBootConfigPath))) {
@@ -495,14 +495,14 @@ function Ensure-AppPxeBootStoreLayout {
     <#
     .SYNOPSIS
         Create the full Netboot HTTP/TFTP store tree (idempotent). Called before starting PXE services
-        or mutating boot assets — not on every panel status poll.
+        or mutating boot assets - not on every panel status poll.
     #>
     $paths = Ensure-AppPxeBootStoreLayoutLite
 
     # Extraction-era leftover: http/iso-wim/ held multi-GB install.wim extracts before
     # the mount-and-serve cut-over. /iso-wim/ is URL-namespace-only now (Caddy routes
     # onto the read-only ISO mounts under <library>/.mounts), so the physical folder
-    # must not exist — a stale extract here would be silently served whenever the
+    # must not exist - a stale extract here would be silently served whenever the
     # matching mount was absent (prune per Craig, 2026-08-20).
     $legacyIsoWim = Join-Path $paths.httpRoot 'iso-wim'
     if (Test-Path -LiteralPath $legacyIsoWim) {
@@ -714,11 +714,11 @@ function Test-AppPxeBootWimIsImageDeployer {
 }
 
 function Test-AppPxeBootWimIsImageDeployerStock {
-    # Bake target is *ImageDeployer*.wim (Craig, 2026-08-18) — any ImageDeployer-named
+    # Bake target is *ImageDeployer*.wim (Craig, 2026-08-18) - any ImageDeployer-named
     # WIM gets the project's credential-free, overlay-aware ImageDeployer.ps1, including
     # numbered download copies kept side by side and legacy creds-baked variants. The
     # real guard is the bake entry's RequiresWimPaths XAML probe: pre-1.10 WIMs (inline
-    # XAML — including old creds-baked variants like ImageDeployerCH.wim) are skipped,
+    # XAML - including old creds-baked variants like ImageDeployerCH.wim) are skipped,
     # so a bake can only land where the 1.10 layout exists, and runtime overlay
     # credentials supersede baked ones anyway.
     param([Parameter(Mandatory)][string]$FileName)
@@ -816,7 +816,7 @@ function Read-AppPxeBootBundledWimbootRecipes {
             }
         }
     } catch {
-        Write-SidecarLog "PXE boot: wimboot-recipes.json read failed — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: wimboot-recipes.json read failed - $($_.Exception.Message)"
     }
     return $map
 }
@@ -985,9 +985,9 @@ function Format-AppPxeBootIpxeMenuItemLine {
         [Parameter(Mandatory)][string]$Label
     )
     # iPXE: item id and label must be separated by a real tab (0x09).
-    # Single-quoted 'item id`tLabel' writes literal backtick-t (0x60 0x74) → choose sets ${target} to
-    # "id`tPartialLabel" → goto ${target} fails (iPXE backtick escaping) → instant return to menu.
-    # See docs/plugins/netboot/AGENT_NOTES_PXE_BOOT.md § "iPXE menu items — PowerShell tab quirk".
+    # Single-quoted 'item id`tLabel' writes literal backtick-t (0x60 0x74) -> choose sets ${target} to
+    # "id`tPartialLabel" -> goto ${target} fails (iPXE backtick escaping) -> instant return to menu.
+    # See docs/plugins/netboot/AGENT_NOTES_PXE_BOOT.md section "iPXE menu items - PowerShell tab quirk".
     "item $Id`t$Label"
 }
 
@@ -1001,7 +1001,7 @@ function Get-AppPxeBootWimbootIpxeBlock {
     if ($EchoLabel) {
         [void]$block.Add("echo $EchoLabel")
     } elseif (Test-AppPxeBootRecipeFlag -Recipe $recipe -Key 'bootAssetsMissing') {
-        [void]$block.Add("echo WARN: $WimFileName boot files missing — re-add the WIM in Netboot")
+        [void]$block.Add("echo WARN: $WimFileName boot files missing - re-add the WIM in Netboot")
     }
     [void]$block.Add('imgfree')
     $optStr = Format-AppPxeBootWimbootKernelOptions -Recipe $recipe
@@ -1033,31 +1033,31 @@ function Get-AppPxeBootWimOverlayProfiles {
         Declarative, reusable WIM-overlay registry. Each profile describes how to enrich a
         family of boot WIMs in two independent, portable ways:
 
-          * Bakes    — files baked into the WIM on disk via wimlib `add` (idempotent,
+          * Bakes    - files baked into the WIM on disk via wimlib `add` (idempotent,
                        hash-markered). Use for static or generated payloads that belong
                        inside the image, e.g. a script or an unattend.xml.
-          * Runtime  — small files published by Caddy and injected into WinPE System32 via
+          * Runtime  - small files published by Caddy and injected into WinPE System32 via
                        iPXE `initrd` at boot. Use for dynamic, rotation-friendly content
                        (connection details, tokens) so the WIM stays generic + secret-free.
 
-        Add a new hashtable here to reuse the whole mechanism for another WIM — nothing
+        Add a new hashtable here to reuse the whole mechanism for another WIM - nothing
         else in the boot/HTTP pipeline needs to change.
 
         Profile keys (all optional unless noted):
-          Id             string  — stable identifier (used in logs).
-          ServedSubdir   string  — folder under http/ that holds this profile's runtime
+          Id             string  - stable identifier (used in logs).
+          ServedSubdir   string  - folder under http/ that holds this profile's runtime
                                     files (also the URL path). Required if Runtime is set.
-          AppliesTo      {param($Name) ...} — predicate: does this WIM get the runtime
+          AppliesTo      {param($Name) ...} - predicate: does this WIM get the runtime
                                     injection? (Mandatory.)
-          BakeAppliesTo  {param($Name) ...} — predicate for baking; defaults to AppliesTo.
+          BakeAppliesTo  {param($Name) ...} - predicate for baking; defaults to AppliesTo.
                                     Often stricter (e.g. only the stock WIM, never variants).
-          IsEnabled      {...}    — gate for both bake + runtime; profile is inert when $false.
-          Bakes          @(@{ MarkerName; WimPath; Source })  — Source is a literal path or
+          IsEnabled      {...}    - gate for both bake + runtime; profile is inert when $false.
+          Bakes          @(@{ MarkerName; WimPath; Source })  - Source is a literal path or
                                     a {scriptblock} returning one. WimPath is the in-WIM dest.
-          Runtime        @(@{ ServedName; WinPeName; Required })  — files to inject. A missing
+          Runtime        @(@{ ServedName; WinPeName; Required })  - files to inject. A missing
                                     Required file suppresses that profile's whole injection
                                     (a missing initrd source would fail the iPXE boot).
-          PublishRuntime {param($Dir,$LanIp) ...} — writes/refreshes the Runtime files into
+          PublishRuntime {param($Dir,$LanIp) ...} - writes/refreshes the Runtime files into
                                     $Dir when enabled (the engine handles dir creation and
                                     removal-when-disabled).
     #>
@@ -1103,7 +1103,7 @@ function Get-AppPxeBootWimOverlayProfiles {
             )
             PublishRuntime = { param($Dir, $LanIp) Write-AppPxeBootImageDeployerDeployOverlayFiles -Dir $Dir -LanIp $LanIp }
         }
-        # Example (future): bake a static unattend.xml into a custom install WIM —
+        # Example (future): bake a static unattend.xml into a custom install WIM -
         # @{
         #     Id = 'soe-unattend'
         #     AppliesTo = { param($Name) $Name -ieq 'Install.wim' }
@@ -1185,7 +1185,7 @@ function Get-AppPxeBootFieldIsoWimbootCoreLines {
         [void]$block.Add("echo $EchoLabel")
     }
     if (Test-AppPxeBootRecipeFlag -Recipe $recipe -Key 'bootAssetsMissing') {
-        [void]$block.Add('echo WARN: FieldIso boot files missing — re-download FieldIso in Netboot')
+        [void]$block.Add('echo WARN: FieldIso boot files missing - re-download FieldIso in Netboot')
     }
     [void]$block.Add('imgfree')
     $optStr = Format-AppPxeBootWimbootKernelOptions -Recipe $recipe
@@ -1359,7 +1359,7 @@ function Invoke-AppPxeBootWimlibExtract {
     )
     $wimlib = Get-AppPxeBootWimlibImagexPath
     if (-not $wimlib) {
-        throw 'PXE boot: WIM tools are missing from this app install — reinstall WinDeployKit or contact support.'
+        throw 'PXE boot: WIM tools are missing from this app install - reinstall WinDeployKit or contact support.'
     }
     if (-not (Test-Path -LiteralPath $DestDir)) {
         $null = New-Item -Path $DestDir -ItemType Directory -Force
@@ -1491,12 +1491,12 @@ function Sync-AppPxeBootFieldIsoWinPeOverlay {
             return @{ skipped = $true; reason = 'current' }
         }
         Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
-        Write-SidecarLog 'PXE boot: FieldIso WIM newer than overlay marker — re-patching WinPE startup script'
+        Write-SidecarLog 'PXE boot: FieldIso WIM newer than overlay marker - re-patching WinPE startup script'
     }
 
     $wimlib = Get-AppPxeBootWimlibImagexPath
     if (-not $wimlib) {
-        Write-SidecarLog 'PXE boot: FieldIso WinPE overlay patch skipped — wimlib missing'
+        Write-SidecarLog 'PXE boot: FieldIso WinPE overlay patch skipped - wimlib missing'
         return @{ skipped = $true; reason = 'no-wimlib' }
     }
 
@@ -1543,7 +1543,7 @@ function Sync-AppPxeBootFieldIsoWinPeOverlay {
         )"
         return @{ patched = $true }
     } catch {
-        Write-SidecarLog "PXE boot: FieldIso WinPE overlay patch failed — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: FieldIso WinPE overlay patch failed - $($_.Exception.Message)"
         return @{ patched = $false; error = $_.Exception.Message }
     } finally {
         foreach ($tf in @($tempFiles)) {
@@ -1640,12 +1640,12 @@ function Invoke-AppPxeBootWimOverlayBake {
 
     $wimlib = Get-AppPxeBootWimlibImagexPath
     if (-not $wimlib) {
-        Write-SidecarLog "PXE boot: overlay bake skipped ($ProfileId) — wimlib-imagex missing"
+        Write-SidecarLog "PXE boot: overlay bake skipped ($ProfileId) - wimlib-imagex missing"
         return @{ skipped = $true; reason = 'no-wimlib'; profile = $ProfileId }
     }
 
     # Optional compatibility gate: only bake into WIMs that already carry the listed paths
-    # (e.g. the 1.10 external XAML). Skips — never writes the marker — so a later WIM
+    # (e.g. the 1.10 external XAML). Skips - never writes the marker - so a later WIM
     # re-download is picked up on the next sync.
     # @() around the if: assignment from an if-expression unwraps empty arrays to $null.
     $requiresWimPaths = @(if ($Bake.ContainsKey('RequiresWimPaths')) { $Bake.RequiresWimPaths } else { })
@@ -1660,7 +1660,7 @@ function Invoke-AppPxeBootWimOverlayBake {
         }
         if ($LASTEXITCODE -ne 0) {
             $hint = if ($Bake.ContainsKey('RequiresHint') -and $Bake.RequiresHint) { [string]$Bake.RequiresHint } else { "WIM lacks $required" }
-            Write-SidecarLog "PXE boot: overlay bake skipped ($ProfileId) for $(Split-Path -Leaf $WimPath) — $hint"
+            Write-SidecarLog "PXE boot: overlay bake skipped ($ProfileId) for $(Split-Path -Leaf $WimPath) - $hint"
             return @{ skipped = $true; reason = 'wim-incompatible'; profile = $ProfileId; missing = [string]$required }
         }
     }
@@ -1686,7 +1686,7 @@ function Invoke-AppPxeBootWimOverlayBake {
         Write-SidecarLog "PXE boot: baked overlay ($ProfileId) $($Bake.WimPath) into $(Split-Path -Leaf $WimPath)"
         return @{ patched = $true; profile = $ProfileId }
     } catch {
-        Write-SidecarLog "PXE boot: overlay bake failed ($ProfileId) — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: overlay bake failed ($ProfileId) - $($_.Exception.Message)"
         return @{ patched = $false; error = $_.Exception.Message; profile = $ProfileId }
     } finally {
         Remove-Item -LiteralPath $updateFile -Force -ErrorAction SilentlyContinue
@@ -1724,13 +1724,13 @@ function Read-AppPxeBootFieldIsoDriversSeed {
         if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
         return ($raw | ConvertFrom-Json)
     } catch {
-        Write-SidecarLog "PXE boot: FieldIso driver seed read failed — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: FieldIso driver seed read failed - $($_.Exception.Message)"
         return $null
     }
 }
 
 function Get-AppPxeBootFieldIsoDriversOsRoot {
-    # User-relocatable driver root: <image library>/Drivers/<Make>/<Model>/ —
+    # User-relocatable driver root: <image library>/Drivers/<Make>/<Model>/ -
     # ImageDeployer 1.10's publish/search convention (Win32_ComputerSystem
     # Manufacturer + Model; its cache-hit search is -Recurse -Depth 1 under
     # Deploy$\Drivers). Vendor folder names come from models.seed.json keys,
@@ -1810,10 +1810,10 @@ function Sync-AppPxeBootFieldIsoDriverStore {
 
     $seed = Read-AppPxeBootFieldIsoDriversSeed
 
-    # Layout is <Drivers>/<Make>/<Model>/ — ImageDeployer 1.10's publish/search
+    # Layout is <Drivers>/<Make>/<Model>/ - ImageDeployer 1.10's publish/search
     # convention (its cache-hit search is -Recurse -Depth 1, so pre-seeded packs and
     # client-downloaded packs coexist in one tree). Beta call (Craig, 2026-08-18):
-    # legacy flat <Drivers>/<model>/ dirs are trashed, not migrated — any child dir
+    # legacy flat <Drivers>/<model>/ dirs are trashed, not migrated - any child dir
     # that is not _default or a seed vendor folder is removed. Skipped when the seed
     # fails to load, so a transient read error can never wipe the vendor tree.
     if ($seed -and $seed.vendors) {
@@ -1822,8 +1822,8 @@ function Sync-AppPxeBootFieldIsoDriverStore {
         foreach ($vendorProp in $seed.vendors.PSObject.Properties) {
             [void]$keepDirs.Add([string]$vendorProp.Name)
         }
-        # Catalog vendors are legitimate Make dirs even when absent from the seed —
-        # without these, promoting a Dell/HP/Microsoft pack created Drivers/Dell/…
+        # Catalog vendors are legitimate Make dirs even when absent from the seed -
+        # without these, promoting a Dell/HP/Microsoft pack created Drivers/Dell/...
         # and the store sync the promote itself triggers deleted the pack seconds
         # later (only Acer/LENOVO survived by riding the seed's vendor list).
         foreach ($catalogVendor in @('Acer', 'LENOVO', 'Dell', 'HP', 'Microsoft')) {
@@ -1832,7 +1832,7 @@ function Sync-AppPxeBootFieldIsoDriverStore {
         foreach ($child in @(Get-ChildItem -LiteralPath $osRoot -Directory -Force -ErrorAction SilentlyContinue)) {
             if ($keepDirs.Contains($child.Name)) { continue }
             # Only a FLAT legacy model folder (files, no subdirs) is trash. A dir with
-            # model SUBDIRS is a Make container — ImageDeployer 1.10 publishes under raw
+            # model SUBDIRS is a Make container - ImageDeployer 1.10 publishes under raw
             # WMI Manufacturer names ('Dell Inc.', 'Microsoft Corporation') and techs
             # mirror remote deploy-share trees the same way; v1 silently deleted those (review
             # finding, 2026-08-20).
@@ -1862,7 +1862,7 @@ function Sync-AppPxeBootFieldIsoDriverStore {
                 if (-not (Test-Path -LiteralPath $hintPath)) {
                     @(
                         "Drop the Win11 x64 OOBD driver pack here (.cab, .exe, .7z, or .zip)."
-                        "FieldIso WinPE extracts with 7z at boot — no repack needed."
+                        "FieldIso WinPE extracts with 7z at boot - no repack needed."
                         "Or use aria2 Tracker -> OOBD drivers (Acer/Lenovo SCCM catalogs)."
                     ) | Set-Content -LiteralPath $hintPath -Encoding UTF8
                 }
@@ -1876,7 +1876,7 @@ function Sync-AppPxeBootFieldIsoDriverStore {
     # wmiPatterns -> installed pack folders); no-ops unless the installed set changed.
     if (Get-Command Write-AppPxeBootDriverAliasMap -ErrorAction SilentlyContinue) {
         try { Write-AppPxeBootDriverAliasMap } catch {
-            Write-SidecarLogVerbose "PXE boot: alias map write failed — $($_.Exception.Message)"
+            Write-SidecarLogVerbose "PXE boot: alias map write failed - $($_.Exception.Message)"
         }
     }
     @{
@@ -1904,7 +1904,7 @@ function Write-AppPxeBootFieldIsoDriversIndex {
                 $folderName = [string]$model.folder
                 if ([string]::IsNullOrWhiteSpace($folderName)) { continue }
                 $modelCount++
-                # <Drivers>/<Make>/<Model>/ — served via the Caddy /drivers/* route
+                # <Drivers>/<Make>/<Model>/ - served via the Caddy /drivers/* route
                 # (handle_path re-roots onto the library, so the tree depth is free).
                 $modelDir = Join-Path (Join-Path $osRoot $vendorName) $folderName
                 $archive = Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $modelDir
@@ -1963,10 +1963,10 @@ function Get-AppPxeBootFieldIsoDriversSummary {
         @{
             osRoot       = Get-AppPxeBootFieldIsoDriversOsRoot
             indexPath    = $indexPath
-            modelCount   = [int]$idx.modelCount
-            readyCount   = [int]$idx.readyCount
-            defaultReady = [bool]$idx.default.archiveReady
-            generated    = [string]$idx.generated
+            modelCount   = [int](Get-AppSidecarJsonProp -Item $idx -Name 'modelCount')
+            readyCount   = [int](Get-AppSidecarJsonProp -Item $idx -Name 'readyCount')
+            defaultReady = [bool](Get-AppSidecarJsonProp -Item (Get-AppSidecarJsonProp -Item $idx -Name 'default') -Name 'archiveReady')
+            generated    = [string](Get-AppSidecarJsonProp -Item $idx -Name 'generated')
             httpPath     = 'drivers/index.json'
         }
     } catch {
@@ -2051,7 +2051,7 @@ function Copy-AppPxeBootBundledMdtBootAssets {
     )
     $srcDir = Get-AppPxeBootBundledMdtBootAssetsDir
     if (-not $srcDir) { return @() }
-    # BCD + boot.sdi only — bootmgfw.efi must come from inside the WIM (wimboot UEFI extract).
+    # BCD + boot.sdi only - bootmgfw.efi must come from inside the WIM (wimboot UEFI extract).
     return @(Copy-AppPxeBootWimBootAssetsFromDir -SourceDir $srcDir -DestDir $DestDir `
         -Names @('BCD', 'boot.sdi'))
 }
@@ -2254,7 +2254,7 @@ function Ensure-AppPxeBootFieldIsoBootAssets {
         return Ensure-AppPxeBootWimBootAssets -WimFileName $fieldIsoWim -SkipMenuRegen:$SkipMenuRegen
     } catch {
         $msg = $_.Exception.Message
-        Write-SidecarLog "PXE boot: FieldIso boot asset export failed — $msg"
+        Write-SidecarLog "PXE boot: FieldIso boot asset export failed - $msg"
         throw
     } finally {
         $wimPath = Join-Path (Get-AppPxeBootLayoutPaths).wimDir $fieldIsoWim
@@ -2301,7 +2301,7 @@ function Export-AppPxeBootWimBootAssets {
             }
         } catch {
             if (-not $Quiet) { throw }
-            Write-SidecarLog "PXE boot: boot asset extract for $name — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: boot asset extract for $name - $($_.Exception.Message)"
         }
     }
 
@@ -2318,7 +2318,7 @@ function Export-AppPxeBootWimBootAssets {
     if (-not (Test-Path -LiteralPath (Join-Path $destDir 'BCD'))) { $needBorrow += 'BCD' }
     if (-not (Test-Path -LiteralPath (Join-Path $destDir 'boot.sdi'))) { $needBorrow += 'boot.sdi' }
     if ($needBorrow.Count -gt 0 -and -not (Test-AppPxeBootWimUsesBundledMdtBootAssets -WimFileName $name)) {
-        # BCD/boot.sdi must match bootmgfw — mixing ImageDeployer bootmgr with TechTools BCD causes 0xc000000f.
+        # BCD/boot.sdi must match bootmgfw - mixing ImageDeployer bootmgr with TechTools BCD causes 0xc000000f.
         $borrowNames = @($needBorrow + @('bootmgfw.efi'))
         $bootRoot = Join-Path $paths.httpRoot 'wim-boot'
         $borrowDir = Get-AppPxeBootWimBootAssetBorrowDir -Stem $stem -BootRoot $bootRoot
@@ -2368,11 +2368,11 @@ function Export-AppPxeBootWimBootAssets {
         if ($packaged.Count -gt 0) { [void]$srcParts.Add("bundled-mdt: $($packaged -join ', ')") }
         if ($borrowed.Count -gt 0) { [void]$srcParts.Add("borrowed: $($borrowed -join ', ')") }
         $detail = if ($srcParts.Count -gt 0) { $srcParts -join '; ' } else { 'ok' }
-        Write-SidecarLog "PXE boot: boot assets for $name → wim-boot/$stem ($detail)"
+        Write-SidecarLog "PXE boot: boot assets for $name -> wim-boot/$stem ($detail)"
     } elseif (-not $Quiet) {
         throw "PXE boot: could not build boot assets for $name (need bootmgr + BCD + boot.sdi)."
     } else {
-        Write-SidecarLog "PXE boot: incomplete boot assets for $name — BCD/boot.sdi still missing"
+        Write-SidecarLog "PXE boot: incomplete boot assets for $name - BCD/boot.sdi still missing"
     }
 
     if (-not $SkipMenuRegen) { Write-AppPxeBootMenuFiles }
@@ -2404,7 +2404,7 @@ function Sync-AppPxeBootWimBootAssets {
             $result = Export-AppPxeBootWimBootAssets -WimFileName $wim.fileName -Quiet -SkipMenuRegen
             if ($result.complete) { $changed = $true }
         } catch {
-            Write-SidecarLog "PXE boot: auto-export boot assets for $($wim.fileName) failed — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: auto-export boot assets for $($wim.fileName) failed - $($_.Exception.Message)"
         }
     }
     return $changed
@@ -2421,7 +2421,7 @@ function Import-AppPxeBootWimBootAssets {
     $name = Get-AppPxeBootSafeWimFileName -FileName $WimFileName
     $wimPath = Join-Path (Get-AppPxeBootLayoutPaths).wimDir $name
     if (-not (Test-Path -LiteralPath $wimPath)) {
-        throw "PXE boot: import boot WIM first — $name not in store."
+        throw "PXE boot: import boot WIM first - $name not in store."
     }
     $stem = [IO.Path]::GetFileNameWithoutExtension($name)
     $destDir = Join-Path (Get-AppPxeBootLayoutPaths).httpRoot "wim-boot/$stem"
@@ -2446,7 +2446,7 @@ function Import-AppPxeBootWimBootAssets {
         throw 'PXE boot: no bootmgr/BCD/boot.sdi found (use MDT Boot/x64, TechTools ISO boot/, or flat folder).'
     }
     Write-AppPxeBootMenuFiles
-    Write-SidecarLog "PXE boot: copied boot assets for $name → wim-boot/$stem ($($copied -join ', '))"
+    Write-SidecarLog "PXE boot: copied boot assets for $name -> wim-boot/$stem ($($copied -join ', '))"
     @{
         wimFileName = $name
         destDir     = $destDir
@@ -2458,7 +2458,7 @@ function Import-AppPxeBootWimBootAssets {
 function Test-AppPxeBootAutoBootDefaultOnPxe {
     param($Config)
     # The Boot WIMs selection is now the single control: a default target (WIM or
-    # default-boot ISO) selected ⇒ auto-boot it; "No default" ⇒ menu-first. The old
+    # default-boot ISO) selected => auto-boot it; "No default" => menu-first. The old
     # standalone autoBootDefault toggle was removed from the UI. This predicate is only
     # consulted on code paths where a default target already exists, so auto-boot is on
     # whenever something is chosen and the menu is shown otherwise.
@@ -2495,10 +2495,10 @@ function Write-AppPxeBootMenuFiles {
     <#
     .SYNOPSIS
         Write http/boot.ipxe (+ menu.ipxe) for field PXE.
-        - defaultBootWim = local WIM (not FieldIso) → auto-boot that WIM (WDS-style); :start menu if boot returns
-        - defaultBootWim = FieldIso + defaultBootIso → auto-boot that ISO via FieldIso WinPE
-        - defaultBootWim = FieldIso (no defaultBootIso) → chain straight to ISO catalog (WinDeployKit local or WAN)
-        - defaultBootWim unset → choose menu; first non-FieldIso WIM or ISO catalog when only FieldIso + ISOs
+        - defaultBootWim = local WIM (not FieldIso) -> auto-boot that WIM (WDS-style); :start menu if boot returns
+        - defaultBootWim = FieldIso + defaultBootIso -> auto-boot that ISO via FieldIso WinPE
+        - defaultBootWim = FieldIso (no defaultBootIso) -> chain straight to ISO catalog (WinDeployKit local or WAN)
+        - defaultBootWim unset -> choose menu; first non-FieldIso WIM or ISO catalog when only FieldIso + ISOs
     #>
     param(
         [switch]$SkipFieldIsoPrepare,
@@ -2510,7 +2510,7 @@ function Write-AppPxeBootMenuFiles {
     # Z:\TaskSequences always matches the panel. Guarded: lib loads after this one.
     if (Get-Command Sync-AppPxeBootTaskSequenceStore -ErrorAction SilentlyContinue) {
         try { Sync-AppPxeBootTaskSequenceStore | Out-Null } catch {
-            Write-SidecarLogVerbose "PXE boot: task-sequence sync skipped — $($_.Exception.Message)"
+            Write-SidecarLogVerbose "PXE boot: task-sequence sync skipped - $($_.Exception.Message)"
         }
     }
 
@@ -2535,7 +2535,7 @@ function Write-AppPxeBootMenuFiles {
     $fieldIsoWim = Get-AppPxeBootFieldIsoWimName
 
     $bootMenuLines = [System.Collections.Generic.List[string]]::new()
-    # Default WIM/ISO toggles only change boot.ipxe — not ISOs/menu.ipxe or urls/*.iso.url.
+    # Default WIM/ISO toggles only change boot.ipxe - not ISOs/menu.ipxe or urls/*.iso.url.
     # REVERT: remove -SkipIsoCatalogRegen from Set-AppPxeBootDefault* if catalog must always regen with defaults.
     $catalogStale = Test-AppPxeBootIsoCatalogStale
     $ipxeTemplateOutdated = Test-AppPxeBootIsoCatalogIpxeTemplateOutdated
@@ -2545,15 +2545,15 @@ function Write-AppPxeBootMenuFiles {
     }
     if ($regenCatalog) {
         if ($ipxeTemplateOutdated) {
-            Write-SidecarLog "PXE boot: ISO catalog iPXE template outdated (rev $($script:AppPxeBootFieldIsoIpxeCatalogRevision)) — regenerating menu"
+            Write-SidecarLog "PXE boot: ISO catalog iPXE template outdated (rev $($script:AppPxeBootFieldIsoIpxeCatalogRevision)) - regenerating menu"
         }
         Write-AppPxeBootLocalIsoCatalog -SkipFieldIsoPrepare:$SkipFieldIsoPrepare | Out-Null
     } elseif ($BootMenuOnly) {
-        Write-SidecarLog 'PXE boot: boot menu only (WIM library change — ISO catalog unchanged)'
+        Write-SidecarLog 'PXE boot: boot menu only (WIM library change - ISO catalog unchanged)'
     } elseif ($SkipIsoCatalogRegen -and $catalogStale) {
-        Write-SidecarLog 'PXE boot: boot menu only (default change — ISO catalog regen deferred; catalog stale until Start field PXE or ISO change)'
+        Write-SidecarLog 'PXE boot: boot menu only (default change - ISO catalog regen deferred; catalog stale until Start field PXE or ISO change)'
     } elseif ($SkipIsoCatalogRegen) {
-        Write-SidecarLog 'PXE boot: boot menu only (skipped ISO catalog regen — catalog still fresh)'
+        Write-SidecarLog 'PXE boot: boot menu only (skipped ISO catalog regen - catalog still fresh)'
     }
     $httpBaseLiteral = Get-AppPxeBootLocalHttpBaseUrl
     $catalogBaseLiteral = Get-AppPxeBootLocalIsoCatalogUrl
@@ -2568,7 +2568,7 @@ function Write-AppPxeBootMenuFiles {
 
     if ($directBootWim) {
         $defaultMenuId = 'boot_default'
-        [void]$bootMenuLines.Add("# WinDeployKit field PXE — auto-boot $directBootWim — generated $generated")
+        [void]$bootMenuLines.Add("# WinDeployKit field PXE - auto-boot $directBootWim - generated $generated")
         if ($autoBoot) {
             [void]$bootMenuLines.Add('goto boot_default_run')
         } else {
@@ -2583,7 +2583,7 @@ function Write-AppPxeBootMenuFiles {
             [void]$bootMenuLines.Add($bootLine)
         }
         [void]$bootMenuLines.Add('echo')
-        [void]$bootMenuLines.Add("echo Auto-boot of $directBootWim failed — opening local menu.")
+        [void]$bootMenuLines.Add("echo Auto-boot of $directBootWim failed - opening local menu.")
         if ($wanDeployEnabled) {
             [void]$bootMenuLines.Add('echo Pick Default (local) to retry, open the ISO catalog, or use WAN backup.')
         } else {
@@ -2593,7 +2593,7 @@ function Write-AppPxeBootMenuFiles {
         [void]$bootMenuLines.Add('')
         [void]$bootMenuLines.Add(':start')
         foreach ($line in @(Get-AppPxeBootMenuBrandingConsoleIpxeLines)) { [void]$bootMenuLines.Add([string]$line) }
-        [void]$bootMenuLines.Add('menu Field PXE — choose boot image')
+        [void]$bootMenuLines.Add('menu Field PXE - choose boot image')
         foreach ($line in @(Get-AppPxeBootMenuBrandingSubtitleIpxeLines)) { [void]$bootMenuLines.Add([string]$line) }
         [void]$bootMenuLines.Add('item --gap -- ------------------------------')
         [void]$bootMenuLines.Add("item $defaultMenuId`tDefault (local): $directBootWim")
@@ -2641,7 +2641,7 @@ function Write-AppPxeBootMenuFiles {
         if ($autoBoot) {
             Write-SidecarLog "PXE boot: boot.ipxe auto-boots $directBootWim ($($kernelOpts.Trim())) (menu at :start if wimboot returns)"
         } else {
-            Write-SidecarLog "PXE boot: boot.ipxe menu-first — default $directBootWim highlighted (autoBootDefault off)"
+            Write-SidecarLog "PXE boot: boot.ipxe menu-first - default $directBootWim highlighted (autoBootDefault off)"
         }
     } else {
         $localIsos = @(Get-AppPxeBootIsoInventory)
@@ -2654,11 +2654,11 @@ function Write-AppPxeBootMenuFiles {
             $defaultIsoMenuId = if ($defaultIso) { Get-AppPxeBootIsoCatalogMenuId -FileName $defaultIso } else { $null }
             $defaultIsoLabel = if ($defaultIso) { Get-AppPxeBootIsoDisplayLabel -FileName $defaultIso } else { $null }
             if ($autoIsoCatalog -and $defaultIso -and $fieldIsoWim) {
-                [void]$bootMenuLines.Add("# WinDeployKit field PXE — default FieldIso → auto-boot $defaultIso — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE - default FieldIso -> auto-boot $defaultIso - generated $generated")
             } elseif ($autoIsoCatalog) {
-                [void]$bootMenuLines.Add("# WinDeployKit field PXE — default FieldIso → ISO catalog — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE - default FieldIso -> ISO catalog - generated $generated")
             } else {
-                [void]$bootMenuLines.Add("# WinDeployKit field PXE — local menu — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE - local menu - generated $generated")
             }
             if ($autoBoot -and $autoIsoCatalog -and $defaultIso -and $fieldIsoWim) {
                 [void]$bootMenuLines.Add("goto $($defaultIsoMenuId)_run")
@@ -2678,7 +2678,7 @@ function Write-AppPxeBootMenuFiles {
                     [void]$bootMenuLines.Add($line)
                 }
                 [void]$bootMenuLines.Add('echo')
-                [void]$bootMenuLines.Add("echo Auto-boot of $defaultIso failed — opening local menu.")
+                [void]$bootMenuLines.Add("echo Auto-boot of $defaultIso failed - opening local menu.")
                 if ($wanDeployEnabled) {
                     [void]$bootMenuLines.Add('echo Pick Default ISO to retry, open the ISO catalog, or use WAN backup.')
                 } else {
@@ -2689,7 +2689,7 @@ function Write-AppPxeBootMenuFiles {
             }
             [void]$bootMenuLines.Add(':start')
             foreach ($line in @(Get-AppPxeBootMenuBrandingConsoleIpxeLines)) { [void]$bootMenuLines.Add([string]$line) }
-            [void]$bootMenuLines.Add('menu Field PXE — choose boot image')
+            [void]$bootMenuLines.Add('menu Field PXE - choose boot image')
             foreach ($line in @(Get-AppPxeBootMenuBrandingSubtitleIpxeLines)) { [void]$bootMenuLines.Add([string]$line) }
             [void]$bootMenuLines.Add('item --gap -- ------------------------------')
             foreach ($wim in $bootableWims) {
@@ -2758,7 +2758,7 @@ function Write-AppPxeBootMenuFiles {
                     Write-SidecarLog "PXE boot: boot.ipxe opens local ISO catalog (FieldIso default); $($localIsos.Count) ISO(s)"
                 }
             } elseif (-not $autoBoot) {
-                Write-SidecarLog 'PXE boot: boot.ipxe menu-first (autoBootDefault off — client must pick boot target)'
+                Write-SidecarLog 'PXE boot: boot.ipxe menu-first (autoBootDefault off - client must pick boot target)'
             } else {
                 if ($wanDeployEnabled) {
                     Write-SidecarLog "PXE boot: boot.ipxe local menu ($($bootableWims.Count) WIM(s), $($localIsos.Count) ISO(s)); WAN backup $deployBase"
@@ -2768,7 +2768,7 @@ function Write-AppPxeBootMenuFiles {
             }
         } else {
             if ($wanDeployEnabled) {
-                [void]$bootMenuLines.Add("# WinDeployKit field PXE — deploy ISO catalog — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE - deploy ISO catalog - generated $generated")
                 [void]$bootMenuLines.Add('echo Loading deploy ISO menu...')
                 [void]$bootMenuLines.Add('chain ${deploy_base}/menu.ipxe?t=${buildsign} || chain ${deploy_base}/menu.ipxe || goto failed')
                 [void]$bootMenuLines.Add(':failed')
@@ -2776,12 +2776,12 @@ function Write-AppPxeBootMenuFiles {
                 [void]$bootMenuLines.Add('shell')
                 Write-SidecarLog "PXE boot: boot.ipxe chains deploy ISO catalog ($deployBase)"
             } else {
-                [void]$bootMenuLines.Add("# WinDeployKit field PXE — no local boot assets — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE - no local boot assets - generated $generated")
                 [void]$bootMenuLines.Add('echo No local boot WIM or ISO on this workstation.')
-                [void]$bootMenuLines.Add('echo Open Netboot in WinDeployKit — add FieldIso.wim plus ISOs or a boot WIM.')
+                [void]$bootMenuLines.Add('echo Open Netboot in WinDeployKit - add FieldIso.wim plus ISOs or a boot WIM.')
                 [void]$bootMenuLines.Add('echo Enable HTTP + TFTP, then reboot the client.')
                 [void]$bootMenuLines.Add('shell')
-                Write-SidecarLog 'PXE boot: boot.ipxe has no local menu assets (local HTTP only — add WIM/ISO in Netboot)'
+                Write-SidecarLog 'PXE boot: boot.ipxe has no local menu assets (local HTTP only - add WIM/ISO in Netboot)'
             }
         }
     }
@@ -2823,7 +2823,7 @@ function Get-AppPxeBootAutoexecScriptText {
     $httpLiteral = if ($lanIp) { "http://${lanIp}:$port/boot.ipxe" } else { $null }
     $lines = [System.Collections.Generic.List[string]]::new()
     [void]$lines.Add('#!ipxe')
-    [void]$lines.Add('# WinDeployKit — TFTP/HTTP autoexec (regenerated on menu sync)')
+    [void]$lines.Add('# WinDeployKit - TFTP/HTTP autoexec (regenerated on menu sync)')
     if ($wanDeployEnabled) {
         [void]$lines.Add("set deploy_base $deployBase")
     }
@@ -2886,12 +2886,12 @@ function Ensure-AppPxeBootAutoexecIfMissing {
     [void]$targets.Add((Join-Path $paths.httpRoot 'autoexec.ipxe'))
     $missing = @($targets | Where-Object { -not (Test-Path -LiteralPath $_) })
     if ($missing.Count -eq 0) { return $false }
-    Write-SidecarLog "PXE boot: autoexec.ipxe missing ($($missing.Count) path(s)) — writing placeholder"
+    Write-SidecarLog "PXE boot: autoexec.ipxe missing ($($missing.Count) path(s)) - writing placeholder"
     $port = [int](Read-AppPxeBootConfig).httpPort
     if ($port -lt 1 -or $port -gt 65535) { $port = 8080 }
     $stub = @(
         '#!ipxe'
-        '# WinDeployKit — placeholder autoexec (full script written on menu sync / Start PXE)'
+        '# WinDeployKit - placeholder autoexec (full script written on menu sync / Start PXE)'
         'chain tftp://${next-server}/boot.ipxe || chain http://${next-server}:' + $port + '/boot.ipxe || shell'
     ) -join "`n"
     Set-AppPxeBootAutoexecScriptContent -Content $stub | Out-Null
@@ -2901,7 +2901,7 @@ function Ensure-AppPxeBootAutoexecIfMissing {
 function Write-AppPxeBootTftpAutoexecScript {
     <#
     .SYNOPSIS
-        TFTP/HTTP autoexec — iPXE loads this when no embedded script (incl. Secure Boot shim in x86_64-sb/).
+        TFTP/HTTP autoexec - iPXE loads this when no embedded script (incl. Secure Boot shim in x86_64-sb/).
         Mirrored to tftp/, tftp/x86_64-sb/, and http/ so TFTP-subdir and HTTP /autoexec.ipxe both work.
     #>
     $content = Get-AppPxeBootAutoexecScriptText
@@ -2974,7 +2974,7 @@ function Get-AppPxeBootIsoMountToken {
     # mount (.mounts/<token>) and its /iso-wim/<token>/ HTTP route. Why not the raw filename:
     # ISO names legally contain spaces and parentheses (e.g. "Windows 11 (24H2).iso") which
     # break the unquoted Caddyfile path and produce mismatched URLs. Why deterministic and not
-    # a random UUID: mounting is idempotent and runs on every Start — a stable token reuses the
+    # a random UUID: mounting is idempotent and runs on every Start - a stable token reuses the
     # same mount and never orphans .mounts dirs, while the 8-char hash of the full name still
     # guarantees two distinct ISOs never collide (even if sanitisation maps their names together).
     $name = [IO.Path]::GetFileNameWithoutExtension(([IO.Path]::GetFileName($IsoFileName)).Trim())
@@ -3281,12 +3281,12 @@ function Ensure-AppPxeBootP7zipTools {
                     $lastError = 'SHA256 or size mismatch after download'
                 } catch {
                     $lastError = $_.Exception.Message
-                    Write-SidecarLogVerbose "PXE boot: p7zip download failed from $url — $lastError"
+                    Write-SidecarLogVerbose "PXE boot: p7zip download failed from $url - $lastError"
                 }
             }
         }
         if (-not $downloaded) {
-            throw "p7zip download failed — $lastError"
+            throw "p7zip download failed - $lastError"
         }
         Expand-AppPxeBootP7zipArchive `
             -Archive $archivePath `
@@ -3303,7 +3303,7 @@ function Ensure-AppPxeBootP7zipTools {
             version = $script:AppPxeBootP7zipPinnedVersion
         }
     } catch {
-        Write-SidecarLog "PXE boot: p7zip install failed — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: p7zip install failed - $($_.Exception.Message)"
         return @{ ok = $false; message = $_.Exception.Message }
     } finally {
         $script:AppPxeBootP7zipInstallInProgress = $false
@@ -3460,7 +3460,7 @@ function Write-AppPxeBootWimOverlayRuntimeAssets {
     .SYNOPSIS
         Publish (or clear) every overlay profile's runtime files for Caddy. When a profile is
         enabled its PublishRuntime writer refreshes the served files; when disabled the engine
-        removes them so stale connection details / tokens never linger. Generic — iterates the
+        removes them so stale connection details / tokens never linger. Generic - iterates the
         registry, so new profiles are picked up automatically.
     #>
     param([string]$LanIp)
@@ -3555,14 +3555,14 @@ function Get-AppPxeBootImageDeployerOverlayCredentialPair {
                     $cred = Ensure-AppPxeBootWindowsSmbThrowawayCredential -Root ([string]$root)
                 }
             } catch {
-                Write-SidecarLog "PXE boot: throwaway SMB credential ensure failed — $($_.Exception.Message)"
+                Write-SidecarLog "PXE boot: throwaway SMB credential ensure failed - $($_.Exception.Message)"
             }
             if (-not $cred) {
                 $candidate = Read-AppPxeBootSmbThrowawayCred
                 if ($candidate -and (Test-AppPxeBootWindowsUserExists -Name ([string]$candidate.User))) {
                     $cred = $candidate
                 } elseif ($candidate) {
-                    Write-SidecarLog "PXE boot: throwaway SMB credential skipped — local user '$([string]$candidate.User)' does not exist on Windows host."
+                    Write-SidecarLog "PXE boot: throwaway SMB credential skipped - local user '$([string]$candidate.User)' does not exist on Windows host."
                 }
             }
         } elseif ($IsMacOS -or $IsDarwin) {
@@ -3596,7 +3596,7 @@ function Get-AppPxeBootImageDeployerOverlayCredentialPair {
                 return @{ User = $user.Trim(); Pass = ([string]$pass).Trim() }
             }
         } catch {
-            Write-SidecarLog "PXE boot: vault credential '$id' for ImageDeployer overlay unavailable — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: vault credential '$id' for ImageDeployer overlay unavailable - $($_.Exception.Message)"
         }
         return $null
     }
@@ -3639,7 +3639,7 @@ function Write-AppPxeBootImageDeployerDeployOverlayFiles {
     if ($pair -and -not [string]::IsNullOrWhiteSpace($pair.User) -and -not [string]::IsNullOrWhiteSpace($pair.Pass)) {
         $credText = ('{0}{2}{1}{2}' -f $pair.User, $pair.Pass, "`r`n")
         Set-Content -LiteralPath $credFile -Value $credText -Encoding ASCII -NoNewline -Force
-        # Runs on every menu/overlay regen — log at info only when the identity changes,
+        # Runs on every menu/overlay regen - log at info only when the identity changes,
         # verbose otherwise (this line was drowning the sidecar log).
         $publishKey = "$($pair.User)|$credsMode"
         if ($script:AppPxeBootState.LastOverlayCredPublishKey -ne $publishKey) {
@@ -3791,7 +3791,7 @@ function Test-AppPxeBootIsoCatalogStale {
         $catalog = Get-Content -LiteralPath $paths.isoCatalogJson -Raw -Encoding UTF8 | ConvertFrom-Json
         $catalogFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         foreach ($entry in @($catalog.entries)) {
-            $path = if ($null -ne $entry.path) { [string]$entry.path } else { '' }
+            $path = [string](Get-AppSidecarJsonProp -Item $entry -Name 'path')
             if ($path -match '(?i)^iso/(.+)$') {
                 [void]$catalogFiles.Add($Matches[1])
             }
@@ -3839,7 +3839,7 @@ function Write-AppPxeBootLocalIsoCatalog {
         try {
             Ensure-AppPxeBootFieldIsoBootAssets -SkipMenuRegen | Out-Null
         } catch {
-            Write-SidecarLog "PXE boot: ISO catalog regen without FieldIso boot files — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: ISO catalog regen without FieldIso boot files - $($_.Exception.Message)"
         }
     }
     $wanBase = Get-AppPxeBootWanIsoCatalogUrl
@@ -3904,7 +3904,7 @@ function Write-AppPxeBootLocalIsoCatalog {
     $catalogIpxeAcc = [System.Collections.Generic.List[string]]::new()
     [void]$catalogIpxeAcc.Add('#!ipxe')
     [void]$catalogIpxeAcc.Add("# fieldiso-ipxe-rev: $($script:AppPxeBootFieldIsoIpxeCatalogRevision)")
-    [void]$catalogIpxeAcc.Add('# Generated by WinDeployKit — WinDeployKit boot ISO catalog')
+    [void]$catalogIpxeAcc.Add('# Generated by WinDeployKit - WinDeployKit boot ISO catalog')
     [void]$catalogIpxeAcc.Add("# $generated")
     [void]$catalogIpxeAcc.Add("set http_port $port")
     if ($wanDeployEnabled) {
@@ -4012,11 +4012,11 @@ function Get-AppPxeBootIsoCatalogBootIpxeBlock {
             } else {
                 [void]$block.Add('chain ${catalog_base}/menu.ipxe?t=${buildsign} || chain ${catalog_base}/menu.ipxe || goto iso_catalog_failed')
                 [void]$block.Add(':iso_catalog_failed')
-                [void]$block.Add('echo Local ISO catalog failed — check HTTP and ISOs/FieldIso.wim in Netboot.')
+                [void]$block.Add('echo Local ISO catalog failed - check HTTP and ISOs/FieldIso.wim in Netboot.')
                 [void]$block.Add('goto start')
             }
         } else {
-            [void]$block.Add('echo Local ISO catalog not ready — add FieldIso.wim and ISOs in Netboot.')
+            [void]$block.Add('echo Local ISO catalog not ready - add FieldIso.wim and ISOs in Netboot.')
             [void]$block.Add('goto start')
         }
     } else {
@@ -4224,7 +4224,7 @@ function Download-AppPxeBootFieldIsoWim {
                 library   = (Get-AppPxeBootWimLibraryResponse)
             }
         }
-        throw "PXE boot: $targetName already exists — use replace to re-download."
+        throw "PXE boot: $targetName already exists - use replace to re-download."
     }
 
     $wimUrl = [string]$manifest.wimUrl
@@ -4238,14 +4238,14 @@ function Download-AppPxeBootFieldIsoWim {
     }
 
     $sizeMb = if ($manifest.sizeBytes -gt 0) { [math]::Round($manifest.sizeBytes / 1MB, 0) } else { 320 }
-    Write-SidecarLog "PXE boot: downloading $targetName (~${sizeMb} MB)…"
+    Write-SidecarLog "PXE boot: downloading $targetName (~${sizeMb} MB)..."
     try {
         Invoke-WebRequest -Uri $wimUrl -OutFile $tmp -UseBasicParsing -TimeoutSec 3600 -ErrorAction Stop
     } catch {
         if (Test-Path -LiteralPath $tmp) {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         }
-        throw "PXE boot: FieldIso download failed — $($_.Exception.Message)"
+        throw "PXE boot: FieldIso download failed - $($_.Exception.Message)"
     }
 
     if (-not (Test-AppPxeBootFieldIsoWimFile -Path $tmp -ExpectedSha256 $manifest.sha256)) {
@@ -4493,7 +4493,7 @@ function Download-AppPxeBootOptionalAsset {
                 library  = (Get-AppPxeBootWimLibraryResponse)
             }
         }
-        throw "PXE boot: $targetName already exists — use replace to re-download."
+        throw "PXE boot: $targetName already exists - use replace to re-download."
     }
 
     $downloadUrl = [string]$asset.downloadUrl
@@ -4507,14 +4507,14 @@ function Download-AppPxeBootOptionalAsset {
     }
 
     $sizeMb = if ($asset.sizeBytes -gt 0) { [math]::Round($asset.sizeBytes / 1MB, 0) } else { 0 }
-    Write-SidecarLog "PXE boot: downloading $targetName (~${sizeMb} MB) ($($asset.id))…"
+    Write-SidecarLog "PXE boot: downloading $targetName (~${sizeMb} MB) ($($asset.id))..."
     try {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $tmp -UseBasicParsing -TimeoutSec 7200 -ErrorAction Stop
     } catch {
         if (Test-Path -LiteralPath $tmp) {
             Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
         }
-        throw "PXE boot: download failed for $targetName — $($_.Exception.Message)"
+        throw "PXE boot: download failed for $targetName - $($_.Exception.Message)"
     }
 
     if (-not (Test-AppPxeBootOptionalAssetFile -Path $tmp -Kind $kind -ExpectedSha256 ([string]$asset.sha256))) {
@@ -4568,7 +4568,7 @@ function Test-AppPxeBootLayout {
 
     if (-not (Test-Path -LiteralPath $paths.snponlyEfi)) {
         if (Get-AppPxeBootBundledSnponlyPath) {
-            [void]$warnings.Add('tftp/snponly.efi — bundled copy pending (enable Netboot or start imaging services)')
+            [void]$warnings.Add('tftp/snponly.efi - bundled copy pending (enable Netboot or start imaging services)')
         } else {
             [void]$missing.Add('tftp/snponly.efi')
         }
@@ -4577,58 +4577,58 @@ function Test-AppPxeBootLayout {
     if (-not (Test-AppPxeBootTftpBootFileExists -RelativePath $configuredBootFile)) {
         $relNorm = ($configuredBootFile -replace '\\', '/').ToLowerInvariant()
         if (Get-AppPxeBootBundledSecureBootTftpRoot -and $relNorm -like 'x86_64-sb/*') {
-            [void]$warnings.Add("tftp/$configuredBootFile — bundled Secure Boot tree pending (enable Netboot or start imaging services)")
+            [void]$warnings.Add("tftp/$configuredBootFile - bundled Secure Boot tree pending (enable Netboot or start imaging services)")
         } else {
-            [void]$warnings.Add("tftp/$configuredBootFile — Option 67 boot file missing (choose another under PXE on this host)")
+            [void]$warnings.Add("tftp/$configuredBootFile - Option 67 boot file missing (choose another under PXE on this host)")
         }
     } elseif ($configuredBootFile -ne 'snponly.efi' -and (Test-AppPxeBootTftpBootFileSecureBoot -RelativePath $configuredBootFile)) {
         if (-not (Test-AppPxeBootTftpBootFileIsSecureBootShimEntry -RelativePath $configuredBootFile)) {
             [void]$warnings.Add(
-                "tftp/$configuredBootFile — Secure Boot will fail (hash not allowed / DB); Option 67 must be x86_64-sb/shimx64.efi, not ipxe/snponly in -sb/"
+                "tftp/$configuredBootFile - Secure Boot will fail (hash not allowed / DB); Option 67 must be x86_64-sb/shimx64.efi, not ipxe/snponly in -sb/"
             )
         }
     }
     if (Get-AppPxeBootFieldIsoWimName) {
         if (-not (Test-AppPxeBootFieldIsoWinPePowerShellInjectAvailable)) {
             [void]$warnings.Add(
-                'FieldIso.wim — WinPE-PowerShell not built in (wim-inject/ empty). On Windows: scripts/prepare-fieldiso-wim-inject.ps1, then Mac: inject-fieldiso-winpe-tools.sh or rebuild FieldIso.wim'
+                'FieldIso.wim - WinPE-PowerShell not built in (wim-inject/ empty). On Windows: scripts/prepare-fieldiso-wim-inject.ps1, then Mac: inject-fieldiso-winpe-tools.sh or rebuild FieldIso.wim'
             )
         }
     }
     if (-not (Test-Path -LiteralPath $paths.wimboot)) {
         if (Get-AppPxeBootBundledWimbootPath) {
-            [void]$warnings.Add('http/wimboot/wimboot — bundled copy pending (start field PXE)')
+            [void]$warnings.Add('http/wimboot/wimboot - bundled copy pending (start field PXE)')
         } else {
-            [void]$missing.Add('http/wimboot/wimboot — run scripts/fetch-wimboot.ps1 and rebuild')
+            [void]$missing.Add('http/wimboot/wimboot - run scripts/fetch-wimboot.ps1 and rebuild')
         }
     }
     $wimFiles = @(Get-ChildItem -LiteralPath $paths.wimDir -Filter '*.wim' -File -ErrorAction SilentlyContinue)
     $isoFiles = @(Get-ChildItem -LiteralPath $paths.isoDir -Filter '*.iso' -File -ErrorAction SilentlyContinue)
     $cfg = Read-AppPxeBootConfig
     if ($wimFiles.Count -eq 0) {
-        [void]$warnings.Add('http/wim/*.wim — add a boot WIM below (ImageDeployer.wim / TechTools)')
+        [void]$warnings.Add('http/wim/*.wim - add a boot WIM below (ImageDeployer.wim / TechTools)')
     }
     if ($isoFiles.Count -gt 0) {
         $fieldIso = Get-AppPxeBootFieldIsoWimName
         if (-not $fieldIso) {
-            [void]$warnings.Add('http/iso/*.iso — local ISO boot needs FieldIso.wim in Boot WIM library')
+            [void]$warnings.Add('http/iso/*.iso - local ISO boot needs FieldIso.wim in Boot WIM library')
         } elseif (-not (Test-AppPxeBootWimBootAssetsComplete -WimFileName $fieldIso)) {
             [void]$warnings.Add(
-                "http/wim-boot/FieldIso/ — BCD/boot.sdi/bootmgfw missing (save settings or add an ISO to regen; ISO catalog boot will fail UEFI until fixed)"
+                "http/wim-boot/FieldIso/ - BCD/boot.sdi/bootmgfw missing (save settings or add an ISO to regen; ISO catalog boot will fail UEFI until fixed)"
             )
         } elseif (Test-AppPxeBootIsoCatalogStale) {
-            [void]$warnings.Add('http/ISOs/menu.ipxe — catalog stale; save settings, start field PXE, or wait for status refresh')
+            [void]$warnings.Add('http/ISOs/menu.ipxe - catalog stale; save settings, start field PXE, or wait for status refresh')
         }
         foreach ($iso in $isoFiles) {
             # Mount-and-serve only: install.wim is exposed live from the mounted ISO
-            # once imaging services run — warn only when services are up but the
+            # once imaging services run - warn only when services are up but the
             # mount failed. (Extraction removed 2026-08-18: duplicated multi-GB WIMs.)
             $isoBase = [IO.Path]::GetFileNameWithoutExtension((Get-AppPxeBootSafeIsoFileName -FileName $iso.Name))
             $mount = $script:AppPxeBootState.IsoMounts[$isoBase]
             $httpRunning = $script:AppPxeBootState.HttpProcess -and -not $script:AppPxeBootState.HttpProcess.HasExited
             if ($httpRunning -and (-not $mount -or -not (Test-Path -LiteralPath $mount.installWim))) {
                 [void]$warnings.Add(
-                    "iso-wim/$isoBase/install.wim — ISO not mounted (check the ISO contains sources/install.wim; Stop then Start Imaging Services)"
+                    "iso-wim/$isoBase/install.wim - ISO not mounted (check the ISO contains sources/install.wim; Stop then Start Imaging Services)"
                 )
             }
         }
@@ -4636,20 +4636,20 @@ function Test-AppPxeBootLayout {
     foreach ($wim in $wimFiles) {
         if ($wim.Length -lt 1MB) {
             [void]$warnings.Add(
-                "http/wim/$($wim.Name) — file is only $([math]::Round($wim.Length / 1KB, 1)) KB (corrupt or placeholder — re-import via Add boot WIM…)"
+                "http/wim/$($wim.Name) - file is only $([math]::Round($wim.Length / 1KB, 1)) KB (corrupt or placeholder - re-import via Add boot WIM...)"
             )
         }
         $recipe = Get-AppPxeBootWimbootRecipe -WimFileName $wim.Name
         if (Test-AppPxeBootRecipeFlag -Recipe $recipe -Key 'bootAssetsMissing') {
             [void]$warnings.Add(
-                "http/wim-boot/$([IO.Path]::GetFileNameWithoutExtension($wim.Name))/ — boot files missing (remove and re-add the WIM in Netboot)"
+                "http/wim-boot/$([IO.Path]::GetFileNameWithoutExtension($wim.Name))/ - boot files missing (remove and re-add the WIM in Netboot)"
             )
         }
     }
 
     $drivers = Get-AppPxeBootFieldIsoDriversSummary
     if ([int]$drivers.modelCount -gt 0 -and [int]$drivers.readyCount -eq 0) {
-        [void]$warnings.Add('Drivers/<model> — model folders exist but no driver packs yet (.cab/.exe/.7z — Open drivers folder or aria2 Tracker)')
+        [void]$warnings.Add('Drivers/<model> - model folders exist but no driver packs yet (.cab/.exe/.7z - Open drivers folder or aria2 Tracker)')
     }
 
     @{
@@ -4686,12 +4686,12 @@ function Test-AppIsExcludedLocationIPv4 {
         the host IP must be a real, routable-on-LAN address. Excluded:
           * loopback            127.0.0.0/8
           * link-local / APIPA  169.254.0.0/16  (DHCP never answered)
-          * CGNAT               100.64.0.0/10   (Tailscale and similar overlays —
-                                                 no broadcast domain shared with
-                                                 the client)
+          * CGNAT               100.64.0.0/10   (carrier-grade NAT and overlay
+                                                 networks - no broadcast domain
+                                                 shared with the client)
           * unspecified         0.0.0.0/8
           * multicast/reserved  224.0.0.0/4 and above
-        Everything else — RFC1918 LAN ranges and public addresses — is allowed.
+        Everything else - RFC1918 LAN ranges and public addresses - is allowed.
     .NOTES
         Replaces the USM original, which filtered against an org site catalog.
     #>
@@ -4763,7 +4763,7 @@ function Get-AppPxeBootNetworkAdapters {
             })
         }
     } catch {
-        Write-SidecarLog "PXE boot: adapter enumeration failed — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: adapter enumeration failed - $($_.Exception.Message)"
     }
 
     if ($rows.Count -gt 0 -and -not ($rows | Where-Object { $_.isDefault })) {
@@ -4796,7 +4796,7 @@ function Get-AppPxeBootLanIpHint {
     $adapters = @(Get-AppPxeBootNetworkAdapters)
     if ($adapters.Count -gt 0) {
         if ([string]::IsNullOrWhiteSpace($InterfaceId)) {
-            return 'Select the Ethernet adapter below — default route may be VPN (Tailscale is ignored for PXE).'
+            return 'Select the Ethernet adapter below - the default route is not a usable PXE address.'
         }
         return $null
     }
@@ -4818,15 +4818,15 @@ function Get-AppPxeBootLanIpHint {
                     $hasUsable = $true
                 }
             }
-            if ($hasUsable) { return 'Adapters are still refreshing — pick Ethernet below or wait a moment and refresh.' }
+            if ($hasUsable) { return 'Adapters are still refreshing - pick Ethernet below or wait a moment and refresh.' }
             if ($hasExcluded) { $vpnOrLinkLocalOnly = $true }
         }
     } catch { }
 
     if ($vpnOrLinkLocalOnly) {
-        return 'Only VPN/Tailscale or link-local is up — PXE needs a real Ethernet IPv4. Plug in cable, wait for DHCP, then pick that adapter.'
+        return 'No usable Ethernet IPv4 is up - PXE needs a real LAN address. Plug in the cable, wait for DHCP, then pick that adapter.'
     }
-    return 'No usable IPv4 on any adapter. Plug in Ethernet and wait for an address (Tailscale and link-local are ignored).'
+    return 'No usable IPv4 on any adapter. Plug in Ethernet and wait for an address (link-local and CGNAT are ignored).'
 }
 
 function Resolve-AppPxeBootDnsmasqPath {
@@ -4925,7 +4925,7 @@ function Get-AppPxeBootMacOsTftpTraverseDirs {
 function Get-AppPxeBootMacOsTftpRootTraverseShellMac {
     <#
     .SYNOPSIS
-        Elevated shell prelude: grant traverse (search) on ~/Library → …/pxe-boot so root dnsmasq
+        Elevated shell prelude: grant traverse (search) on ~/Library -> .../pxe-boot so root dnsmasq
         can read the canonical TFTP tree under Application Support. No copy or /private/tmp mirror.
     #>
     if (-not (Get-Command ConvertTo-AppUnixShellSingleQuotedString -ErrorAction SilentlyContinue)) {
@@ -4960,19 +4960,19 @@ function New-AppPxeBootDnsmasqConfig {
     )
     $iface = Get-AppPxeBootInterfaceNameForDnsmasq -InterfaceId $InterfaceId
     if (-not $iface) {
-        throw 'PXE boot: no active network adapter with IPv4 — connect Ethernet and retry.'
+        throw 'PXE boot: no active network adapter with IPv4 - connect Ethernet and retry.'
     }
     $bootFile = Get-AppPxeBootConfiguredTftpBootFile
     $lanIp = Get-AppPxeBootLanIp -InterfaceId $InterfaceId
     $tftpRootNorm = ($TftpRoot -replace '\\', '/')
     $logFile = Join-Path (Get-AppPxeBootStoreRoot) 'dnsmasq.log'
     $lines = [System.Collections.Generic.List[string]]::new()
-    [void]$lines.Add("# WinDeployKit PXE boot — generated $(Get-Date -Format 'o')")
+    [void]$lines.Add("# WinDeployKit PXE boot - generated $(Get-Date -Format 'o')")
     [void]$lines.Add("interface=$iface")
     [void]$lines.Add('bind-interfaces')
     switch ($Mode) {
         'router' {
-            # TFTP only — no site DHCP/DNS (port=0). Matches ipxeboot dnsmasq-tftp-only.conf.
+            # TFTP only - no site DHCP/DNS (port=0). Matches ipxeboot dnsmasq-tftp-only.conf.
             [void]$lines.Add('port=0')
         }
         'standalone' {
@@ -4999,7 +4999,7 @@ function New-AppPxeBootDnsmasqConfig {
     $OutPath
 }
 
-# Keep in sync with packaging/pxe-caddy.json (runtime install — not bundled in signed macOS pkg).
+# Keep in sync with packaging/pxe-caddy.json (runtime install - not bundled in signed macOS pkg).
 $script:AppPxeBootCaddyVersion = '2.11.4'
 
 function Get-AppPxeBootCaddyManifestDefaultUrl {
@@ -5315,11 +5315,11 @@ function Ensure-AppPxeBootCaddy {
                 $lastError = 'SHA256 or size mismatch after download'
             } catch {
                 $lastError = $_.Exception.Message
-                Write-SidecarLogVerbose "PXE boot: Caddy download failed from $url — $lastError"
+                Write-SidecarLogVerbose "PXE boot: Caddy download failed from $url - $lastError"
             }
         }
         if (-not $downloaded) {
-            throw "PXE boot: Caddy download failed — $lastError"
+            throw "PXE boot: Caddy download failed - $lastError"
         }
 
         $extractDir = Join-Path $tmpRoot 'extract'
@@ -5395,7 +5395,7 @@ function Write-AppPxeBootCaddyfile {
             )
         }
     } catch {
-        Write-SidecarLog "PXE boot: image library routes unavailable — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: image library routes unavailable - $($_.Exception.Message)"
         $routeLines = @()
     }
 
@@ -5425,7 +5425,7 @@ function Write-AppPxeBootCaddyfile {
     }
 
     $lines = @(
-        "# WinDeployKit Netboot — generated $(Get-Date -Format 'o')"
+        "# WinDeployKit Netboot - generated $(Get-Date -Format 'o')"
         '{'
         '    auto_https off'
         '}'
@@ -5458,7 +5458,7 @@ function Clear-AppPxeBootLegacyHttpRunner {
     }
 }
 
-# Keep in sync with packaging/pxe-tftpd64.json (Windows TFTP — runtime install like Caddy).
+# Keep in sync with packaging/pxe-tftpd64.json (Windows TFTP - runtime install like Caddy).
 $script:AppPxeBootTftpd64Version = '4.74'
 
 function Get-AppPxeBootTftpd64ManifestDefaultUrl {
@@ -5674,11 +5674,11 @@ function Ensure-AppPxeBootTftpd64 {
                 $lastError = 'SHA256 or size mismatch after download'
             } catch {
                 $lastError = $_.Exception.Message
-                Write-SidecarLogVerbose "PXE boot: Tftpd64 download failed from $url — $lastError"
+                Write-SidecarLogVerbose "PXE boot: Tftpd64 download failed from $url - $lastError"
             }
         }
         if (-not $downloaded) {
-            throw "PXE boot: Tftpd64 download failed — $lastError"
+            throw "PXE boot: Tftpd64 download failed - $lastError"
         }
 
         $extractDir = Join-Path $tmpRoot 'extract'
@@ -5745,7 +5745,7 @@ function Ensure-AppPxeBootWindowsFirewallRules {
                     -Protocol $spec.Protocol -LocalPort $spec.LocalPort -Profile Any -ErrorAction Stop | Out-Null
                 [void]$added.Add($spec.DisplayName)
             } catch {
-                Write-SidecarLogVerbose "PXE boot: New-NetFirewallRule failed ($($spec.DisplayName)) — $($_.Exception.Message)"
+                Write-SidecarLogVerbose "PXE boot: New-NetFirewallRule failed ($($spec.DisplayName)) - $($_.Exception.Message)"
             }
         }
         if ($Tftpd64Exe -and (Test-Path -LiteralPath $Tftpd64Exe)) {
@@ -5757,7 +5757,7 @@ function Ensure-AppPxeBootWindowsFirewallRules {
                         -Action Allow -Profile Any -ErrorAction Stop | Out-Null
                     [void]$added.Add($progName)
                 } catch {
-                    Write-SidecarLogVerbose "PXE boot: Tftpd64 program firewall rule failed — $($_.Exception.Message)"
+                    Write-SidecarLogVerbose "PXE boot: Tftpd64 program firewall rule failed - $($_.Exception.Message)"
                 }
             }
         }
@@ -5778,7 +5778,7 @@ function Ensure-AppPxeBootWindowsFirewallRules {
     }
 
     if ($added.Count -gt 0) {
-        Write-SidecarLog "PXE boot: Windows Firewall — $($added -join ', ')"
+        Write-SidecarLog "PXE boot: Windows Firewall - $($added -join ', ')"
     }
 
     @{ ok = $true; added = @($added) }
@@ -6461,7 +6461,7 @@ function Get-AppPxeBootTftpd64StartFailureDetail {
     if (Test-Path -LiteralPath $IniPath) {
         $iniText = (Get-Content -LiteralPath $IniPath -Raw -ErrorAction SilentlyContinue)
         if ($iniText -match '(?m)^BaseDirectory=\s*$') {
-            [void]$parts.Add('Tftpd32.ini BaseDirectory is empty — check path with spaces')
+            [void]$parts.Add('Tftpd32.ini BaseDirectory is empty - check path with spaces')
         }
     } else {
         [void]$parts.Add("Tftpd32.ini missing: $IniPath")
@@ -6516,7 +6516,7 @@ function Start-AppPxeBootTftpServer {
                 $holder = Get-AppPxeBootPort69ProcessId
                 throw "PXE boot: UDP port 69 is already in use (pid $holder). Stop the other TFTP server and retry."
             }
-            # Tftpd64 is a Win32 GUI app — Start-Process -WindowStyle Hidden works; CreateNoWindow does not.
+            # Tftpd64 is a Win32 GUI app - Start-Process -WindowStyle Hidden works; CreateNoWindow does not.
             $proc = Start-Process -FilePath $exe -ArgumentList @('-hide') -WorkingDirectory $exeDir -PassThru -WindowStyle Hidden
             Start-Sleep -Milliseconds 1200
             if ($proc -and -not $proc.HasExited) {
@@ -6530,19 +6530,19 @@ function Start-AppPxeBootTftpServer {
             }
             $detail = Get-AppPxeBootTftpd64StartFailureDetail -IniPath $iniPath -TftpRoot $TftpRoot
             $hint = if ($detail) { $detail } else { 'check Windows Firewall (WinDeployKit adds rules automatically when permitted)' }
-            throw "PXE boot: Tftpd64 exited immediately — $hint"
+            throw "PXE boot: Tftpd64 exited immediately - $hint"
         }
-        throw 'PXE boot: Tftpd64 could not be installed — enable Netboot and retry, or set a custom path in Settings.'
+        throw 'PXE boot: Tftpd64 could not be installed - enable Netboot and retry, or set a custom path in Settings.'
     } elseif (($IsWindows -or ($env:OS -eq 'Windows_NT')) -and $preferDnsmasq) {
-        Write-SidecarLog "PXE boot: TFTP mode $Mode uses dnsmasq (ProxyDHCP/standalone — not Tftpd64)"
+        Write-SidecarLog "PXE boot: TFTP mode $Mode uses dnsmasq (ProxyDHCP/standalone - not Tftpd64)"
     }
 
     $dnsmasq = Resolve-AppPxeBootDnsmasqPath
     if (-not $dnsmasq) {
         if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
-            throw 'PXE boot: Tftpd64 could not be installed — enable Netboot and retry, or set a custom path in Settings.'
+            throw 'PXE boot: Tftpd64 could not be installed - enable Netboot and retry, or set a custom path in Settings.'
         }
-        throw 'PXE boot: bundled dnsmasq not found — run ./scripts/build-dnsmasq-macos.sh and rebuild, or brew install dnsmasq.'
+        throw 'PXE boot: bundled dnsmasq not found - run ./scripts/build-dnsmasq-macos.sh and rebuild, or brew install dnsmasq.'
     }
 
     $confPath = (Get-AppPxeBootLayoutPaths).dnsmasqConf
@@ -6556,7 +6556,7 @@ function Start-AppPxeBootTftpServer {
             if (-not (Test-AppPxeBootDnsmasqProcessIsAutoKillable -ProcessId $holder -ConfPath $confPathCheck -StoreRoot $storeRootCheck)) {
                 throw (Get-AppPxeBootPort69ConflictMessage)
             }
-            Write-SidecarLog "PXE boot: port 69 blocked by pid $holder — will clear in single elevated TFTP start"
+            Write-SidecarLog "PXE boot: port 69 blocked by pid $holder - will clear in single elevated TFTP start"
         }
 
         $includeClear = ($holder -gt 0) -or (@(Get-AppPxeBootDnsmasqProcessIds).Count -gt 0)
@@ -6569,7 +6569,7 @@ function Start-AppPxeBootTftpServer {
             } catch {
                 $msg = $_.Exception.Message
                 if ($attempt -lt 2 -and $msg -match 'already in use|Address already in use') {
-                    Write-SidecarLog 'PXE boot: port 69 blocked during TFTP start — retrying with elevated clear'
+                    Write-SidecarLog 'PXE boot: port 69 blocked during TFTP start - retrying with elevated clear'
                     $includeClear = $true
                     Start-Sleep -Milliseconds 400
                     continue
@@ -6902,7 +6902,7 @@ function Get-AppPxeBootHttpPortConflictMessage {
 
 function Get-AppPxeBootImagingLogDir {
     # Per-client imaging logs pushed by ImageDeployer's Write-Log over HTTP. Lives beside
-    # (not under) http/ — the panel reads via IPC; Caddy never serves these files.
+    # (not under) http/ - the panel reads via IPC; Caddy never serves these files.
     $dir = Join-Path (Get-AppPxeBootStoreRoot) 'imaging-logs'
     if (-not (Test-Path -LiteralPath $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -6915,7 +6915,7 @@ function Start-AppPxeBootImagingLogIngest {
     .SYNOPSIS
         Loopback ingest endpoint for ImageDeployer imaging-log pushes. Caddy reverse-proxies
         POST /imaging-log/ingest here, so no new public port, no firewall prompt, and no
-        http.sys URL-ACL headaches — a plain TcpListener on 127.0.0.1 with a minimal HTTP
+        http.sys URL-ACL headaches - a plain TcpListener on 127.0.0.1 with a minimal HTTP
         responder running in its own runspace. Returns the bound port, or 0 on failure
         (imaging must never depend on log ingest).
     #>
@@ -6946,7 +6946,7 @@ function Start-AppPxeBootImagingLogIngest {
                     }
                     $client = $Listener.AcceptTcpClient()
                 } catch {
-                    break   # listener stopped — shut down
+                    break   # listener stopped - shut down
                 }
                 try {
                     $client.ReceiveTimeout = 3000
@@ -6994,16 +6994,21 @@ function Start-AppPxeBootImagingLogIngest {
                         }
                         $payload = $null
                         try { $payload = $encoding.GetString($body, 0, $read) | ConvertFrom-Json } catch { $payload = $null }
-                        if ($payload -and $payload.lines) {
-                            $serialRaw = [string]$payload.serial
+                        # StrictMode: a bare $payload.lines THROWS when the client omits
+                        # the key, and `-and $payload.lines` does NOT guard it - the
+                        # property read happens before the comparison. The agent contract
+                        # is still in flux, so read every field defensively.
+                        $payloadLines = @(Get-AppSidecarJsonProp -Item $payload -Name 'lines')
+                        if ($payload -and $payloadLines.Count -gt 0 -and $null -ne $payloadLines[0]) {
+                            $serialRaw = [string](Get-AppSidecarJsonProp -Item $payload -Name 'serial')
                             if ([string]::IsNullOrWhiteSpace($serialRaw)) { $serialRaw = 'UNKNOWN' }
                             # Leading dots would make the file hidden on macOS (and invisible to
-                            # the non -Force Get-ChildItem readers) — trim them off too.
+                            # the non -Force Get-ChildItem readers) - trim them off too.
                             $serial = ($serialRaw.Trim() -replace '[^A-Za-z0-9._-]', '-').TrimStart('.', '-')
                             if ([string]::IsNullOrWhiteSpace($serial)) { $serial = 'UNKNOWN' }
                             if ($serial.Length -gt 64) { $serial = $serial.Substring(0, 64) }
                             $logPath = Join-Path $LogDir "$serial.log"
-                            $newLines = @($payload.lines | ForEach-Object { [string]$_ })
+                            $newLines = @($payloadLines | ForEach-Object { [string]$_ })
                             $newLines | Out-File -Append -FilePath $logPath -Encoding utf8
                             # Cap runaway logs: keep the newest 1500 lines past 4MB.
                             try {
@@ -7015,16 +7020,17 @@ function Start-AppPxeBootImagingLogIngest {
                             } catch { }
                             $statusPath = Join-Path $LogDir "$serial.json"
                             if (-not $clientIp) {
-                                # No X-Forwarded-For on this push — keep the last known IP.
+                                # No X-Forwarded-For on this push - keep the last known IP.
                                 try {
                                     $previous = Get-Content -LiteralPath $statusPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
-                                    if ($previous -and $previous.ip) { $clientIp = [string]$previous.ip }
+                                    $prevIp = Get-AppSidecarJsonProp -Item $previous -Name 'ip'
+                                    if ($prevIp) { $clientIp = [string]$prevIp }
                                 } catch { }
                             }
                             $statusInfo = [ordered]@{
                                 serial      = $serialRaw.Trim()
-                                make        = [string]$payload.make
-                                model       = [string]$payload.model
+                                make        = [string](Get-AppSidecarJsonProp -Item $payload -Name 'make')
+                                model       = [string](Get-AppSidecarJsonProp -Item $payload -Name 'model')
                                 ip          = [string]$clientIp
                                 lastSeenUtc = [DateTime]::UtcNow.ToString('o')
                                 lastLine    = [string]($newLines | Select-Object -Last 1)
@@ -7040,7 +7046,7 @@ function Start-AppPxeBootImagingLogIngest {
                     $stream.Write($reply, 0, $reply.Length)
                     $stream.Flush()
                 } catch {
-                    Write-IngestError "request error — $($_.Exception.Message)"
+                    Write-IngestError "request error - $($_.Exception.Message)"
                 } finally {
                     try { $client.Close() } catch { }
                 }
@@ -7057,7 +7063,7 @@ function Start-AppPxeBootImagingLogIngest {
         Write-SidecarLog "PXE boot: imaging-log ingest listening on 127.0.0.1:$port"
         return $port
     } catch {
-        Write-SidecarLog "PXE boot: imaging-log ingest failed to start — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: imaging-log ingest failed to start - $($_.Exception.Message)"
         try { if ($listener) { $listener.Stop() } } catch { }
         $script:AppPxeBootState.LogIngest = $null
         return 0
@@ -7092,7 +7098,7 @@ function Get-AppPxeBootImagingClients {
         } catch {
             continue
         }
-        # Set-StrictMode: snapshots from older builds may lack fields (ip landed later) —
+        # Set-StrictMode: snapshots from older builds may lack fields (ip landed later) -
         # read every property tolerantly rather than by dot access.
         function Get-ImagingSnapshotProp {
             param($Info, [string]$Name)
@@ -7219,7 +7225,7 @@ function Start-AppPxeBootHttpServer {
 
     if ($holder -gt 0) {
         if (Test-AppPxeBootHttpProcessIsOurs -ProcessId $holder -CaddyConfigPath $caddyConfig -StoreRoot $storeRoot) {
-            Write-SidecarLog "PXE boot: port $Port blocked by previous WinDeployKit Caddy (pid $holder) — clearing"
+            Write-SidecarLog "PXE boot: port $Port blocked by previous WinDeployKit Caddy (pid $holder) - clearing"
             Clear-AppPxeBootHttpPort -Port $Port | Out-Null
         } elseif ($orphanIds.Count -gt 0) {
             Write-SidecarLog "PXE boot: clearing orphan HTTP server process(es) on port $Port"
@@ -7241,7 +7247,7 @@ function Start-AppPxeBootHttpServer {
     Ensure-AppPxeBootCaddy | Out-Null
     $caddyExe = Get-AppPxeBootCaddyPath
     if (-not $caddyExe) {
-        throw 'PXE boot: Caddy is not installed — enable Netboot and wait for the download to finish.'
+        throw 'PXE boot: Caddy is not installed - enable Netboot and wait for the download to finish.'
     }
 
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
@@ -7249,7 +7255,7 @@ function Start-AppPxeBootHttpServer {
     }
 
     # Imaging-log ingest first so the Caddyfile can carry its reverse_proxy port. A failed
-    # ingest start (port 0) just omits the route — imaging never depends on log push.
+    # ingest start (port 0) just omits the route - imaging never depends on log push.
     $ingestPort = Start-AppPxeBootImagingLogIngest
 
     Write-AppPxeBootCaddyfile -Path $caddyConfig -HttpRoot $HttpRoot -Port $Port -BindAddress $bindAddress -ImagingLogIngestPort $ingestPort
@@ -7272,7 +7278,7 @@ function Start-AppPxeBootHttpServer {
         $detail = Get-AppPxeBootCaddyStartFailureDetail -CaddyExe $caddyExe -CaddyConfig $caddyConfig -StoreRoot $storeRoot
         $hint = 'check Caddyfile and port availability'
         if ($detail) { $hint = $detail }
-        throw "PXE boot: Caddy exited immediately — $hint"
+        throw "PXE boot: Caddy exited immediately - $hint"
     }
 
     if (-not $script:AppPxeBootState.HttpProcess -or $script:AppPxeBootState.HttpProcess.HasExited) {
@@ -7312,14 +7318,14 @@ function Stop-AppPxeBootServices {
             try {
                 Dismount-AppPxeBootInstallWimIsos
             } catch {
-                Write-SidecarLog "PXE boot: ISO dismount-all error — $($_.Exception.Message)"
+                Write-SidecarLog "PXE boot: ISO dismount-all error - $($_.Exception.Message)"
             }
             # Tear down the Deploy$ share too so its state follows imaging services (best
-            # effort; macOS only unshares when admin is already cached — no fresh prompt).
+            # effort; macOS only unshares when admin is already cached - no fresh prompt).
             try {
                 Remove-AppPxeBootImageLibraryShare
             } catch {
-                Write-SidecarLog "PXE boot: SMB share teardown error — $($_.Exception.Message)"
+                Write-SidecarLog "PXE boot: SMB share teardown error - $($_.Exception.Message)"
             }
         }
     }
@@ -7513,16 +7519,16 @@ function Get-AppPxeBootRouterInstructions {
         option66Label = 'Next Server (boot server host name / IP)'
         option67Label = 'Bootfile Name'
         notes         = @(
-            'On the site router or DHCP server — leave client leases unchanged; add PXE boot options only.'
+            'On the site router or DHCP server - leave client leases unchanged; add PXE boot options only.'
             'Option 66 = this laptop IPv4 on the deployment LAN (same subnet as targets).'
             "Option 67 = $bootFile (path relative to tftp/ on this host)."
             if ($sb) {
                 'Secure Boot: Option 67 must be shimx64.efi (shim loads ipxe/snponly from x86_64-sb/). Do not use x86_64-sb/ipxe.efi as Option 67.'
                 'Hyper-V Gen2: Security -> Secure Boot template -> Microsoft UEFI Certificate Authority (not Windows-only).'
             } else {
-                'Non–Secure Boot: snponly.efi chains to local boot.ipxe over HTTP.'
+                'Non-Secure Boot: snponly.efi chains to local boot.ipxe over HTTP.'
             }
-            'Some routers accept only a flat filename — copy or symlink shimx64.efi to tftp/ root if needed.'
+            'Some routers accept only a flat filename - copy or symlink shimx64.efi to tftp/ root if needed.'
             'Turn on the TFTP server switch in Netboot before PXE booting a target.'
             'UEFI target -> TFTP boot file -> local boot.ipxe menu; WIM/ISO over HTTP from this workstation.'
         )
@@ -7612,7 +7618,7 @@ function Get-AppPxeBootStatus {
         tftpPid           = $tftpPid
         tftpBackend       = $tftpBackend
         running           = ($httpRunning -or $tftpRunning)
-        # Devices that pushed imaging logs in the last 3 minutes — drives the collapsed
+        # Devices that pushed imaging logs in the last 3 minutes - drives the collapsed
         # "Imaging clients" badge off the panel's existing 8s status poll (cheap dir scan).
         imagingClientsActive = @(Get-AppPxeBootImagingClients | Where-Object { $_.active }).Count
         startedAt         = $script:AppPxeBootState.StartedAt
@@ -7818,7 +7824,7 @@ function Ensure-AppPxeBootWindowsSmbThrowawayCredential {
             }
             Write-SidecarLog "PXE boot: created Windows throwaway SMB user $user"
         } catch {
-            Write-SidecarLog "PXE boot: failed to create Windows throwaway SMB user — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: failed to create Windows throwaway SMB user - $($_.Exception.Message)"
             return $null
         }
         $persistCred = $true
@@ -7864,7 +7870,7 @@ function Ensure-AppPxeBootWindowsSmbThrowawayCredential {
                 Write-SidecarLog "PXE boot: failed to grant NTFS read for $account on $Root (icacls exit $LASTEXITCODE)"
             }
         } catch {
-            Write-SidecarLog "PXE boot: failed to grant NTFS read for $account on $Root — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: failed to grant NTFS read for $account on $Root - $($_.Exception.Message)"
         }
     }
 
@@ -7898,7 +7904,7 @@ function Ensure-AppPxeBootMacOsImageLibraryShare {
         Get-AppMacOsTccProtectedBase -Path $Root
     } else { $null }
     if ($tccBase) {
-        Write-SidecarLog "PXE boot: refusing Deploy`$ share — '$Root' is under TCC-protected '$tccBase'; smbd cannot serve it. Move the ISO & driver root to e.g. ~/Public/WinDeployKit."
+        Write-SidecarLog "PXE boot: refusing Deploy`$ share - '$Root' is under TCC-protected '$tccBase'; smbd cannot serve it. Move the ISO & driver root to e.g. ~/Public/WinDeployKit."
         return $false
     }
     $name = $script:AppPxeBootImageLibraryShareName
@@ -7911,7 +7917,7 @@ function Ensure-AppPxeBootMacOsImageLibraryShare {
     # + dscl -passwd on every start) was DESTRUCTIVE on macOS 26: pwpolicy silently
     # fails, the AuthenticationAuthority hash-list write does not persist, and the
     # unconditional password reset then regenerated ShadowHashData WITHOUT the
-    # SMB-NT hash — killing WinPE logons that had worked since the account was
+    # SMB-NT hash - killing WinPE logons that had worked since the account was
     # created (sysadminctl -addUser is the one path that reliably mints SMB-NT).
     # Field incident 2026-08-18; see AGENT_NOTES_WINPE_SMB_AUTH_MACOS.md.
     $script = @"
@@ -7931,9 +7937,9 @@ if ! smbutil view "//WORKGROUP;`$U:`$P@127.0.0.1" >/dev/null 2>&1; then
   # Field-proven remediation (2026-08-18, three stacked causes):
   # 1. SMB-NT hash: sysadminctl -addUser does NOT mint it on this macOS build;
   #    pwpolicy sethashtypes + a password (re)set is what lands it. No '|| true'
-  #    on pwpolicy — a silent failure here was how the hash quietly vanished.
+  #    on pwpolicy - a silent failure here was how the hash quietly vanished.
   # 2. Service ACL: when com.apple.access_smb exists, smbd rejects any account
-  #    not in it ("account restrictions" in WinPE) — admit the throwaway.
+  #    not in it ("account restrictions" in WinPE) - admit the throwaway.
   pwpolicy -u "`$U" -sethashtypes SMB-NT on
   dscl . -passwd "/Users/`$U" "`$P"
   if dscl . -read /Groups/com.apple.access_smb >/dev/null 2>&1; then
@@ -7958,20 +7964,20 @@ mkdir -p "`$ROOT"
 /usr/sbin/sharing -a "`$ROOT" -n "`$SHARE" -S "`$SHARE" -s 001 -g 000 -R 1
 echo SM_SMB_OK
 "@
-    # Runs as genuine root via sudo (Invoke-AppMacOsAdminShellCommand) — dscl /
+    # Runs as genuine root via sudo (Invoke-AppMacOsAdminShellCommand) - dscl /
     # sysadminctl / pwpolicy fail with eDSPermissionError under osascript's restricted
     # elevated context, so privileged execution must not go through AppleScript.
     $out = Invoke-AppMacOsAdminShellCommand -ShellCommand $script -AllowFailure
     if ($out -match 'SM_SMB_OK') {
         if ($out -match 'SM_SMB_REMEDIATED') {
-            Write-SidecarLog "PXE boot: throwaway SMB account $u failed local auth — remediated (SMB-NT hash + service-ACL membership) and re-verified OK"
+            Write-SidecarLog "PXE boot: throwaway SMB account $u failed local auth - remediated (SMB-NT hash + service-ACL membership) and re-verified OK"
         } elseif ($out -match 'SM_SMB_AUTH_BROKEN') {
-            Write-SidecarLog "PXE boot: WARNING — throwaway SMB account $u STILL fails local SMB auth after remediation; WinPE Deploy`$ mounts will fail (see AGENT_NOTES_WINPE_SMB_AUTH_MACOS.md)"
+            Write-SidecarLog "PXE boot: WARNING - throwaway SMB account $u STILL fails local SMB auth after remediation; WinPE Deploy`$ mounts will fail (see AGENT_NOTES_WINPE_SMB_AUTH_MACOS.md)"
         }
         Write-SidecarLog "PXE boot: macOS SMB share $name -> $Root (read-only, guest off; auth WORKGROUP\$u)"
         return $true
     }
-    Write-SidecarLog "PXE boot: macOS SMB share provisioning did not confirm — $out"
+    Write-SidecarLog "PXE boot: macOS SMB share provisioning did not confirm - $out"
     return $false
 }
 
@@ -8031,7 +8037,7 @@ function Get-AppPxeBootImageLibraryShareStatus {
             $status.active = Test-AppPxeBootMacOsShareActive -Name $name
             if ($tccBase) {
                 $status.tccBlocked = $true
-                $status.guidance = "macOS protects '$tccBase' (TCC) — smbd cannot serve $name from here, so WinPE will fail with 'network name not found'. Move the ISO & driver root out of Downloads/Desktop/Documents (e.g. ~/Public/WinDeployKit) in Settings -> Downloads, then Start Imaging Services again."
+                $status.guidance = "macOS protects '$tccBase' (TCC) - smbd cannot serve $name from here, so WinPE will fail with 'network name not found'. Move the ISO & driver root out of Downloads/Desktop/Documents (e.g. ~/Public/WinDeployKit) in Settings -> Downloads, then Start Imaging Services again."
             } elseif (-not $status.active) {
                 $status.guidance = "Tick this box and Start Imaging Services to auto-create $name (read-only, hidden) and a throwaway SMB user. ImageDeployer/WinPE then mounts $($status.unc) as WORKGROUP\<user>."
             }
@@ -8071,16 +8077,16 @@ function Ensure-AppPxeBootImageLibraryShare {
                 }
             }
         } catch {
-            Write-SidecarLog "PXE boot: SMB share ensure failed — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: SMB share ensure failed - $($_.Exception.Message)"
         }
     } elseif ((Get-AppPxeBootImageLibraryPlatform) -eq 'macos') {
         try {
             Ensure-AppPxeBootMacOsImageLibraryShare -Root $root | Out-Null
         } catch {
-            Write-SidecarLog "PXE boot: macOS SMB share ensure failed — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: macOS SMB share ensure failed - $($_.Exception.Message)"
         }
     } else {
-        Write-SidecarLog "PXE boot: SMB share is manual on this OS — see Netboot panel guidance."
+        Write-SidecarLog "PXE boot: SMB share is manual on this OS - see Netboot panel guidance."
     }
     Get-AppPxeBootImageLibraryShareStatus
 }
@@ -8104,7 +8110,7 @@ function Remove-AppPxeBootImageLibraryShare {
             }
         } elseif ($platform -eq 'macos') {
             if (-not (Test-AppPxeBootMacOsShareActive -Name $name)) { return }
-            # Only act if admin creds are available WITHOUT prompting — either cached this
+            # Only act if admin creds are available WITHOUT prompting - either cached this
             # session or resolvable from the local-admin vault. We never pop a dialog just
             # to unshare; if neither source exists the share is left for the next Start /
             # explicit toggle to reconcile.
@@ -8116,7 +8122,7 @@ function Remove-AppPxeBootImageLibraryShare {
                 try { $vaultAvailable = [bool](Get-AppLocalMachineCredentialSecure) } catch { $vaultAvailable = $false }
             }
             if (-not $cached -and -not $vaultAvailable) {
-                Write-SidecarLog "PXE boot: leaving $name shared (no cached/vault admin password — won't prompt just to unshare)"
+                Write-SidecarLog "PXE boot: leaving $name shared (no cached/vault admin password - won't prompt just to unshare)"
                 return
             }
             if (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue) {
@@ -8129,7 +8135,7 @@ function Remove-AppPxeBootImageLibraryShare {
             }
         }
     } catch {
-        Write-SidecarLog "PXE boot: SMB share removal warning — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: SMB share removal warning - $($_.Exception.Message)"
     }
 }
 
@@ -8182,7 +8188,7 @@ function Start-AppPxeBootServices {
         try {
             Mount-AppPxeBootInstallWimIsos | Out-Null
         } catch {
-            Write-SidecarLog "PXE boot: ISO mount-serve error — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: ISO mount-serve error - $($_.Exception.Message)"
         }
     }
 
@@ -8223,7 +8229,7 @@ function Start-AppPxeBootServices {
 
     # SMB comes up with imaging services for parity with HTTP/TFTP (techs shouldn't have
     # to remember a separate tick). The only hard blocker is a TCC-protected root on
-    # macOS — smbd can't serve it — so skip + surface guidance there instead of creating
+    # macOS - smbd can't serve it - so skip + surface guidance there instead of creating
     # a dead share. Otherwise enable it (persist the tick) and ensure the share.
     if ($startHttp) {
         try {
@@ -8231,7 +8237,7 @@ function Start-AppPxeBootServices {
             if ($Minimal) {
                 Write-SidecarLogVerbose 'PXE boot: minimal start - skipping Deploy$ SMB share.'
             } elseif ($shareStatus.tccBlocked) {
-                Write-SidecarLog "PXE boot: SMB not auto-enabled — $($shareStatus.guidance)"
+                Write-SidecarLog "PXE boot: SMB not auto-enabled - $($shareStatus.guidance)"
             } else {
                 if (-not $cfg.smbShareEnabled) {
                     $cfg = Write-AppPxeBootConfig -SmbShareEnabled $true
@@ -8244,7 +8250,7 @@ function Start-AppPxeBootServices {
                 Write-AppPxeBootMenuFiles
             }
         } catch {
-            Write-SidecarLog "PXE boot: SMB ensure error — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: SMB ensure error - $($_.Exception.Message)"
         }
     }
 
@@ -8259,12 +8265,12 @@ function Start-AppPxeBootServices {
             $httpHint = if (Test-AppPxeBootWanDeployMenuEnabled) {
                 'snponly.efi falls back to deploy.example.com when boot.ipxe is unreachable. '
             } else {
-                'Clients need HTTP for the local boot menu — enable HTTP in Netboot. '
+                'Clients need HTTP for the local boot menu - enable HTTP in Netboot. '
             }
-            throw ('PXE boot: HTTP did not start — ' + $httpHint + ($errors -join ' '))
+            throw ('PXE boot: HTTP did not start - ' + $httpHint + ($errors -join ' '))
         }
         if ($errors.Count -gt 0) {
-            Write-SidecarLog "PXE boot: partial start — $($errors -join ' | ')"
+            Write-SidecarLog "PXE boot: partial start - $($errors -join ' | ')"
         }
     } elseif ($errors.Count -gt 0) {
         throw $errors[0]
@@ -8297,7 +8303,7 @@ function Open-AppPxeBootStoreFolder {
 function Reveal-AppPxeBootMacOsSmbd {
     # Open the Full Disk Access pane AND reveal /usr/sbin/smbd selected in Finder so a
     # user can drag it into the list when they insist on a TCC-protected share root
-    # (Downloads/Desktop/Documents). smbd — not this app — is the process TCC blocks, so
+    # (Downloads/Desktop/Documents). smbd - not this app - is the process TCC blocks, so
     # this is the only way to let it serve those folders. Both opens run here in the
     # sidecar because Tauri's shell `open` scope rejects the x-apple.systempreferences:
     # URL scheme. macOS only.
@@ -8306,7 +8312,7 @@ function Reveal-AppPxeBootMacOsSmbd {
     if ($IsMacOS) {
         try {
             # Open Full Disk Access FIRST, then let System Settings settle before revealing
-            # smbd — System Settings grabs focus asynchronously a beat after launch, so if
+            # smbd - System Settings grabs focus asynchronously a beat after launch, so if
             # we reveal Finder first it gets shoved to the back. Reveal + raise Finder LAST
             # so it wins the foreground (this is what worked in early tests). Plain `open`,
             # no AppleScript needed.
@@ -8403,7 +8409,7 @@ function Import-AppPxeBootWim {
     Complete-AppPxeBootWimImport -TargetName $targetName -Dest $dest -Paths $paths -ReplaceExisting:$ReplaceExisting
 }
 
-# Imageable / SOE WIMs (install.wim, custom SOE) — placed under the user-chosen
+# Imageable / SOE WIMs (install.wim, custom SOE) - placed under the user-chosen
 # ISO & driver root at <root>/WIMs/<name>.wim, served via Caddy /WIMs/* and read
 # by the WinPE client from <DeployShare>\WIMs\. These are NOT boot WIMs:
 # no boot-asset packaging, no default-WIM selection, no iPXE menu entry.
@@ -8533,7 +8539,7 @@ function Remove-AppPxeBootWim {
     }
 
     # Boot menu always; ISO catalog only when FieldIso removed (catalog entries need FieldIso.wim).
-    # SkipFieldIsoPrepare — no wimlib overlay / boot-asset export on delete.
+    # SkipFieldIsoPrepare - no wimlib overlay / boot-asset export on delete.
     if ($removedFieldIso) {
         Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare
     } else {
@@ -8587,16 +8593,16 @@ function Dismount-AppPxeBootIso {
             & hdiutil detach $MountInfo.mountPath -force 2>&1 | Out-Null
             Remove-Item -LiteralPath $MountInfo.mountPath -Recurse -Force -ErrorAction SilentlyContinue
         } elseif ($MountInfo.platform -eq 'windows') {
-            # Remove the in-share junction first — Directory.Delete on a reparse point drops
+            # Remove the in-share junction first - Directory.Delete on a reparse point drops
             # the link only, never recursing into (and deleting) the mounted ISO contents.
             if ($MountInfo.shareMountPath -and (Test-Path -LiteralPath $MountInfo.shareMountPath)) {
                 try { [System.IO.Directory]::Delete($MountInfo.shareMountPath, $false) }
-                catch { Write-SidecarLog "PXE boot: junction cleanup warning — $($_.Exception.Message)" }
+                catch { Write-SidecarLog "PXE boot: junction cleanup warning - $($_.Exception.Message)" }
             }
             Dismount-DiskImage -ImagePath $MountInfo.isoPath -ErrorAction SilentlyContinue | Out-Null
         }
     } catch {
-        Write-SidecarLog "PXE boot: ISO dismount warning — $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: ISO dismount warning - $($_.Exception.Message)"
     }
 }
 
@@ -8607,10 +8613,10 @@ function Dismount-AppPxeBootIso {
 #   - HTTP : Caddy handle_path /iso-wim/<token>/* -> <mount>/sources
 #   - SMB  : the overlay-aware ImageDeployer.ps1 scans Z:\.mounts\*\sources\install.wim and
 #            reads the REAL file straight across the sub-mount (verified working on macOS
-#            smbd and Windows — DISM reads it directly).
+#            smbd and Windows - DISM reads it directly).
 # <token> is a deterministic, path-/Caddyfile-/URL-safe slug + 8-char hash of the ISO file
-# name (Get-AppPxeBootIsoMountToken), so any number of ISOs — including ones with spaces or
-# parentheses in their names — mount side by side without colliding or breaking the Caddyfile.
+# name (Get-AppPxeBootIsoMountToken), so any number of ISOs - including ones with spaces or
+# parentheses in their names - mount side by side without colliding or breaking the Caddyfile.
 # The friendly ISO name is kept in a sibling <token>.name file so the WIM picker can show it.
 # We previously tried symlinking a WIMs/<base>-install.wim entry to avoid putting the file
 # at top level, but Apple's smbd does not emit a Windows-followable symlink (WinPE DISM
@@ -8651,7 +8657,7 @@ function Clear-AppPxeBootStaleIsoMountDirs {
                 & hdiutil detach $dir.FullName -force 2>&1 | Out-Null
                 Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
             } else {
-                # Windows: a live mount is a junction (reparse point) — delete the link only so
+                # Windows: a live mount is a junction (reparse point) - delete the link only so
                 # we never recurse into and wipe the mounted ISO contents. Plain leftover dirs
                 # (empty) are removed outright.
                 $isReparse = $false
@@ -8667,7 +8673,7 @@ function Clear-AppPxeBootStaleIsoMountDirs {
             }
             Write-SidecarLog "PXE boot: cleaned stale .mounts entry '$($dir.Name)' (legacy/removed ISO)"
         } catch {
-            Write-SidecarLog "PXE boot: could not clean stale .mounts entry '$($dir.Name)' — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: could not clean stale .mounts entry '$($dir.Name)' - $($_.Exception.Message)"
         }
     }
 }
@@ -8680,7 +8686,7 @@ function Mount-AppPxeBootInstallWimIsos {
         overlay-aware ImageDeployer.ps1 scans Z:\.mounts\*\sources\install.wim. Idempotent.
     .NOTES
         Each ISO gets a deterministic, path-/Caddyfile-/URL-safe mount token
-        (Get-AppPxeBootIsoMountToken) so multiple — and awkwardly named — ISOs never collide.
+        (Get-AppPxeBootIsoMountToken) so multiple - and awkwardly named - ISOs never collide.
         The friendly ISO name is written alongside the mount as <token>.name so the WIM picker
         can show it instead of the slugged folder.
     #>
@@ -8703,8 +8709,8 @@ function Mount-AppPxeBootInstallWimIsos {
         }
         try {
             Write-SidecarLog "PXE boot: mounting ISO $($iso.Name) (read-only) to serve install.wim in place"
-            # Expose the mount INSIDE the Deploy$ share at .mounts/<token> so SMB clients —
-            # and the overlay-aware ImageDeployer scan of Z:\.mounts\*\sources\install.wim —
+            # Expose the mount INSIDE the Deploy$ share at .mounts/<token> so SMB clients -
+            # and the overlay-aware ImageDeployer scan of Z:\.mounts\*\sources\install.wim -
             # read the real file across the sub-mount.
             #   macOS  : hdiutil mounts directly at .mounts/<token>.
             #   Windows: Mount-DiskImage gives a drive letter, so we junction
@@ -8735,7 +8741,7 @@ function Mount-AppPxeBootInstallWimIsos {
             }
             $resolved = Resolve-AppPxeBootMountInstallWim -MountPath $mountInfo.mountPath
             if (-not $resolved) {
-                Write-SidecarLog "PXE boot: $($iso.Name) has no install.wim — dismounting"
+                Write-SidecarLog "PXE boot: $($iso.Name) has no install.wim - dismounting"
                 Dismount-AppPxeBootIso -MountInfo $mountInfo
                 continue
             }
@@ -8762,7 +8768,7 @@ function Mount-AppPxeBootInstallWimIsos {
             $sizeGb = [math]::Round((Get-Item -LiteralPath $resolved.wim).Length / 1GB, 2)
             Write-SidecarLog "PXE boot: serving install.wim for '$displayName' in place at .mounts/$token (${sizeGb} GB, no extract)"
         } catch {
-            Write-SidecarLog "PXE boot: failed to mount $($iso.Name) — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: failed to mount $($iso.Name) - $($_.Exception.Message)"
         }
     }
 
@@ -8792,7 +8798,7 @@ function Dismount-AppPxeBootInstallWimIso {
     $entry = $script:AppPxeBootState.IsoMounts[$Base]
     if (-not $entry) { return }
     # NB: an extracted WIMs/<base>-install.wim copy (if the operator made one) is a real
-    # library asset and is intentionally NOT removed here — only when its ISO leaves the
+    # library asset and is intentionally NOT removed here - only when its ISO leaves the
     # library. Dismount just releases the read-only mount.
     if ($entry.mountInfo) {
         Dismount-AppPxeBootIso -MountInfo $entry.mountInfo
@@ -8814,7 +8820,7 @@ function Dismount-AppPxeBootInstallWimIsos {
 
 function Get-AppPxeBootIsoMountStatus {
     @{
-        # Mount-and-serve is unconditional — extraction was removed 2026-08-18 and a
+        # Mount-and-serve is unconditional - extraction was removed 2026-08-18 and a
         # stale persisted isoMountServe=false must not make the UI claim it's off.
         enabled = $true
         mounts  = @($script:AppPxeBootState.IsoMounts.Values | ForEach-Object {
@@ -9005,17 +9011,17 @@ function Import-AppPxeBootIso {
     Copy-Item -LiteralPath $SourcePath -Destination $dest -Force
 
     $cfg = Read-AppPxeBootConfig
-    # Mount-and-serve is the ONLY path (no extraction, ever — duplicated multi-GB
+    # Mount-and-serve is the ONLY path (no extraction, ever - duplicated multi-GB
     # WIMs on disk defeat the point of HTTP serving). If HTTP is already running,
     # mount now so the new ISO's install.wim serves immediately; else on next start.
     if ($script:AppPxeBootState.HttpProcess -and -not $script:AppPxeBootState.HttpProcess.HasExited) {
         try {
             Mount-AppPxeBootInstallWimIsos | Out-Null
-            # Caddy `run` doesn't hot-reload — restart so the new /iso-wim/<base> route applies.
+            # Caddy `run` doesn't hot-reload - restart so the new /iso-wim/<base> route applies.
             Stop-AppPxeBootHttpServer | Out-Null
             Start-AppPxeBootHttpServer -HttpRoot (Get-AppPxeBootLayoutPaths).httpRoot -Port ([int]$cfg.httpPort) -InterfaceId $cfg.interfaceId | Out-Null
         } catch {
-            Write-SidecarLog "PXE boot: mount after ISO import failed — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: mount after ISO import failed - $($_.Exception.Message)"
         }
     }
 
@@ -9035,7 +9041,7 @@ function Remove-AppPxeBootIso {
     if (-not (Test-Path -LiteralPath $dest)) {
         throw "PXE boot: ISO not found: $name"
     }
-    # Release any live mount first — the ISO file is locked while mounted.
+    # Release any live mount first - the ISO file is locked while mounted.
     $mountBase = [IO.Path]::GetFileNameWithoutExtension($name)
     if ($script:AppPxeBootState.IsoMounts.ContainsKey($mountBase)) {
         Dismount-AppPxeBootInstallWimIso -Base $mountBase
@@ -9077,7 +9083,7 @@ function Set-AppPxeBootDefaultIso {
             -TftpMode $existing.tftpMode `
             -DefaultBootIso '' | Out-Null
         Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare -SkipIsoCatalogRegen
-        Write-SidecarLog 'PXE boot: default boot ISO cleared — FieldIso default opens ISO catalog menu'
+        Write-SidecarLog 'PXE boot: default boot ISO cleared - FieldIso default opens ISO catalog menu'
         return (Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh)
     }
     $name = Get-AppPxeBootSafeIsoFileName -FileName $FileName
@@ -9163,7 +9169,7 @@ function Set-AppPxeBootDefaultWim {
             -TftpMode $existing.tftpMode `
             -DefaultBootWim '' | Out-Null
         Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare -SkipIsoCatalogRegen
-        Write-SidecarLog 'PXE boot: default boot WIM cleared — clients choose from PXE menu'
+        Write-SidecarLog 'PXE boot: default boot WIM cleared - clients choose from PXE menu'
         return (Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh)
     }
     $name = Get-AppPxeBootSafeWimFileName -FileName $FileName
@@ -9175,7 +9181,7 @@ function Set-AppPxeBootDefaultWim {
         Ensure-AppPxeBootWimBootAssets -WimFileName $name -SkipMenuRegen | Out-Null
     }
     if (Test-AppPxeBootWimIsFieldIso -FileName $name) {
-        Write-SidecarLog "PXE boot: default boot WIM set to $name (deploy ISO catalog chain — not local wimboot auto-boot)"
+        Write-SidecarLog "PXE boot: default boot WIM set to $name (deploy ISO catalog chain - not local wimboot auto-boot)"
     }
     $existing = Read-AppPxeBootConfig
     Write-AppPxeBootConfig `
@@ -9268,7 +9274,7 @@ function Set-AppPxeBootPluginConfig {
                 Remove-AppPxeBootImageLibraryShare
             }
         } catch {
-            Write-SidecarLog "PXE boot: SMB ensure (config change) error — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: SMB ensure (config change) error - $($_.Exception.Message)"
         }
     }
     # Apply an ISO mount-serve toggle live: (re)mount or dismount and restart HTTP so
@@ -9286,11 +9292,11 @@ function Set-AppPxeBootPluginConfig {
                 Start-AppPxeBootHttpServer -HttpRoot (Get-AppPxeBootLayoutPaths).httpRoot -Port ([int]$cfg.httpPort) -InterfaceId $cfg.interfaceId | Out-Null
             }
         } catch {
-            Write-SidecarLog "PXE boot: ISO mount toggle error — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: ISO mount toggle error - $($_.Exception.Message)"
         }
     }
     # Apply an overlay toggle live: (re)bake the ImageDeployer script and publish/remove
-    # the runtime cred/UNC files, then refresh boot.ipxe so the iPXE initrd lines match —
+    # the runtime cred/UNC files, then refresh boot.ipxe so the iPXE initrd lines match -
     # no full service restart needed. All idempotent and gated on the config flags.
     if ($PSBoundParameters.ContainsKey('SmbOverlayEnabled') -or
         $PSBoundParameters.ContainsKey('ImageDeployerOverlayCreds') -or
@@ -9300,7 +9306,7 @@ function Set-AppPxeBootPluginConfig {
             Sync-AppPxeBootFieldIsoHttpAssets | Out-Null
             if (-not $SkipMenuRegen) { Write-AppPxeBootMenuFiles }
         } catch {
-            Write-SidecarLog "PXE boot: overlay toggle apply error — $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: overlay toggle apply error - $($_.Exception.Message)"
         }
     }
     if ($SkipMenuRegen) {

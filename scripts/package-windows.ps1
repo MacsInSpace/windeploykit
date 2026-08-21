@@ -21,12 +21,12 @@
 
 .PARAMETER Bundles
     Comma-separated Tauri bundle kinds: msi, nsis (default: msi).
-    NSIS is NOT distributed since 0.4.2 — setup.exe cannot upgrade MSI installs and
+    NSIS is NOT distributed since 0.4.2 - setup.exe cannot upgrade MSI installs and
     creates duplicate Installed-apps entries (field policy: MSI only). Pass
     -Bundles msi,nsis only for local dev/testing; release-public never uploads it.
 
 .PARAMETER Arch
-    x64 | arm64 — PowerShell payload and build target (default: x64)
+    x64 | arm64 - PowerShell payload and build target (default: x64)
 
 .PARAMETER BundlePowerShell
     Also download and embed portable PowerShell (~250 MB) in the installer.
@@ -173,7 +173,7 @@ function Resolve-RustBuildToolchain {
     $toolchain = "stable-$rustTarget"
     $installed = @((rustup toolchain list 2>$null) -match [regex]::Escape($toolchain)) -contains $true
     if (-not $installed) {
-        Write-Host "==> Rust host ($defaultHost) differs from build arch ($Arch) — installing $toolchain" -ForegroundColor Cyan
+        Write-Host "==> Rust host ($defaultHost) differs from build arch ($Arch) - installing $toolchain" -ForegroundColor Cyan
         if ($Arch -eq 'x64') {
             rustup toolchain install $toolchain --force-non-host
         }
@@ -244,7 +244,7 @@ function Sync-LatestSource {
 
         if ($behind -eq 0) {
             if ($dirtyFiles.Count -gt 0) {
-                Write-Host "  Already up to date with $upstream — continuing with local changes:" -ForegroundColor Yellow
+                Write-Host "  Already up to date with $upstream - continuing with local changes:" -ForegroundColor Yellow
                 $dirtyFiles | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
             }
             else {
@@ -365,10 +365,10 @@ function Initialize-WindowsNpmHostEnvironment {
     $cliArch = Get-WindowsNodeProcessArch
     $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
     if ($InstallerArch -eq 'x64' -and $cliArch -eq 'arm64') {
-        Write-Host "  Node $nodeExe ($cliArch) — Rust target x86_64-pc-windows-msvc for x64 MSI" -ForegroundColor DarkGray
+        Write-Host "  Node $nodeExe ($cliArch) - Rust target x86_64-pc-windows-msvc for x64 MSI" -ForegroundColor DarkGray
     }
     else {
-        Write-Host "  Node $nodeExe ($cliArch) — installer arch $InstallerArch" -ForegroundColor DarkGray
+        Write-Host "  Node $nodeExe ($cliArch) - installer arch $InstallerArch" -ForegroundColor DarkGray
     }
     Ensure-TauriCliNativeBinding -AppDir $AppDir -CliArch $cliArch
     if (-not (Test-WindowsNpmInstall -AppDir $AppDir -CliArch $cliArch)) {
@@ -546,7 +546,7 @@ $env:VITE_APP_VERSION = $Version
 $env:VITE_BUILD_NUMBER = "$GitSha-$BuildStamp"
 $env:VITE_BUILD_STAMP = Get-Date -Format 'yyyyMMdd'
 $env:VITE_APP_VARIANT = $Arch
-Write-Step "Frontend build id: $($env:VITE_APP_VERSION) · $($env:VITE_BUILD_NUMBER) ($($env:VITE_APP_VARIANT))"
+Write-Step "Frontend build id: $($env:VITE_APP_VERSION) | $($env:VITE_BUILD_NUMBER) ($($env:VITE_APP_VARIANT))"
 
 if (-not $SkipClean -and (Test-Path -LiteralPath $TauriTarget)) {
     Write-Step 'Cleaning Cargo/Tauri target (avoids stale paths after repo move)'
@@ -558,7 +558,7 @@ Initialize-WindowsNpmHostEnvironment -AppDir $AppDir -InstallerArch $Arch
 $nodeExe = (Get-Command node -ErrorAction Stop).Source
 $tauriJs = Join-Path $AppDir 'node_modules\@tauri-apps\cli\tauri.js'
 if (-not (Test-Path -LiteralPath $tauriJs)) {
-    throw "Missing $tauriJs — run without -SkipNpmInstall."
+    throw "Missing $tauriJs - run without -SkipNpmInstall."
 }
 Push-Location $AppDir
 try {
@@ -579,7 +579,7 @@ finally {
 
 $psOpenAdInBundle = @(Get-ChildItem -Path (Join-Path $AppDir 'src-tauri/target') -Recurse -Filter 'PSOpenAD.psd1' -ErrorAction SilentlyContinue)
 if ($psOpenAdInBundle.Count -eq 0) {
-    Write-Host 'WARN: PSOpenAD.psd1 not found under src-tauri/target after build — MSI may be missing LDAP module.' -ForegroundColor Yellow
+    Write-Host 'WARN: PSOpenAD.psd1 not found under src-tauri/target after build - MSI may be missing LDAP module.' -ForegroundColor Yellow
 } else {
     Write-Step "Bundle contains PSOpenAD ($($psOpenAdInBundle.Count) manifest(s))"
 }
@@ -610,7 +610,7 @@ if (Test-Path -LiteralPath $portableExe) {
 
 $nsisSection = if ($nsis) {
     @"
-2. NSIS setup.exe (interactive wizard — dev/test only; NEVER distribute):
+2. NSIS setup.exe (interactive wizard - dev/test only; NEVER distribute):
    Run the *-setup.exe installer from this folder.
    If an older MSI or setup.exe is already installed, uninstall all
    "WinDeployKit" entries in Settings -> Apps first.
@@ -628,7 +628,7 @@ MSI installs and causes duplicate Installed-apps entries). Use the MSI.
 
 @"
 
-WinDeployKit $Version — Windows install
+WinDeployKit $Version - Windows install
 ==============================================
 
 Built (UTC): $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm'))
@@ -657,7 +657,7 @@ INSTALL (pick one)
    Replaces a previous MSI of the same product automatically.
 
 $nsisSection
-   windeploykit.exe in this folder is NOT sufficient alone — use the MSI above.
+   windeploykit.exe in this folder is NOT sufficient alone - use the MSI above.
    The full app with resources is only inside the MSI install tree.
 
 FIRST RUN
@@ -668,7 +668,7 @@ FIRST RUN
 
 SMARTScreen
 -----------
-Unsigned builds may show "Windows protected your PC". Click More info → Run anyway,
+Unsigned builds may show "Windows protected your PC". Click More info -> Run anyway,
 or sign the MSI in your org (optional future step).
 
 "@ | Set-Content -LiteralPath (Join-Path $OutDir 'README-INSTALL.txt') -Encoding utf8
@@ -689,7 +689,7 @@ if ($outFiles) {
     Compress-Archive -Path (Join-Path $OutDir '*') -DestinationPath $zipPath -Force
 }
 else {
-    Write-Host 'No installer files copied to output folder — check tauri build bundle paths above.' -ForegroundColor Yellow
+    Write-Host 'No installer files copied to output folder - check tauri build bundle paths above.' -ForegroundColor Yellow
 }
 
 Write-Step "Output folder: $OutDir"

@@ -1,5 +1,5 @@
 /**
- * Console tree — the MDT Deployment Workbench left pane.
+ * Console tree - the MDT Deployment Workbench left pane.
  *
  * One vertical tree: a Deployment Share root with its nodes nested beneath,
  * each row a single line with a disclosure caret, icon and label. Selection is
@@ -13,7 +13,7 @@ import { NAV_TREE, type NavNode } from "./navConfig";
 interface SidebarProps {
   activeId: string;
   onSelect: (id: string) => void;
-  /** Node ids whose services are unavailable — rendered dimmed, still clickable. */
+  /** Node ids whose services are unavailable - rendered dimmed, still clickable. */
   disabledIds?: ReadonlySet<string>;
 }
 
@@ -120,7 +120,7 @@ function TreeNode({
             onToggle(node.id);
           }}
         >
-          {hasChildren ? (isOpen ? "▾" : "▸") : ""}
+          {hasChildren ? (isOpen ? "v" : ">") : ""}
         </span>
         <AppIcon name={node.icon} size={14} />
         <span className="truncate">{node.label}</span>

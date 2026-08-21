@@ -1,14 +1,14 @@
 <#
-    WinDeployKit sidecar — long-lived PowerShell 7 service, NDJSON over stdio.
+    WinDeployKit sidecar - long-lived PowerShell 7 service, NDJSON over stdio.
 
     Protocol (unchanged from the USM original this was ported from):
       stdin   one JSON object per line: {"id":N,"cmd":"Name","params":{...}}
-      stdout  one JSON response per line — responses ONLY
+      stdout  one JSON response per line - responses ONLY
       stderr  human-readable log lines
 
     There is no bootstrap gauntlet here: WinDeployKit has no directory session and
     no sign-in, so the service is ready the moment the dispatch loop starts.
-    Commands resolve by convention — "Foo" runs Handle-Foo from handlers/.
+    Commands resolve by convention - "Foo" runs Handle-Foo from handlers/.
 #>
 
 Set-StrictMode -Version Latest
@@ -16,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 $script:SidecarRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-# Repo/bundle root — libs resolve vendored binaries and packaging manifests from
+# Repo/bundle root - libs resolve vendored binaries and packaging manifests from
 # here (vendor/binaries, packaging/*.json). Must be set before any lib loads.
 $script:AppSidecarProjectRoot = Split-Path -Parent $script:SidecarRoot
 $ProjectRoot = $script:AppSidecarProjectRoot
@@ -128,7 +128,7 @@ function Invoke-SidecarCommand {
 
 function Initialize-SidecarHostBridge {
     # Pure .NET stdin pump: the reader thread has no runspace, so it must not
-    # call back into PowerShell — it only enqueues raw lines.
+    # call back into PowerShell - it only enqueues raw lines.
     if ('WinDeployKitSidecar.SidecarHost' -as [type]) { return }
     Add-Type @'
 using System;
@@ -181,10 +181,15 @@ function Invoke-SidecarDispatchOnce {
             return $true
         }
 
+        # StrictMode: ConvertFrom-Json omits absent keys entirely, so a bare $req.cmd
+        # THROWS on a request that has no cmd. That threw past the IsNullOrWhiteSpace
+        # check below into the outer catch, which logs but never answers - so the
+        # client waited out its per-command timeout instead of getting an error.
         $id = 0
-        try { $id = [int]$req.id } catch { $id = 0 }
-        $cmd = [string]$req.cmd
-        $prm = if ($req.PSObject.Properties.Name -contains 'params') { $req.params } else { @{} }
+        try { $id = [int](Get-AppSidecarJsonProp -Item $req -Name 'id') } catch { $id = 0 }
+        $cmd = [string](Get-AppSidecarJsonProp -Item $req -Name 'cmd')
+        $prm = Get-AppSidecarJsonProp -Item $req -Name 'params'
+        if ($null -eq $prm) { $prm = @{} }
         if ([string]::IsNullOrWhiteSpace($cmd)) {
             Write-SidecarError -Id $id -Message 'Request had no cmd.' -Code 'UNKNOWN'
             return $true

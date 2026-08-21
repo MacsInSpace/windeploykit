@@ -1,4 +1,4 @@
-# AppElevation.ps1 — generic macOS sudo-elevation + credential-cache helpers.
+# AppElevation.ps1 - generic macOS sudo-elevation + credential-cache helpers.
 # Extracted from USM AppCurricRoutes.ps1 (lines 132-572) during the windeploykit port.
 
 function ConvertTo-AppAppleScriptQuotedString {
@@ -83,7 +83,7 @@ function Get-AppMacOsAdminUserName {
 
 function ConvertTo-AppPlainTextFromSecureString {
     param([Parameter(Mandatory)][System.Security.SecureString]$SecureString)
-    # SecureStringToBSTR returns only the first character on macOS PowerShell — use Unicode alloc.
+    # SecureStringToBSTR returns only the first character on macOS PowerShell - use Unicode alloc.
     $ptr = [System.Runtime.InteropServices.Marshal]::SecureStringToGlobalAllocUnicode($SecureString)
     try {
         return [System.Runtime.InteropServices.Marshal]::PtrToStringUni($ptr)
@@ -108,7 +108,7 @@ function Get-AppMacOsDialogHelperPath {
         Locate the bundled windeploykit-dialog native prompt helper (tools/windeploykit-dialog).
         Preferred over osascript: security tooling / MDM can deny osascript, and
         then `display dialog` prompts silently never appear. Returns $null when
-        the helper isn't present (dev checkout without a build) — callers fall
+        the helper isn't present (dev checkout without a build) - callers fall
         back to osascript.
     #>
     if (-not ($IsMacOS -or $IsDarwin)) { return $null }
@@ -139,7 +139,7 @@ function Invoke-AppMacOsSecurePasswordDialog {
     .SYNOPSIS
         Show a secure-entry password prompt and return the plain-text entry.
         windeploykit-dialog (bundled AppKit helper, argv-only, no AppleScript) first;
-        osascript `display dialog … with hidden answer` as fallback.
+        osascript `display dialog ... with hidden answer` as fallback.
         Throws on cancel or empty entry.
     #>
     param([Parameter(Mandatory)][string]$Message)
@@ -158,11 +158,11 @@ function Invoke-AppMacOsSecurePasswordDialog {
         if ($code -eq 2) {
             throw 'Administrator permission was not granted (cancelled).'
         }
-        Write-SidecarLog "macOS: windeploykit-dialog helper failed (exit $code) — falling back to osascript. $($plain.Trim())"
+        Write-SidecarLog "macOS: windeploykit-dialog helper failed (exit $code) - falling back to osascript. $($plain.Trim())"
     }
 
     if (-not (Get-Command osascript -ErrorAction SilentlyContinue)) {
-        throw 'Neither the bundled dialog helper nor osascript is available — cannot request administrator password.'
+        throw 'Neither the bundled dialog helper nor osascript is available - cannot request administrator password.'
     }
     $quotedMsg = ConvertTo-AppAppleScriptQuotedString -Value $Message
     $osa = @"
@@ -199,7 +199,7 @@ function Invoke-AppMacOsAdminCredentialPrompt {
     } else {
         @(
             'WinDeployKit needs your macOS administrator password for this session'
-            '(TFTP port 69, network routes). It is kept in memory only — not saved to disk.'
+            '(TFTP port 69, network routes). It is kept in memory only - not saved to disk.'
         ) -join ' '
     }
     $plain = Invoke-AppMacOsSecurePasswordDialog -Message $msg
@@ -233,13 +233,13 @@ function Start-AppMacOsAdminCredentialPrefetch {
     $msg = if ($Purpose -eq 'pxe') {
         @(
             'WinDeployKit needs your macOS administrator password for Netboot (TFTP port 69).'
-            'It is kept in memory only — not saved to disk.'
-            'Enter it now — boot menus and HTTP continue starting while this dialog is open.'
+            'It is kept in memory only - not saved to disk.'
+            'Enter it now - boot menus and HTTP continue starting while this dialog is open.'
         ) -join ' '
     } else {
         @(
             'WinDeployKit needs your macOS administrator password for this session'
-            '(TFTP port 69, network routes). It is kept in memory only — not saved to disk.'
+            '(TFTP port 69, network routes). It is kept in memory only - not saved to disk.'
         ) -join ' '
     }
     $quotedMsg = ConvertTo-AppAppleScriptQuotedString -Value $msg
@@ -252,7 +252,7 @@ function Start-AppMacOsAdminCredentialPrefetch {
 
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
-    # Fresh runspace — module functions aren't available here, so the
+    # Fresh runspace - module functions aren't available here, so the
     # helper-first / osascript-fallback logic is duplicated inline.
     $null = $ps.AddScript({
         param([string]$QuotedDialogMessage, [string]$PlainMessage, [string]$HelperPath)
@@ -269,10 +269,10 @@ function Start-AppMacOsAdminCredentialPrefetch {
             if ($code -eq 2) {
                 throw 'Administrator permission was not granted (cancelled).'
             }
-            # Helper broke unexpectedly — fall through to osascript.
+            # Helper broke unexpectedly - fall through to osascript.
         }
         if (-not (Get-Command osascript -ErrorAction SilentlyContinue)) {
-            throw 'Neither the bundled dialog helper nor osascript is available — cannot request administrator password.'
+            throw 'Neither the bundled dialog helper nor osascript is available - cannot request administrator password.'
         }
         $osa = @"
 try
@@ -307,7 +307,7 @@ end try
         Handle  = $handle
         Runspace = $rs
     }
-    Write-SidecarLog 'macOS: administrator password dialog opened (prefetch — Netboot / TFTP)'
+    Write-SidecarLog 'macOS: administrator password dialog opened (prefetch - Netboot / TFTP)'
     $script:AppMacOsAdminCredentialPrefetchState
 }
 
@@ -419,7 +419,7 @@ function Invoke-AppMacOsAdminShellCommand {
             $plain = $null
         }
 
-        # sudo writes this to stderr when the password is wrong — drop the bad cache and
+        # sudo writes this to stderr when the password is wrong - drop the bad cache and
         # retry once (which re-prompts / re-reads the vault).
         if ($stderr -match 'Sorry, try again|incorrect password attempt') {
             Clear-AppMacOsAdminCredentialCache

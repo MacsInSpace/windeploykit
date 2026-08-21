@@ -1,4 +1,4 @@
-# AppPaths.ps1 — single source of truth for app-owned data locations.
+# AppPaths.ps1 - single source of truth for app-owned data locations.
 #
 # Replaces the ~20 copy-pasted "where do I put data" blocks that each hardcoded a
 # different parent folder across builds. See
@@ -59,10 +59,10 @@ function Get-AppCacheDir {
 }
 
 # ---------------------------------------------------------------------------
-# Image library (ISOs / drivers / imageable WIMs) — user-relocatable root.
+# Image library (ISOs / drivers / imageable WIMs) - user-relocatable root.
 #
-# The ROOT itself is chosen by the technician in the frontend (Settings →
-# Downloads → ISO & driver root, default ~/Downloads/WinDeployKit)
+# The ROOT itself is chosen by the technician in the frontend (Settings ->
+# Downloads -> ISO & driver root, default ~/Downloads/WinDeployKit)
 # and passed into IPC calls. The sidecar must never silently default large
 # downloads to the system drive, so these helpers REQUIRE an explicit root and
 # only resolve the recommended sub-structure beneath it.
@@ -70,7 +70,7 @@ function Get-AppCacheDir {
 # Structure mirrors what the WinPE client expects on the deploy share so
 # the laptop can serve it directly:
 #   <root>/iso/<name>.iso
-#   <root>/Drivers/<model>/*.inf      (flat model folder — no vendor / Win11x64)
+#   <root>/Drivers/<model>/*.inf      (flat model folder - no vendor / Win11x64)
 #   <root>/WIMs/<name>.wim
 #   <root>/.incoming/<guid>/          (aria2 staging)
 # ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ function Test-AppImageLibraryRoot {
 # always supplies the correct, user-chosen root, so this is only a safety net.
 #
 # macOS: ~/Downloads (and ~/Desktop, ~/Documents) are TCC-protected, so the SMB
-# daemon (smbd) is *denied* read access to anything there — a Deploy$ share rooted
+# daemon (smbd) is *denied* read access to anything there - a Deploy$ share rooted
 # in Downloads is created but never served ("network name cannot be found" in
 # WinPE). We default to ~/Public instead (Apple's purpose-built sharing folder,
 # not TCC-protected). Mirrors getImageLibraryRoot() in app/src/lib/imageLibrary.ts.
@@ -196,7 +196,7 @@ function ConvertTo-AppImageDriverModelFolderName {
 }
 
 function Get-AppImageDriverModelDir {
-    # Drivers/<Make>/<Model> — ImageDeployer 1.10's publish/search convention.
+    # Drivers/<Make>/<Model> - ImageDeployer 1.10's publish/search convention.
     # Make omitted -> legacy flat Drivers/<Model> (kept for callers that only
     # know the model; ImageDeployer's -Recurse -Depth 1 search finds both).
     param(

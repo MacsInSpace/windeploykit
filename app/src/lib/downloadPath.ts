@@ -9,7 +9,7 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-/** Site id — used for the optional per-site download subfolder. */
+/** Site id - used for the optional per-site download subfolder. */
 export function getActiveSiteIdForDownloads(): string | undefined {
   const siteId = getAppState().siteProfile.siteId;
   return siteId?.trim() || undefined;
@@ -46,7 +46,7 @@ export async function ensureDownloadDir(dir: string): Promise<void> {
     // site subfolder option is on.
     await mkdir(dir, { recursive: true });
   } catch (err) {
-    // Some platforms error when the folder already exists — treat that as ok.
+    // Some platforms error when the folder already exists - treat that as ok.
     try {
       if (await exists(dir)) return;
     } catch {

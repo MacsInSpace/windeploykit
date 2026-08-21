@@ -1,5 +1,5 @@
 /**
- * App shell — MDT console tree on the left, one panel per node on the right.
+ * App shell - MDT console tree on the left, one panel per node on the right.
  *
  * No sign-in gate and no boot overlay: WinDeployKit has no directory session, so
  * the workspace is live from first paint.
@@ -59,7 +59,7 @@ function NotBuiltYet({ label, id }: { label: string; id: string }) {
         <h1 className="panel-title">{label}</h1>
       </header>
       <div className="flex flex-1 items-center justify-center">
-        <p className="empty-state mono">{id} — panel not built yet</p>
+        <p className="empty-state mono">{id} - panel not built yet</p>
       </div>
     </div>
   );

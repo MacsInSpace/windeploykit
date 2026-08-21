@@ -57,7 +57,7 @@ rustc --version
 $rustHostLine = & rustc -vV 2>&1 | Select-String '^host: '
 $rustHost = if ($rustHostLine) { ($rustHostLine -replace '^host: ', '').ToString().Trim() } else { '' }
 if ($rustHost -match '^aarch64-' -and $env:PROCESSOR_ARCHITECTURE -ne 'ARM64') {
-    Write-Host '  Windows ARM host detected with x64 build intent — ensuring x86_64 Rust toolchain for MSVC parity' -ForegroundColor Yellow
+    Write-Host '  Windows ARM host detected with x64 build intent - ensuring x86_64 Rust toolchain for MSVC parity' -ForegroundColor Yellow
     $x64Toolchain = 'stable-x86_64-pc-windows-msvc'
     if (-not ((rustup toolchain list 2>$null) -match [regex]::Escape($x64Toolchain))) {
         rustup toolchain install $x64Toolchain --force-non-host
@@ -72,7 +72,7 @@ if (-not $wv2) {
 
 Write-Step 'Checking MSVC (link.exe) for Rust/Tauri'
 if (-not (Get-Command link -ErrorAction SilentlyContinue)) {
-    Write-Host '  link.exe not on PATH — package-windows.ps1 will load VS 2022 dev env automatically.' -ForegroundColor Yellow
+    Write-Host '  link.exe not on PATH - package-windows.ps1 will load VS 2022 dev env automatically.' -ForegroundColor Yellow
     Write-Host '  If builds fail, install VS 2022 with workload "Desktop development with C++".' -ForegroundColor Yellow
 }
 
@@ -85,7 +85,7 @@ if (-not $needsNpmInstall) {
 if (-not $needsNpmInstall -and (Test-Path -LiteralPath (Join-Path $AppDir 'node_modules\.bin\tauri'))) {
     $binHead = Get-Content -LiteralPath (Join-Path $AppDir 'node_modules\.bin\tauri') -TotalCount 1 -ErrorAction SilentlyContinue
     if ($binHead -eq 'XSym') {
-        Write-Host '  node_modules came from macOS (Unix symlinks) — reinstalling for Windows' -ForegroundColor Yellow
+        Write-Host '  node_modules came from macOS (Unix symlinks) - reinstalling for Windows' -ForegroundColor Yellow
         Remove-Item -LiteralPath (Join-Path $AppDir 'node_modules') -Recurse -Force
         $needsNpmInstall = $true
     }

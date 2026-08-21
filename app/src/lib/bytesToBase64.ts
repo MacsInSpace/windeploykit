@@ -1,4 +1,4 @@
-/** Chunked base64 encode — avoids call-stack limits on large buffers. */
+/** Chunked base64 encode - avoids call-stack limits on large buffers. */
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunk = 0x8000;

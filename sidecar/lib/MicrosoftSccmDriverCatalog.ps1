@@ -1,12 +1,12 @@
-# Microsoft Surface driver pack catalog — parse OSDCatalogMicrosoftDriverPack.json.
+# Microsoft Surface driver pack catalog - parse OSDCatalogMicrosoftDriverPack.json.
 # Primary: https://raw.githubusercontent.com/maurice-daly/DriverAutomationTool/master/Data/OSDCatalogMicrosoftDriverPack.json
 # Source choice (2026-08-18): the FFU project's Surface support scrapes three HTML pages
-# (Learn SKU reference + support model list + Download Center __DLCDetails__) — its most
+# (Learn SKU reference + support model list + Download Center __DLCDetails__) - its most
 # fragile scraper (upstream issue #94). MSEndpointMgr's Driver Automation Tool maintains
 # this JSON instead (same OEMLinks.xml that surfaced AcerCatalog.xml): every entry carries
 # a direct download.microsoft.com MSI URL plus the Surface SystemId list
 # (Win32_ComputerSystemProduct SKU strings) for exact matching. No hashes published
-# (HashMD5 is null throughout) — noted, not available from this source.
+# (HashMD5 is null throughout) - noted, not available from this source.
 
 $script:AppMicrosoftSccmCatalogUrl = 'https://raw.githubusercontent.com/maurice-daly/DriverAutomationTool/master/Data/OSDCatalogMicrosoftDriverPack.json'
 $script:AppMicrosoftSccmCatalogCacheHours = 168
@@ -94,7 +94,7 @@ function Parse-AppMicrosoftSccmCatalogFromJson {
     $models = [System.Collections.Generic.List[hashtable]]::new()
     $catalogVersion = $null
     foreach ($item in @($items)) {
-        # Sidecar runs under Set-StrictMode (NpsLogViewer.ps1) — a catalog entry missing
+        # Sidecar runs under Set-StrictMode (NpsLogViewer.ps1) - a catalog entry missing
         # any key must degrade, not throw, so all reads go through Get-AppAria2JsonProp.
         $model = ([string](Get-AppAria2JsonProp -Item $item -Name 'Model')).Trim()
         $url = ([string](Get-AppAria2JsonProp -Item $item -Name 'Url')).Trim()
@@ -156,7 +156,7 @@ function Resolve-AppMicrosoftSccmDriverUrlForWmiPatterns {
         foreach ($pattern in $Patterns) {
             if ([string]::IsNullOrWhiteSpace($pattern)) { continue }
             # Surface SystemId (Win32_ComputerSystemProduct SKU, e.g.
-            # Surface_Laptop_7th_Edition_2036) — exact match beats name fuzzing.
+            # Surface_Laptop_7th_Edition_2036) - exact match beats name fuzzing.
             foreach ($sysId in $systemIds) {
                 if ([string]$sysId -and ([string]$sysId).Trim().Equals($pattern.Trim(), [StringComparison]::OrdinalIgnoreCase)) {
                     $matched = $true
@@ -227,7 +227,7 @@ function Get-AppMicrosoftSccmDriverCatalog {
             $modelsRaw = Get-AppAria2JsonProp -Item $cached -Name 'models'
             if ($fetchedAtRaw -and $modelsRaw) {
                 try {
-                    # PS7 ConvertFrom-Json hydrates ISO strings into [DateTime] — parse only strings.
+                    # PS7 ConvertFrom-Json hydrates ISO strings into [DateTime] - parse only strings.
                     $fetchedAt = if ($fetchedAtRaw -is [datetime]) {
                         [datetime]$fetchedAtRaw
                     } else {
@@ -268,7 +268,7 @@ function Get-AppMicrosoftSccmDriverCatalog {
         $script:AppMicrosoftSccmCatalogLastError = $_.Exception.Message
         $cached = Read-AppMicrosoftSccmCatalogCache
         if ($cached -and (Get-AppAria2JsonProp -Item $cached -Name 'models')) {
-            Write-SidecarLog "Microsoft SCCM catalog: live fetch failed — $($_.Exception.Message); using stale cache."
+            Write-SidecarLog "Microsoft SCCM catalog: live fetch failed - $($_.Exception.Message); using stale cache."
             $result = ConvertTo-AppMicrosoftSccmCatalogResult -Record $cached -FromCache $true -Stale $true
             if ($result) { return $result }
         }

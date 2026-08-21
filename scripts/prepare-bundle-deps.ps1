@@ -5,22 +5,22 @@
 
 .DESCRIPTION
     Writes to packaging/staged/:
-      sidecar/      — copy of repo sidecar/
-      modules/      — PSOpenAD + WinDeployKitPS.psm1 + Posh-SSH (when vendor/Posh-SSH present)
-      powershell/   — full portable PowerShell 7 install (optional; -BundlePowerShell)
+      sidecar/      - copy of repo sidecar/
+      modules/      - PSOpenAD + WinDeployKitPS.psm1 + Posh-SSH (when vendor/Posh-SSH present)
+      powershell/   - full portable PowerShell 7 install (optional; -BundlePowerShell)
 
-    Lo-Fi mini player tools (yt-dlp + deno) download at first play — not staged here.
+    Lo-Fi mini player tools (yt-dlp + deno) download at first play - not staged here.
 
-    Run on the SAME OS you will use for `tauri build` (Windows build → -Platform Windows).
+    Run on the SAME OS you will use for `tauri build` (Windows build -> -Platform Windows).
 
     Release installer filenames (WinDeployKit_* under dist/) are set by
-    package-macos.sh / package-windows.ps1 — not by this staging script.
+    package-macos.sh / package-windows.ps1 - not by this staging script.
 
 .PARAMETER Platform
     Windows | MacOS | Host (auto-detect from $IsWindows / $IsMacOS)
 
 .PARAMETER Arch
-    x64 | arm64 | Host — CPU family for PowerShell download (Windows arm64 = Surface etc.)
+    x64 | arm64 | Host - CPU family for PowerShell download (Windows arm64 = Surface etc.)
 
 .PARAMETER PwshVersion
     PowerShell release to download (default 7.5.4).
@@ -68,7 +68,7 @@ function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 function Remove-AppStagedFieldIsoBuildArtifacts {
     <#
     FieldIso.wim is downloaded at runtime (GitLab manifest). wim-inject/ and Windows
-    fieldiso/tools/*.exe are maintainer-only inputs for build-fieldiso-wim.sh — not for the app bundle.
+    fieldiso/tools/*.exe are maintainer-only inputs for build-fieldiso-wim.sh - not for the app bundle.
     #>
     param([Parameter(Mandatory)][string]$SidecarDest)
 
@@ -227,41 +227,41 @@ function Stage-AppPxeVendorBinaries {
             Copy-Item -LiteralPath $universal -Destination (Join-Path $destDir 'dnsmasq-universal') -Force
             Write-Step 'Staged vendored dnsmasq-universal (Netboot TFTP)'
         } else {
-            Write-Warning "Vendored dnsmasq missing: $universal — run ./scripts/build-dnsmasq-macos.sh"
+            Write-Warning "Vendored dnsmasq missing: $universal - run ./scripts/build-dnsmasq-macos.sh"
         }
         $wimlibUni = Join-Path $RepoRoot 'vendor/binaries/pxe-macos/wimlib-imagex-universal'
         if (Test-Path -LiteralPath $wimlibUni) {
             Copy-Item -LiteralPath $wimlibUni -Destination (Join-Path $destDir 'wimlib-imagex-universal') -Force
             Write-Step 'Staged vendored wimlib-imagex-universal (Netboot boot assets)'
         } else {
-            Write-Warning "Vendored wimlib missing: $wimlibUni — run ./scripts/fetch-wimlib.ps1"
+            Write-Warning "Vendored wimlib missing: $wimlibUni - run ./scripts/fetch-wimlib.ps1"
         }
         $dialogUni = Join-Path $RepoRoot 'vendor/binaries/dialog-macos/windeploykit-dialog-universal'
         if (Test-Path -LiteralPath $dialogUni) {
             Copy-Item -LiteralPath $dialogUni -Destination (Join-Path $destDir 'windeploykit-dialog-universal') -Force
             Write-Step 'Staged vendored windeploykit-dialog-universal (native admin/password prompts)'
         } else {
-            Write-Warning "Vendored windeploykit-dialog missing: $dialogUni — run ./scripts/build-windeploykit-dialog.sh (osascript fallback will be used)"
+            Write-Warning "Vendored windeploykit-dialog missing: $dialogUni - run ./scripts/build-windeploykit-dialog.sh (osascript fallback will be used)"
         }
         return
     }
 
     if ($Platform -eq 'Windows') {
-        # tauri.conf.json always maps packaging/staged/binaries/ — directory must exist even when
+        # tauri.conf.json always maps packaging/staged/binaries/ - directory must exist even when
         # optional PXE tools are absent (no Windows dnsmasq; wimlib fetched separately).
         $destDir = Join-Path $Staged 'binaries'
         New-Item -ItemType Directory -Path $destDir -Force | Out-Null
 
         $src = Join-Path $RepoRoot 'vendor/binaries/pxe-windows/dnsmasq.exe'
         if (-not (Test-Path -LiteralPath $src)) {
-            Write-Warning "Vendored Windows dnsmasq missing: $src — Netboot uses Tftpd64 on Windows (see vendor/binaries/pxe-windows/README.md)"
+            Write-Warning "Vendored Windows dnsmasq missing: $src - Netboot uses Tftpd64 on Windows (see vendor/binaries/pxe-windows/README.md)"
         } else {
             Copy-Item -LiteralPath $src -Destination (Join-Path $destDir 'dnsmasq.exe') -Force
             Write-Step 'Staged vendored dnsmasq.exe (Netboot TFTP fallback)'
         }
         $wimlibSrc = Join-Path $RepoRoot 'vendor/binaries/pxe-windows/wimlib'
         if (-not (Test-Path -LiteralPath $wimlibSrc)) {
-            Write-Warning "Vendored Windows wimlib missing: $wimlibSrc — run pwsh -File ./scripts/fetch-wimlib.ps1 (optional; Netboot boot-asset extraction)"
+            Write-Warning "Vendored Windows wimlib missing: $wimlibSrc - run pwsh -File ./scripts/fetch-wimlib.ps1 (optional; Netboot boot-asset extraction)"
             return
         }
         $wimlibDest = Join-Path $destDir 'wimlib'
@@ -316,7 +316,7 @@ function Test-AppVendoredPoshSshLayout {
 
 function Normalize-AppVendoredPoshSshLayout {
     <#
-        Save-Module writes vendor/Posh-SSH/<version>/Posh-SSH.psd1 — flatten to vendor/Posh-SSH/Posh-SSH.psd1
+        Save-Module writes vendor/Posh-SSH/<version>/Posh-SSH.psd1 - flatten to vendor/Posh-SSH/Posh-SSH.psd1
         so staging matches PSOpenAD (direct manifest under modules/Posh-SSH).
     #>
     param([Parameter(Mandatory)][string]$VendorPoshSshRoot)
@@ -353,7 +353,7 @@ function Ensure-AppVendoredPoshSsh {
 
     if ($SkipPoshSshVendor) { return $null }
 
-    Write-Step 'vendor/Posh-SSH missing — saving from PSGallery for bundle staging'
+    Write-Step 'vendor/Posh-SSH missing - saving from PSGallery for bundle staging'
     if (-not (Test-Path -LiteralPath $vendorRoot)) {
         New-Item -ItemType Directory -Path $vendorRoot -Force | Out-Null
     }
@@ -395,7 +395,7 @@ if (-not $PsOpenAdSrc) {
         $PsOpenAdSrc = $VendorPsOpenAd
     }
     elseif (-not $SkipPsOpenAdBuild -and (Test-Path -LiteralPath $BuildPsOpenAdScript)) {
-        Write-Step 'vendor/PSOpenAD missing — building from vendor/psopenad.lock.json (requires git + dotnet SDK)'
+        Write-Step 'vendor/PSOpenAD missing - building from vendor/psopenad.lock.json (requires git + dotnet SDK)'
         & $BuildPsOpenAdScript
         if (Test-Path -LiteralPath $VendorManifest) {
             $PsOpenAdSrc = $VendorPsOpenAd
@@ -477,7 +477,7 @@ if (Test-Path -LiteralPath $vendorWimboot) {
     Copy-Item -LiteralPath $vendorWimboot -Destination $pxeBundledWimboot -Force
     Write-Step 'Bundled wimboot from vendor/binaries/pxe-wimboot/'
 } elseif (-not (Test-Path -LiteralPath $pxeBundledWimboot)) {
-    Write-Warning 'wimboot missing — run pwsh -File ./scripts/fetch-wimboot.ps1 before release packaging'
+    Write-Warning 'wimboot missing - run pwsh -File ./scripts/fetch-wimboot.ps1 before release packaging'
 }
 
 $pxeSbBundled = Join-Path $pxeBundledDir 'x86_64-sb'
@@ -509,7 +509,7 @@ if (Test-Path -LiteralPath (Join-Path $vendorSb 'shimx64.efi') -PathType Leaf) {
         }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $pxeSbBundled 'shimx64.efi') -PathType Leaf)) {
-        Write-Warning 'Secure Boot TFTP tree missing — run pwsh -File ./scripts/fetch-pxe-secure-boot.ps1 before release packaging'
+        Write-Warning 'Secure Boot TFTP tree missing - run pwsh -File ./scripts/fetch-pxe-secure-boot.ps1 before release packaging'
     }
 }
 
@@ -527,7 +527,7 @@ if (Test-Path -LiteralPath (Join-Path $vendorMdtDir 'BCD')) {
     }
     Write-Step 'Bundled MDT boot assets from vendor/binaries/pxe-mdt-boot/x64'
 } elseif (-not (Test-Path -LiteralPath (Join-Path $pxeBundledMdtDir 'BCD'))) {
-    Write-Warning 'MDT boot assets missing — run pwsh -File ./scripts/fetch-mdt-boot-assets.ps1 before release packaging (ImageDeployer wimboot)'
+    Write-Warning 'MDT boot assets missing - run pwsh -File ./scripts/fetch-mdt-boot-assets.ps1 before release packaging (ImageDeployer wimboot)'
 }
 
 Copy-Item -LiteralPath $SidecarSrc -Destination $sidecarDest -Recurse -Force
@@ -557,10 +557,10 @@ if (-not (Test-Path -LiteralPath $eduHubModuleSrc)) {
 Copy-Item -LiteralPath $eduHubModuleSrc -Destination (Join-Path $fieldTestDestDir 'eduHubAPI_module.psm1') -Force
 Write-Step 'Copied eduHubAPI_module.psm1 into staged sidecar/scripts'
 
-# eduHub CSV data module (pwsh 7 — parse/join/match) — Import-AppEduHubModule resolves it at
+# eduHub CSV data module (pwsh 7 - parse/join/match) - Import-AppEduHubModule resolves it at
 # sidecar/scripts/eduHub/EduHubData.psm1 in installed builds (scripts/eduHub/ in dev checkouts).
 # Field bug 2026-07-23: it was never staged, so every installed build threw
-# "eduHub module not found: …\scripts\eduHub\EduHubData.psm1".
+# "eduHub module not found: ...\scripts\eduHub\EduHubData.psm1".
 $eduHubDataSrc = Join-Path $RepoRoot 'scripts/eduHub/EduHubData.psm1'
 if (-not (Test-Path -LiteralPath $eduHubDataSrc)) {
     throw "eduHub data module missing: $eduHubDataSrc"
@@ -621,13 +621,13 @@ if (-not (Test-Path -LiteralPath $PsModuleSrcDir)) {
     throw "WinDeployKitPS module dir missing: $PsModuleSrcDir"
 }
 Copy-Item -LiteralPath $PsModuleSrcDir -Destination $psModuleDest -Recurse -Force
-# Monolith archive is optional — omit from release bundle to save space
+# Monolith archive is optional - omit from release bundle to save space
 $monolith = Join-Path $psModuleDest 'WinDeployKitPS.Monolith.psm1'
 if (Test-Path -LiteralPath $monolith) {
     Remove-Item -LiteralPath $monolith -Force
 }
 
-# MDMKit modules (Jamf Pro / Jamf School / Mosyle / Mosyle Free panels) — committed
+# MDMKit modules (Jamf Pro / Jamf School / Mosyle / Mosyle Free panels) - committed
 # under vendor/mdmkit via scripts/sync-mdmkit-vendor.ps1. Optional: warn-and-skip when
 # absent so non-MDM builds still work, but a normal checkout always has them.
 $MdmKitVendorRoot = Join-Path $RepoRoot 'vendor/mdmkit'
@@ -635,9 +635,9 @@ $MdmKits = @('JamfProKit', 'JamfSchoolKit', 'MosyleKit', 'MosyleFreeKit')
 foreach ($kit in $MdmKits) {
     $kitSrc = Join-Path $MdmKitVendorRoot $kit
     if (-not (Test-Path -LiteralPath (Join-Path $kitSrc "$kit.psd1"))) {
-        # Not fatal here — Assert-AppStagedMdmKits below turns it into a build failure
+        # Not fatal here - Assert-AppStagedMdmKits below turns it into a build failure
         # with the full list, so one run reports every missing kit rather than the first.
-        Write-Step "WARN vendor/mdmkit/$kit missing — MDM panel for $kit will not work in this bundle (run scripts/sync-mdmkit-vendor.ps1)"
+        Write-Step "WARN vendor/mdmkit/$kit missing - MDM panel for $kit will not work in this bundle (run scripts/sync-mdmkit-vendor.ps1)"
         continue
     }
     $kitDest = Join-Path $Staged "modules/$kit"
@@ -701,7 +701,7 @@ if ($IsMacOS -and $env:DEPLOYKIT_MACOS_SIGN_IDENTITY) {
 }
 
 if (-not $BundlePowerShell -or $SkipPowerShell) {
-    Write-Step 'PowerShell not bundled — app will use pwsh 7+ on PATH (install separately)'
+    Write-Step 'PowerShell not bundled - app will use pwsh 7+ on PATH (install separately)'
     exit 0
 }
 

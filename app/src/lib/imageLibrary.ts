@@ -6,7 +6,7 @@ import { getSetting } from "./settings";
 import { SETTING_DOWNLOAD_DIR, SETTING_IMAGE_LIBRARY_DIR } from "./downloadSettings";
 import { getSystemDownloadsDir } from "./downloadPath";
 
-// The "ISO & driver root" — where ISOs, driver packs, and imageable WIMs are
+// The "ISO & driver root" - where ISOs, driver packs, and imageable WIMs are
 // stored and served from. Mirrors sidecar/lib/AppPaths.ps1 (Get-AppImageLibraryPaths)
 // and the Deploy$ shape ImageDeployer.ps1 expects, so the laptop can serve it
 // directly over SMB/HTTP:
@@ -54,8 +54,8 @@ export async function getImageLibraryRoot(): Promise<string> {
   if (override) return override;
 
   // macOS: ~/Downloads (and ~/Desktop, ~/Documents) are TCC-protected, so the SMB
-  // daemon can't serve the Deploy$ share from there — WinPE fails with "network
-  // name not found". A custom Settings → Downloads location outside those folders
+  // daemon can't serve the Deploy$ share from there - WinPE fails with "network
+  // name not found". A custom Settings -> Downloads location outside those folders
   // is followed (Craig, 2026-08-18); only TCC-protected (or unset) bases divert to
   // ~/Public (Apple's sharing folder, not TCC-gated). Mirrors the TCC list in
   // sidecar/lib/AppPaths.ps1 (Get-AppMacOsTccProtectedRoots).
@@ -115,7 +115,7 @@ export function imageDriverModelFolderName(model: string): string {
 }
 
 /**
- * Driver folder for a device: <root>/Drivers/<Make>/<Model>/ — ImageDeployer 1.10's
+ * Driver folder for a device: <root>/Drivers/<Make>/<Model>/ - ImageDeployer 1.10's
  * publish/search convention. Make omitted -> legacy flat <root>/Drivers/<Model>/
  * (ImageDeployer's -Recurse -Depth 1 cache search finds both).
  */
@@ -172,7 +172,7 @@ export async function getImageLibraryFreeSpace(): Promise<FreeSpaceInfo | null> 
 
 /** Human-readable byte size, e.g. "12.4 GB". */
 export function formatBytes(bytes: number | null | undefined): string {
-  if (bytes == null || !Number.isFinite(bytes)) return "—";
+  if (bytes == null || !Number.isFinite(bytes)) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
   let value = bytes;
   let i = 0;

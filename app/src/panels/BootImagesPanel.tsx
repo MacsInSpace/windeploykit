@@ -1,4 +1,4 @@
-/** Boot Images — the boot WIM library served over TFTP/HTTP. */
+/** Boot Images - the boot WIM library served over TFTP/HTTP. */
 import { PxeWorkspace } from "../workspaces/PxeWorkspace";
 
 export function BootImagesPanel() {

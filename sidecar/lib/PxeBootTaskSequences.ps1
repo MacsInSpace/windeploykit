@@ -1,22 +1,22 @@
-# Netboot task sequences — MDT-style named deployments for ImageDeployer.
+# Netboot task sequences - MDT-style named deployments for ImageDeployer.
 #
 # Craig's real unattend templates (Client/Server) are embedded below with a split
 # token model:
 #   * publish-time tokens ({{JoinDomain}}, {{MachineOu}}, {{ProductKey}}, server
 #     networking, {{LocalAdminPw}} from the Site Profile, and a
-#     store-credential join's full {{JoinDom}}/{{JoinUser}}/{{JoinPw}} triplet) —
+#     store-credential join's full {{JoinDom}}/{{JoinUser}}/{{JoinPw}} triplet) -
 #     substituted HERE from each sequence's saved fields when the store syncs, so
 #     what lands in <library>/TaskSequences/<id>.xml is concrete.
 #   * deploy-time tokens ({{SITE}}, {{SERIAL}}, and for ambient-credential joins the
-#     whole {{JoinDom}}/{{JoinUser}}/{{JoinPw}} triplet) — left intact in the
+#     whole {{JoinDom}}/{{JoinUser}}/{{JoinPw}} triplet) - left intact in the
 #     published file. ImageDeployer fills them on the client at deploy time
 #     (site id, device serial, and the credentials typed for the share
-#     connect — one coherent credential, never publisher identity + deployer
+#     connect - one coherent credential, never publisher identity + deployer
 #     password). Join passwords therefore NEVER sit in a file on the share.
 #
 # The published files are served over the existing read-only Deploy$ share as
 # Z:\TaskSequences\<id>.xml; ImageDeployer's Task Sequence picker lists them and
-# copies the chosen one to <OS volume>\Windows\Panther\unattend.xml after apply —
+# copies the chosen one to <OS volume>\Windows\Panther\unattend.xml after apply -
 # the standard first-boot (specialize + oobeSystem) mechanism. The windowsPE pass
 # from the original hand-built files is omitted: it only runs under setup.exe,
 # never for DISM-applied images. EULA-hiding removed per Craig (2026-08-19).
@@ -52,7 +52,7 @@ function Get-AppPxeBootTsProp {
 
 function Get-AppPxeBootTaskSequenceDefaults {
     # Seeded menu. Steps are the editable/reorderable spec of what runs at first
-    # boot (specialize RunSynchronous) — seeded here from Craig's RDP-enable and
+    # boot (specialize RunSynchronous) - seeded here from Craig's RDP-enable and
     # GPO-disable sets, but plain data the panel can add to, remove, or reorder.
     # Empty productKey publishes the role default from the KMS catalog.
     @(
@@ -136,7 +136,7 @@ function Read-AppPxeBootTaskSequences {
     try {
         $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
         # An existing store with an EMPTY list is an explicit user choice (all
-        # sequences deleted — Craig, 2026-08-20: the seeds are examples, fully
+        # sequences deleted - Craig, 2026-08-20: the seeds are examples, fully
         # deletable). Only a missing/corrupt store file re-seeds the examples.
         return @(Get-AppPxeBootTsProp -Item $raw -Name 'sequences')
     } catch {
@@ -151,7 +151,7 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
     $id = ([string](Get-AppPxeBootTsProp -Item $Item -Name 'id')).Trim()
     if ([string]::IsNullOrWhiteSpace($id)) { return $null }
     # Slug guard: the id becomes a filename on the share. TrimStart also strips
-    # leading dots — '../x' must not survive as a hidden/path-shaped name.
+    # leading dots - '../x' must not survive as a hidden/path-shaped name.
     $id = ($id -replace '[^A-Za-z0-9._-]', '-').Trim('-').TrimStart('.', '-').ToLowerInvariant()
     if ([string]::IsNullOrWhiteSpace($id)) { return $null }
     $kind = ([string](Get-AppPxeBootTsProp -Item $Item -Name 'kind')).Trim().ToLowerInvariant()
@@ -174,7 +174,7 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
     if ($fields.Contains('joinDomain') -and $fields['joinDomain'] -match '^@\{.*?value=([^;}]+)') {
         $fields['joinDomain'] = ([string]$matches[1]).Trim()
     }
-    # Ordered custom steps (reg / cmd / pwsh) — the editable first-boot spec.
+    # Ordered custom steps (reg / cmd / pwsh) - the editable first-boot spec.
     $steps = @()
     foreach ($stepIn in @(Get-AppPxeBootTsProp -Item $Item -Name 'steps')) {
         if ($null -eq $stepIn) { continue }
@@ -259,7 +259,7 @@ function Get-AppPxeBootTaskSequencePublishContext {
     <#
     .SYNOPSIS
         Live values resolved at publish time from the Site Profile: the join
-        identity (domain + username — never the password), the local-admin
+        identity (domain + username - never the password), the local-admin
         passwords used for the {{LocalAdminPw}} token, and the base OU for
         {{SiteOu}} machine-OU tokens.
     .NOTES
@@ -267,7 +267,7 @@ function Get-AppPxeBootTaskSequencePublishContext {
         exists every value is $null, which makes the token expansion fail loudly
         rather than publishing a wrong-but-plausible value.
         The USM original sourced these from the Site Profile and fell back to
-        two hardcoded department bench passwords — both removed for WinDeployKit.
+        two hardcoded department bench passwords - both removed for WinDeployKit.
     #>
     $ctx = @{
         joinDomain   = $null
@@ -481,7 +481,7 @@ function Get-AppPxeBootTsTimeZone {
 
 function Get-AppPxeBootTsOobeAccounts {
     # oobeSystem accounts + autologon. Admin groups are an explicit optional list
-    # (Craig, 2026-08-19) — emitted only when joining a domain and groups are set.
+    # (Craig, 2026-08-19) - emitted only when joining a domain and groups are set.
     # {{LocalAdminPw}} comes from the Site Profile.
     param([string[]]$AdminGroups = @(), [bool]$EmitGroups)
     $domainAccounts = ''
@@ -561,7 +561,7 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     # --- Computer name: suffix field + composed, healed {{SITE}} prefix ----------
     # Heal collapses only the {{SITE}} token and the configured site id (typed once
     # or repeated, dash or not). Never strip arbitrary leading digits: a suffix can
-    # legitimately start with digits (serials/asset tags — Craig, 2026-08-19).
+    # legitimately start with digits (serials/asset tags - Craig, 2026-08-19).
     $nameSuffix = & $get 'computerName' '{{SERIAL}}'
     $nameSuffix = $nameSuffix -replace '^(\{\{SITE\}\}-?)+', ''
     if ($ctx.siteId) {
@@ -665,7 +665,7 @@ function Sync-AppPxeBootTaskSequenceStore {
     .SYNOPSIS
         Publish enabled sequences to <library>/TaskSequences/<id>.xml (Z:\TaskSequences
         over Deploy$). Prunes files for removed/disabled sequences. Deploy-time tokens
-        stay literal — see the header comment; secrets never land on the share.
+        stay literal - see the header comment; secrets never land on the share.
     #>
     $dir = Get-AppPxeBootTaskSequenceLibraryDir
     if (-not $dir) { return @{ published = 0; dir = $null } }
@@ -746,7 +746,7 @@ function Get-AppPxeBootTaskSequencesPayload {
     } catch { }
 
     # OU suggestion: reverse the join domain into DN form with the AD default
-    # computers container — example.local → CN=Computers,DC=example,DC=local.
+    # computers container - example.local -> CN=Computers,DC=example,DC=local.
     $defaultOuSuggestion = $null
     try {
         $firstJoinDomain = @($joinDomainOptions) | Select-Object -First 1

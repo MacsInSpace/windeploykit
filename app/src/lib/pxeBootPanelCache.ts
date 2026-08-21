@@ -5,7 +5,7 @@ import type {
 } from "./types";
 import { getCached, setCached } from "./queryCache";
 
-/** In-memory cache key — survives Netboot panel unmount/remount. */
+/** In-memory cache key - survives Netboot panel unmount/remount. */
 export const PXE_BOOT_CONFIG_CACHE_KEY = "pxe-boot:config";
 
 export function getPxeBootPanelData(): PxeBootPluginConfigResponse | undefined {

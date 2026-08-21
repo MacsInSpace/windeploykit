@@ -26,7 +26,7 @@ export function CredentialSelect({
       {credentials.map((c) => (
         <option key={c.id} value={c.id}>
           {c.label}
-          {c.loginName && c.loginName !== c.label ? ` · ${c.loginName}` : ""}
+          {c.loginName && c.loginName !== c.label ? ` | ${c.loginName}` : ""}
           {!c.configured ? " (password not set)" : ""}
         </option>
       ))}

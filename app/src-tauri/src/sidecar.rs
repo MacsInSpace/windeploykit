@@ -231,7 +231,7 @@ impl Sidecar {
             st.exit_started = true;
         }
 
-        // Never block_on from the AppKit main thread — it deadlocks the Tauri tokio runtime (macOS hang on quit).
+        // Never block_on from the AppKit main thread - it deadlocks the Tauri tokio runtime (macOS hang on quit).
         let me = Arc::clone(self);
         let worker = std::thread::Builder::new()
             .name("windeploykit-sidecar-exit".into())
@@ -249,7 +249,7 @@ impl Sidecar {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
             warn!(
-                "sidecar exit worker timed out after {}s — force killing",
+                "sidecar exit worker timed out after {}s - force killing",
                 MAX_WAIT.as_secs()
             );
         }
@@ -273,7 +273,7 @@ impl Sidecar {
             });
         }
 
-        // Drop outbound only — stdin_writer must flush EOF to pwsh before we abort I/O tasks.
+        // Drop outbound only - stdin_writer must flush EOF to pwsh before we abort I/O tasks.
         self.shutdown_for_exit();
 
         const GRACE_SECS: u64 = 3;
@@ -300,7 +300,7 @@ impl Sidecar {
         };
 
         if timed_out || self.state.lock().pid.is_some() {
-            warn!("sidecar still running after graceful shutdown — force killing");
+            warn!("sidecar still running after graceful shutdown - force killing");
             self.force_kill_child();
         }
 
@@ -403,7 +403,7 @@ impl Sidecar {
             .arg("Bypass")
             .arg("-File")
             .arg(&script);
-        // Hide the console via CREATE_NO_WINDOW below — do not pass pwsh -WindowStyle;
+        // Hide the console via CREATE_NO_WINDOW below - do not pass pwsh -WindowStyle;
         // it is missing on several site pwsh builds and aborts before windeploykit-sidecar.ps1 runs.
         if let Some(root) = project_root {
             child_cmd.arg("-ProjectRoot").arg(root);
@@ -560,7 +560,7 @@ async fn child_waiter(mut child: Child, sc: Arc<Sidecar>) {
             success = status.success();
             exit_code = status.code();
             let mut st = sc.state.lock();
-            // Restart/spawn may have replaced this child — ignore stale waiters.
+            // Restart/spawn may have replaced this child - ignore stale waiters.
             if st.pid != child_pid {
                 return;
             }
@@ -583,7 +583,7 @@ async fn child_waiter(mut child: Child, sc: Arc<Sidecar>) {
             st.last_error = Some(e.to_string());
         }
     }
-    // Fail every in-flight request — they will not get answered.
+    // Fail every in-flight request - they will not get answered.
     let pending = std::mem::take(&mut sc.state.lock().pending);
     for (_id, tx) in pending {
         let _ = tx.send(serde_json::json!({
@@ -698,7 +698,7 @@ pub fn check_pwsh_prerequisite<R: Runtime>(app: &AppHandle<R>) -> PwshPrerequisi
 }
 
 /// Returns `(pwsh executable, working directory for the child process)` when a
-/// real install exists. PowerShell is a directory install on macOS/Windows — cwd
+/// real install exists. PowerShell is a directory install on macOS/Windows - cwd
 /// must be the install root.
 fn resolve_pwsh_launch<R: Runtime>(app: &AppHandle<R>) -> Option<(PathBuf, PathBuf)> {
     if let Ok(p) = std::env::var("STMC_PWSH") {
@@ -821,6 +821,6 @@ fn resolve_sidecar_script<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<Path
     }
 
     anyhow::bail!(
-        "could not locate windeploykit-sidecar.ps1 — set STMC_SIDECAR_SCRIPT or place the sidecar next to the app"
+        "could not locate windeploykit-sidecar.ps1 - set STMC_SIDECAR_SCRIPT or place the sidecar next to the app"
     )
 }

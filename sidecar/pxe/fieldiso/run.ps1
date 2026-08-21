@@ -151,7 +151,7 @@ function Get-FieldIsoApplyDir {
     if (-not [string]::IsNullOrWhiteSpace($fromEnv)) {
         return $fromEnv.Trim().TrimEnd('\')
     }
-    # Skip D: — often the read-only virtio-win / ISO CD in lab boots.
+    # Skip D: - often the read-only virtio-win / ISO CD in lab boots.
     foreach ($letter in @('W', 'E', 'F', 'G', 'C')) {
         if ($letter -eq 'X') { continue }
         $root = "${letter}:\"

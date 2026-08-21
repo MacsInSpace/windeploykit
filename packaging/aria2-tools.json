@@ -12,7 +12,7 @@
       "sha256": "bd62ee64319289bfb950047c5e12a913f26517ca9a4db3dacd23d52b20dbf995",
       "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2-1.37.0_mac_arm64.tar.gz",
       "githubUrl": null,
-      "notes": "Homebrew bottle repack — run scripts/fetch-aria2-tools.ps1 on Apple Silicon Mac to refresh."
+      "notes": "Homebrew bottle repack - run scripts/fetch-aria2-tools.ps1 on Apple Silicon Mac to refresh."
     },
     "macos_amd64": {
       "archiveName": "aria2-1.37.0_mac_amd64.tar.gz",
@@ -22,7 +22,7 @@
       "sha256": "",
       "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2-1.37.0_mac_amd64.tar.gz",
       "githubUrl": null,
-      "notes": "No official macOS x64 binary — maintainer repack via fetch-aria2-tools.ps1 on Intel Mac."
+      "notes": "No official macOS x64 binary - maintainer repack via fetch-aria2-tools.ps1 on Intel Mac."
     },
     "windows_amd64": {
       "archiveName": "aria2-1.37.0-win-64bit-build1.zip",

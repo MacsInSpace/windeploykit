@@ -1,6 +1,6 @@
 # Infrastructure SSH credential vault (switch / gear passwords).
 #
-# Passwords are stored as PSCredential via Export-Clixml — same approach as
+# Passwords are stored as PSCredential via Export-Clixml - same approach as
 # StoredCredentials.xml: DPAPI on Windows; user-readable-only on macOS/Linux.
 #
 # Stored under plugins/infrastructure-ssh/ beneath the canonical app data root
@@ -51,13 +51,13 @@ function Write-AppInfraSshIndex {
 $script:AppInfraSshDeSignInCredentialId = 'app-de-signin'
 
 function Get-AppInfraSshDeSignInCredential {
-    # TODO(Site Profile): no ambient signed-in credential in WinDeployKit — callers
+    # TODO(Site Profile): no ambient signed-in credential in WinDeployKit - callers
     # supply credentials explicitly or use the stored credential vault.
     return $null
 }
 
 function Get-AppInfraSshDeSignInSummary {
-    <# Virtual list entry for the signed-in DE account — null when not signed in. #>
+    <# Virtual list entry for the signed-in DE account - null when not signed in. #>
     $de = Get-AppInfraSshDeSignInCredential
     if (-not $de -or [string]::IsNullOrWhiteSpace([string]$de.UserName)) { return $null }
     @{
@@ -383,7 +383,7 @@ function Remove-AppInfraSshCredential {
     param([Parameter(Mandatory)][string]$Id)
     $safeId = Normalize-AppInfraSshCredentialId -Id $Id
     if (Test-AppInfraSshDefaultCredentialId -Id $safeId) {
-        throw 'Default site credentials cannot be deleted — clear the password instead.'
+        throw 'Default site credentials cannot be deleted - clear the password instead.'
     }
     $path = Get-AppInfraSshCredentialPath -Id $safeId
     if (Test-Path -LiteralPath $path) {

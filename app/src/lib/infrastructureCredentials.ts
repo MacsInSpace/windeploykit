@@ -1,6 +1,6 @@
 import type { InfraSshCredentialSummary } from "./types";
 
-/** Login name for SSH / RDP / web UI — explicit loginName or label fallback. */
+/** Login name for SSH / RDP / web UI - explicit loginName or label fallback. */
 export function resolveInfraCredentialLoginName(
   cred: InfraSshCredentialSummary | undefined,
 ): string | undefined {

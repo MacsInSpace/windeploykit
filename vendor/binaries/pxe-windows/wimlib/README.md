@@ -1,6 +1,6 @@
 # Vendored wimlib-imagex (Netboot boot asset extraction)
 
-Official portable [wimlib](https://wimlib.net/) Windows binaries — extracts BCD/boot.sdi/bootmgr from boot WIMs on import.
+Official portable [wimlib](https://wimlib.net/) Windows binaries - extracts BCD/boot.sdi/bootmgr from boot WIMs on import.
 
 | Path | Description |
 |------|-------------|

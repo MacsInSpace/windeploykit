@@ -91,7 +91,7 @@ function CredentialPasswordRow({
         </div>
       ) : (
         <div className="text-[10px]" style={{ color: "var(--text3)" }}>
-          Login: <span className="mono" style={{ color: "var(--text2)" }}>{resolvedLogin || "—"}</span>
+          Login: <span className="mono" style={{ color: "var(--text2)" }}>{resolvedLogin || "-"}</span>
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -186,7 +186,7 @@ export function InfrastructureCredentialsOverlay({
     [credentials, siteId],
   );
   const customCredentials = useMemo(
-    // builtIn = app-provided virtual entries (signed-in DE account) — offered in
+    // builtIn = app-provided virtual entries (signed-in DE account) - offered in
     // pickers but not managed here: nothing on disk to edit or delete.
     () => credentials.filter((c) => !isDefaultInfraCredentialId(c.id) && !c.builtIn),
     [credentials],
@@ -394,7 +394,7 @@ export function InfrastructureCredentialsOverlay({
     <Modal
       open={open}
       title="Infrastructure credentials"
-      subtitle="SSH, RDP, web logins, and optional local administrator — encrypted on this device (Export-Clixml)."
+      subtitle="SSH, RDP, web logins, and optional local administrator - encrypted on this device (Export-Clixml)."
       onClose={onClose}
       lock={busy}
       width={620}
@@ -417,7 +417,7 @@ export function InfrastructureCredentialsOverlay({
             style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text2)" }}
           >
             <span className="mono" style={{ color: "var(--text)" }}>
-              {storePath || "…/WinDeployKit/plugins/infrastructure-ssh/"}
+              {storePath || ".../WinDeployKit/plugins/infrastructure-ssh/"}
             </span>
             <div className="mt-1" style={{ color: "var(--text3)" }}>
               Site-scoped passwords for off-domain servers, network gear, and similar.
@@ -431,10 +431,10 @@ export function InfrastructureCredentialsOverlay({
             className="mono mb-2 text-[9px] font-medium uppercase"
             style={{ color: "var(--text3)", letterSpacing: "0.15em" }}
           >
-            This computer — local administrator
+            This computer - local administrator
           </div>
           <p className="mb-3 text-[10.5px] leading-snug" style={{ color: "var(--text3)" }}>
-            Optional password for this workstation — not tied to a site. Same account you use to
+            Optional password for this workstation - not tied to a site. Same account you use to
             administer this machine. WinDeployKit uses it for host-side elevation (PXE TFTP on port
             69, SMB share create/remove via <span className="mono">sharing</span>, routes, and
             similar) without prompting every time. When Site Build or other workflows export an SMB
@@ -445,7 +445,7 @@ export function InfrastructureCredentialsOverlay({
           </p>
           {loading && !localMachine ? (
             <div className="text-[11px]" style={{ color: "var(--text3)" }}>
-              Loading…
+              Loading...
             </div>
           ) : (
             <div
@@ -540,7 +540,7 @@ export function InfrastructureCredentialsOverlay({
             style={{ color: "var(--text3)", letterSpacing: "0.15em" }}
           >
             Default credentials
-            {siteId ? ` · site ${siteId}` : ""}
+            {siteId ? ` | site ${siteId}` : ""}
           </div>
           <p className="mb-3 text-[10.5px] leading-snug" style={{ color: "var(--text3)" }}>
             The site default password is site-specific. If yours
@@ -554,7 +554,7 @@ export function InfrastructureCredentialsOverlay({
             </div>
           ) : loading ? (
             <div className="text-[11px]" style={{ color: "var(--text3)" }}>
-              Loading…
+              Loading...
             </div>
           ) : (
             <div className="flex flex-col gap-2">
@@ -617,7 +617,7 @@ export function InfrastructureCredentialsOverlay({
             Additional credentials
           </div>
           <p className="mb-3 text-[10.5px] leading-snug" style={{ color: "var(--text3)" }}>
-            Off-domain servers, legacy gear, local admin accounts — label is for your reference;
+            Off-domain servers, legacy gear, local admin accounts - label is for your reference;
             username is what SSH / RDP / web clients use at login.
           </p>
           <div className="mb-3 flex flex-col gap-2">
@@ -661,7 +661,7 @@ export function InfrastructureCredentialsOverlay({
           </div>
           {customCredentials.length === 0 ? (
             <div className="text-[11px]" style={{ color: "var(--text3)" }}>
-              No extra credentials — use defaults above or add site-specific passwords here.
+              No extra credentials - use defaults above or add site-specific passwords here.
             </div>
           ) : (
             <div className="flex flex-col gap-2">

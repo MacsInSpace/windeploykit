@@ -1,13 +1,13 @@
 # Data freshness
 
-**Default: live.** Every WinDeployKit panel reflects *machine state right now* —
+**Default: live.** Every WinDeployKit panel reflects *machine state right now* -
 services up or down, transfers in flight, clients mid-deployment, what is
 actually on disk in the image library. State changes outside the app (a service
 stopped from a terminal, an ISO dropped into the folder, a client PXE-booting),
 so a panel that trusts a TTL will lie.
 
 This is the opposite of the USM original it was ported from, where the expensive
-sources were LDAP directory reads — staff and student lists that change daily at
+sources were LDAP directory reads - staff and student lists that change daily at
 most, and where a cached list shown instantly was strictly better than a spinner.
 Those panels are not here.
 
@@ -21,7 +21,7 @@ Those panels are not here.
 | Downloads / transfers | Poll, 2s |
 | Image library, boot WIMs, driver store | Refetch on mount + after any mutation |
 | Stored credential list | Poll, 30s |
-| Vendor SCCM driver catalogs | **Cached (168h)** — see below |
+| Vendor SCCM driver catalogs | **Cached (168h)** - see below |
 
 ## Caching is not banned
 

@@ -10,7 +10,7 @@
 #     fallback); every later device of that model cache-hits the store.
 #
 #   * Alias map: Drivers/aliases.json maps model names / Lenovo machine types /
-#     seed wmiPatterns to the pack folder actually on disk — the baked ImageDeployer
+#     seed wmiPatterns to the pack folder actually on disk - the baked ImageDeployer
 #     consults it when its exact-name search misses (Dell packs live under systemId
 #     folders that never equal Win32 Model; Lenovo under 4-char machine types).
 #     Installed packs only, so the file stays small and every entry is actionable.
@@ -21,7 +21,7 @@ $script:AppPxeBootAliasMapSignature = $null
 
 function Get-AppPxeBootCatalogDriverRowsCached {
     # Tracker driver rows from the CACHED vendor catalogs (no live fetch), memoised
-    # for 10 minutes — the payload build walks all five catalogs.
+    # for 10 minutes - the payload build walks all five catalogs.
     param([int]$MaxAgeMinutes = 10)
     $now = (Get-Date).ToUniversalTime()
     if ($script:AppPxeBootDriverRowsCache -and ($now - $script:AppPxeBootDriverRowsCache.at).TotalMinutes -lt $MaxAgeMinutes) {
@@ -34,7 +34,7 @@ function Get-AppPxeBootCatalogDriverRowsCached {
         $script:AppPxeBootDriverRowsCache = @{ at = $now; rows = $rows }
         return $rows
     } catch {
-        Write-SidecarLogVerbose "PXE boot: catalog driver rows unavailable — $($_.Exception.Message)"
+        Write-SidecarLogVerbose "PXE boot: catalog driver rows unavailable - $($_.Exception.Message)"
         return @()
     }
 }
@@ -85,7 +85,7 @@ function Sync-AppPxeBootDriverPullThrough {
         Housekeeping tick (30s throttle): for each imaging client active in the last
         10 minutes, fetch its catalog driver pack ONCE if the store lacks it. Every
         outcome is recorded in the ledger so a make|model is never retried
-        automatically — a tech re-downloads from the Drivers tab if needed.
+        automatically - a tech re-downloads from the Drivers tab if needed.
     #>
     $now = (Get-Date).ToUniversalTime()
     if (($now - $script:AppPxeBootPullThroughLastSyncUtc).TotalSeconds -lt 30) { return }
@@ -161,7 +161,7 @@ function Write-AppPxeBootDriverAliasMap {
     <#
     .SYNOPSIS
         Publish Drivers/aliases.json for the baked ImageDeployer: aliases (model
-        names, Lenovo machine types, seed wmiPatterns — wildcards allowed) -> the
+        names, Lenovo machine types, seed wmiPatterns - wildcards allowed) -> the
         vendor/folder of a pack ACTUALLY on disk. Regenerated only when the set of
         installed pack folders changes, so the store-sync poll stays cheap.
     #>

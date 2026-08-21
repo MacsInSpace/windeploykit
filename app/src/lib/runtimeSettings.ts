@@ -28,7 +28,7 @@ export const SETTING_VERBOSE_POWERSHELL = defineSetting({
   group: DEBUG_GROUP,
   label: "Verbose PowerShell",
   description:
-    "WARNING: VERY noisy — enables native pwsh Write-Verbose / Write-Debug output and cmdlet -Verbose detail in the Sidecar Log ([pwsh:verbose] / [pwsh:debug] prefixes). Use only when tracing third-party cmdlet behaviour. Default OFF. Toggling applies immediately.",
+    "WARNING: VERY noisy - enables native pwsh Write-Verbose / Write-Debug output and cmdlet -Verbose detail in the Sidecar Log ([pwsh:verbose] / [pwsh:debug] prefixes). Use only when tracing third-party cmdlet behaviour. Default OFF. Toggling applies immediately.",
   type: "boolean",
   defaultValue: false,
 });
@@ -39,7 +39,7 @@ export const SETTING_SKIP_HTTP_CERTIFICATE_CHECK = defineSetting({
   group: GROUP,
   label: "Skip HTTPS certificate validation",
   description:
-    "When enabled, Invoke-RestMethod and Invoke-WebRequest skip TLS certificate checks — needed for an on-prem artifact server with a private CA. Turn off for strict validation.",
+    "When enabled, Invoke-RestMethod and Invoke-WebRequest skip TLS certificate checks - needed for an on-prem artifact server with a private CA. Turn off for strict validation.",
   type: "boolean",
   defaultValue: true,
 });

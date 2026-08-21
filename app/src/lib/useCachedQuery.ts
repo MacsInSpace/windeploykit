@@ -40,7 +40,7 @@ export interface UseCachedQueryOptions {
   /**
    * Re-fetch every N ms while the hook is mounted. WinDeployKit panels show live
    * machine state (services up/down, transfers in flight, clients imaging), so
-   * they poll rather than trusting a TTL — the cache only exists so a remount
+   * they poll rather than trusting a TTL - the cache only exists so a remount
    * paints instantly instead of flashing empty.
    */
   pollMs?: number;
@@ -110,7 +110,7 @@ export function useCachedQuery<T>(
     });
   }, [key, enabled, ttlMs, entry?.fetchedAt, entry?.status]);
 
-  // Live refresh while mounted. Bypasses the TTL deliberately — the cached
+  // Live refresh while mounted. Bypasses the TTL deliberately - the cached
   // value is a paint buffer, not the source of truth, for anything that
   // reflects live machine state.
   useEffect(() => {

@@ -14,7 +14,7 @@ export default defineConfig({
   },
   clearScreen: false,
   server: {
-    // Not the Tauri default 1420 — several of our Tauri apps share a dev machine and
+    // Not the Tauri default 1420 - several of our Tauri apps share a dev machine and
     // strictPort makes the second one fail. Keep below 49152 (OS ephemeral range).
     port: 42410,
     strictPort: true,

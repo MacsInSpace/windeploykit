@@ -1,7 +1,7 @@
-# HP client driver pack catalog — parse HPClientDriverPackCatalog.cab → XML.
+# HP client driver pack catalog - parse HPClientDriverPackCatalog.cab -> XML.
 # Primary: https://ftp.hp.com/pub/caps-softpaq/cmit/HPClientDriverPackCatalog.cab
 # Replaces the HP_Driverpack_Matrix_x64.html scrape (th/td regex + column-offset
-# state machine — fragile by construction; AGENT_NOTES_PXE_DRIVERS §3.2): the cab
+# state machine - fragile by construction; AGENT_NOTES_PXE_DRIVERS section 3.2): the cab
 # is the canonical SCCM driver *pack* source, carries per-product SystemId (matches
 # Win32_BaseBoard.Product) and per-SoftPaq MD5/SHA-256, and a sibling UpdateInfo.xml
 # publishes the cab's own SHA1 so the catalog is verified before parsing.
@@ -99,7 +99,7 @@ function Invoke-AppHpSccmHttpGetBytes {
 }
 
 function Get-AppHpSccmCabExtractTool {
-    # Same tool ladder as the Dell lib (cabextract → 7z → expand.exe) — CI-side only.
+    # Same tool ladder as the Dell lib (cabextract -> 7z -> expand.exe) - CI-side only.
     $cabextract = Get-Command cabextract -ErrorAction SilentlyContinue
     if ($cabextract) { return @{ kind = 'cabextract'; command = $cabextract.Source } }
     foreach ($name in @('7z', '7za')) {
@@ -363,7 +363,7 @@ function Resolve-AppHpSccmDriverUrlForWmiPatterns {
         $matched = $false
         foreach ($pattern in $Patterns) {
             if ([string]::IsNullOrWhiteSpace($pattern)) { continue }
-            # SystemId (Win32_BaseBoard.Product) exact match — sturdier than name fuzzing.
+            # SystemId (Win32_BaseBoard.Product) exact match - sturdier than name fuzzing.
             foreach ($sysId in $systemIds) {
                 if ([string]$sysId -and ([string]$sysId).Trim().Equals($pattern.Trim(), [StringComparison]::OrdinalIgnoreCase)) {
                     $matched = $true
@@ -498,12 +498,12 @@ function Get-AppHpSccmDriverCatalog {
         try {
             $updateInfoXml = Invoke-AppHpSccmHttpGet -Uri $script:AppHpSccmCatalogUpdateInfoUrl -MaxTimeSec 60
         } catch {
-            Write-SidecarLog "HP SCCM catalog: UpdateInfo fetch failed — $($_.Exception.Message); proceeding without cab verification."
+            Write-SidecarLog "HP SCCM catalog: UpdateInfo fetch failed - $($_.Exception.Message); proceeding without cab verification."
         }
         $cabBytes = Invoke-AppHpSccmHttpGetBytes -Uri $script:AppHpSccmCatalogUrl
         $hashOk = Test-AppHpSccmCatalogCabHash -CabBytes $cabBytes -UpdateInfoXml $updateInfoXml
         if ($hashOk -eq $false) {
-            Write-SidecarLog 'HP SCCM catalog: cab SHA1 mismatch vs UpdateInfo — refetching once.'
+            Write-SidecarLog 'HP SCCM catalog: cab SHA1 mismatch vs UpdateInfo - refetching once.'
             $cabBytes = Invoke-AppHpSccmHttpGetBytes -Uri $script:AppHpSccmCatalogUrl
             $hashOk = Test-AppHpSccmCatalogCabHash -CabBytes $cabBytes -UpdateInfoXml $updateInfoXml
             if ($hashOk -eq $false) {
@@ -529,7 +529,7 @@ function Get-AppHpSccmDriverCatalog {
         if (-not $ForceRefresh) {
     $cached = Read-AppHpSccmCatalogCache
         if ($cached -and (Get-AppAria2JsonProp -Item $cached -Name 'models')) {
-                Write-SidecarLog "HP SCCM catalog: live fetch failed — $($_.Exception.Message); using stale cache."
+                Write-SidecarLog "HP SCCM catalog: live fetch failed - $($_.Exception.Message); using stale cache."
                 $cachedSource = [string](Get-AppAria2JsonProp -Item $cached -Name 'sourceUrl')
                 return @{
                     sourceUrl = if ($cachedSource) { $cachedSource } else { $script:AppHpSccmCatalogUrl }

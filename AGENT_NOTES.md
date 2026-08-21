@@ -1,4 +1,4 @@
-# Agent notes — WinDeployKit
+# Agent notes - WinDeployKit
 
 **Read this first.** It is the handover for a fresh session: what this project
 is, where it came from, what is decided, what works, and what is booby-trapped.
@@ -7,21 +7,21 @@ is, where it came from, what is decided, what works, and what is booby-trapped.
 
 ---
 
-## 0. Orientation — read this before touching anything
+## 0. Orientation - read this before touching anything
 
 | Fact | Value |
 | --- | --- |
 | Project root | `/Volumes/Data/projects/windeploykit` |
-| GitHub | `MacsInSpace/windeploykit` (**private**, empty — nothing pushed yet) |
+| GitHub | `MacsInSpace/windeploykit` (**private**, empty - nothing pushed yet) |
 | Git | on `main`; initial commit `75d3f25` landed 2026-08-21 |
 | App data (macOS) | `~/Library/Application Support/WinDeployKit` |
 | Bundle id | `com.macsinspace.windeploykit` |
 | Dev server | Vite on **42410** (HMR 42411) |
 | Sidecar entry | `sidecar/windeploykit-sidecar.ps1` |
 
-**The project has been renamed twice**: `psd-ui` → `deploykit` → `windeploykit`
+**The project has been renamed twice**: `psd-ui` -> `deploykit` -> `windeploykit`
 (2026-08-21). If you find a stale `deploykit` or `psd-ui` reference anywhere,
-it is a leftover — fix it. `~/Library/Application Support/DeployKit.old-name.bak`
+it is a leftover - fix it. `~/Library/Application Support/DeployKit.old-name.bak`
 is the pre-rename app data, kept until a full run is confirmed; delete it then.
 
 ### Two directories are local-only and gitignored
@@ -36,21 +36,21 @@ cut made during the extraction. This file is the summary; that file is the
 detail. `usm-reference/IMPORT_MANIFEST.md` records exactly what was copied and
 what was deliberately left behind.
 
-### USM is READ-ONLY — and is now DOWNSTREAM of us
+### USM is READ-ONLY - and is now DOWNSTREAM of us
 
 `/Volumes/Data/projects/stmc-manager` ("USM") is the app this was extracted
 from. It is **under active development by the user**.
 
 > **Never modify, never `git checkout`, never `git stash` in that repo.**
 > Copy out of it only. If you find a bug there, write it up in
-> `usm-reference/HANDOVER_TO_USM_AGENT.md` — do not fix it in place.
+> `usm-reference/HANDOVER_TO_USM_AGENT.md` - do not fix it in place.
 
 **Direction changed 2026-08-21 (Craig):** WinDeployKit and PSOpenAD-FE are both
 off on their own corporate dev paths, and **USM now takes from this project**,
 not the other way round. WinDeployKit owns the netboot/downloads domain; USM
 becomes the integrator that vendors it (the way it already vendors MDMKit).
 
-Read-only still applies — "downstream" is about *ownership of the code*, not
+Read-only still applies - "downstream" is about *ownership of the code*, not
 permission to edit their tree.
 
 ### The three-repo relationship
@@ -58,29 +58,29 @@ permission to edit their tree.
 | Repo | Relationship | Channel to us |
 | --- | --- | --- |
 | `stmc-manager` (USM) | **Downstream** for netboot/downloads; **upstream** for sidecar runtime core | `docs/handover/HANDOVER_TO_WINDEPLOYKIT_AGENT.md` (tracked, pushed) |
-| `PSOpenAD-FE` | **Sibling** — shares the design system only, no code | `docs/handover/HANDOVER_TO_WINDEPLOYKIT_AGENT.md` (tracked) |
-| `ipxeboot` | Build dependency for the Secure Boot iPXE chain | none — undeclared, see §6 |
+| `PSOpenAD-FE` | **Sibling** - shares the design system only, no code | `docs/handover/HANDOVER_TO_WINDEPLOYKIT_AGENT.md` (tracked) |
+| `ipxeboot` | Build dependency for the Secure Boot iPXE chain | none - undeclared, see section 6 |
 
-Outbound from us: **`docs/handover/HANDOVER_TO_USM_AGENT.md`** — tracked and
+Outbound from us: **`docs/handover/HANDOVER_TO_USM_AGENT.md`** - tracked and
 pushable, mirroring theirs. Append under a dated heading; never rewrite earlier
 entries, so both sides can see what has already been carried.
 
 > Moved there 2026-08-21 from `usm-reference/`, which is gitignored and so could
-> never be pushed. `usm-reference/` keeps its actual job — reference material and
+> never be pushed. `usm-reference/` keeps its actual job - reference material and
 > internal detail that must never enter the tracked tree. **One historical entry
 > stays behind** (2026-08-20, parameter-binding bugs): it quotes USM function and
 > parameter names carrying internal domain detail. Already delivered and actioned,
 > so nothing outstanding. Anything written for USM from now on goes in the tracked
-> file — and must be scrubbed of internal identifiers before it does.
+> file - and must be scrubbed of internal identifiers before it does.
 
 ### The ownership boundary (settled 2026-08-21)
 
 | Bucket | Owner | Contents |
 | --- | --- | --- |
-| **Domain** (~13) | **Us.** USM vendors from here | `PxeBoot*` ×3, `Aria2*` ×3, the five vendor catalogs, `VendorSccmCatalogRefresh`, `EvalIsoCatalog` |
+| **Domain** (~13) | **Us.** USM vendors from here | `PxeBoot*` x3, `Aria2*` x3, the five vendor catalogs, `VendorSccmCatalogRefresh`, `EvalIsoCatalog` |
 | **Runtime core** (~9) | **USM.** We consume | `Ipc`, `AppPaths`, `AppPlatform`, `AppHttp`, `SidecarParams`, `AppPluginGates`, `AppLazyPlugins`, `LocalMachineCredentials`, `InfrastructureSshCredentials` |
 
-**`AppNativeProcess.ps1` and `AppElevation.ps1` are runtime core — USM's**, even
+**`AppNativeProcess.ps1` and `AppElevation.ps1` are runtime core - USM's**, even
 though the refactor was done here and currently lives only here. Settled by call
 graph: both straddle the boundary (`Start-AppNativeProcess` is called by our
 `VendorSccmCatalogRefresh.ps1:168`; `AppElevation` is dot-sourced by our sidecar
@@ -89,10 +89,10 @@ USM vendoring its own credential-prompt machinery back from a downstream project
 
 > **Do not edit either file here without sending the change to USM first.** USM is
 > creating its own copies using our filenames and split so they stay
-> byte-comparable. `AppHttp.ps1` is a deliberate 56-line stub of USM's 546 — that
+> byte-comparable. `AppHttp.ps1` is a deliberate 56-line stub of USM's 546 - that
 > asymmetry is intentional, not drift.
 
-### Identity injection — contract proposed, not yet agreed
+### Identity injection - contract proposed, not yet agreed
 
 The domain libs hardcode product identity, which is why a cross-repo diff is ~90%
 noise and hid three real bugs for a day. The fix is one `$script:AppProductIdentity`
@@ -101,15 +101,15 @@ object set by the host sidecar before any lib is dot-sourced (same constraint as
 / `UserAgentToken`, and the rule that **a domain lib contains no product literal at
 all**.
 
-Our functional surface is **20 sites** (`AppPaths` ×5, `Aria2Plugin` ×3, one
-User-Agent per vendor catalog, `Ipc` ×1, `PxeBootTaskSequences` ×1,
-`Aria2PxeIntegration` ×1); ~53 further mentions are prose and are being left alone.
+Our functional surface is **20 sites** (`AppPaths` x5, `Aria2Plugin` x3, one
+User-Agent per vendor catalog, `Ipc` x1, `PxeBootTaskSequences` x1,
+`Aria2PxeIntegration` x1); ~53 further mentions are prose and are being left alone.
 
-**Field names are with USM for agreement — do not start coding this until they
+**Field names are with USM for agreement - do not start coding this until they
 confirm.** Both sides implementing different shapes is the failure this prevents.
 Full proposal and rationale in `docs/handover/HANDOVER_TO_USM_AGENT.md`.
 
-**Explicitly NOT shared: the frontend.** WinDeployKit is corporate — no themes,
+**Explicitly NOT shared: the frontend.** WinDeployKit is corporate - no themes,
 no arcade, no personality. USM keeps all of that. Panels, theme system and
 `index.css` diverge by design; the sharing boundary is the sidecar domain libs
 only. Do not try to reconcile the UI.
@@ -128,18 +128,18 @@ client.
 **Generic-isation of the school-directory data model completed 2026-08-21.** The
 netboot and downloads plug-ins were generic from the start, but the infrastructure
 credential layer that came across with them still carried the upstream school model:
-381 `school` references, 124 of them `schoolNumber`. All removed —
+381 `school` references, 124 of them `schoolNumber`. All removed -
 
-- `schoolNumber` → **`siteId`** everywhere. The store already returned
+- `schoolNumber` -> **`siteId`** everywhere. The store already returned
   `siteProfile.siteId`, so this was naming, not behaviour. The `{{SN}}` task-sequence
   token is now **`{{SITE}}`**, matching what section 5 says Site Profile will supply.
-- **Deleted** `app/src/lib/infrastructureSsh.ts` and `infrastructureProbeTypes.ts` —
+- **Deleted** `app/src/lib/infrastructureSsh.ts` and `infrastructureProbeTypes.ts` -
   school network-gear management (core/edge switches, WLC, admin printers, an
   internal catalogue subnet). Every export was dead outside its own module, and none
   of it is Windows deployment.
 - The credential vault seeded two org-issued accounts by naming convention. It now
   seeds **one generic site default** (`default-<site>-admin`), with no name or
-  password implied. Both TS and sidecar sides moved together — they share the id
+  password implied. Both TS and sidecar sides moved together - they share the id
   shape, so they must not drift.
 - Removed dead upstream subsystems that carried the vocabulary: the school-init
   bootstrap ladder in `Ipc.ps1` (nothing emitted any phase), the group-membership
@@ -148,17 +148,17 @@ credential layer that came across with them still carried the upstream school mo
 - Product-name and identity leaks fixed: `Unofficial-School-Manager` User-Agent,
   `SCHOOL_MANAGER_PXE_*` env vars, and "Reinstall School Manager" error strings.
 
-The only remaining `school` in the tree is **"Jamf School"** — a real product name in
+The only remaining `school` in the tree is **"Jamf School"** - a real product name in
 a cache description, correctly left alone.
 
 > Two persisted keys changed shape, and the project's convention is a clean cut-over,
 > no migration: the `download.schoolSubdir` setting id, and default credential ids
-> (`default-0000-school-admin` → `default-<site>-admin`). Existing local values are
+> (`default-0000-school-admin` -> `default-<site>-admin`). Existing local values are
 > ignored rather than migrated.
 
 ---
 
-## 2. Locked decisions — do not relitigate
+## 2. Locked decisions - do not relitigate
 
 1. **No ImageDeployer.** The upstream tool used a third-party WinPE client
    (Steven Edwards' ImageDeployer) with no licence grant. It is **excluded** from
@@ -171,15 +171,15 @@ a cache description, correctly left alone.
    permanently, scales to a room full of machines, and keeps secrets server-side.
    A minimal text fallback stays in the client for degraded operation.
 3. **Task sequences execute in three phases**, one step schema
-   (`reg | cmd | pwsh | app…`) tagged by phase:
-   - **A. WinPE agent** — disk prep, apply, driver install, plant unattend + runner
-   - **B. specialize** — unattend `RunSynchronous` (the existing generator)
-   - **C. first-boot runner** — planted by the agent, runs the rest in full
+   (`reg | cmd | pwsh | app...`) tagged by phase:
+   - **A. WinPE agent** - disk prep, apply, driver install, plant unattend + runner
+   - **B. specialize** - unattend `RunSynchronous` (the existing generator)
+   - **C. first-boot runner** - planted by the agent, runs the rest in full
      Windows, reports to the same log endpoint, self-removes.
-     *Phase C does not exist yet.* It is the highest-value missing piece — it is
+     *Phase C does not exist yet.* It is the highest-value missing piece - it is
      where the Applications layer will plug in.
 4. **Boot images: any Windows ISO + wimlib overlay**, with a **build-match rule**
-   — `sidecar/pxe/fieldiso/wim-inject/` carries SOFTWARE and COMPONENTS registry
+   - `sidecar/pxe/fieldiso/wim-inject/` carries SOFTWARE and COMPONENTS registry
    hives from a DISM-serviced base, so it is welded to its WinPE build family.
    One ADK export per build era. Prefer image **index 1** (bare WinPE), not
    index 2 (Setup).
@@ -193,14 +193,14 @@ a cache description, correctly left alone.
    in a menu and run by the phase-C runner. **winget is not on Server 2022 or
    LTSC/IoT** (it is on Win11 and Server 2025), so scripts are the universal
    base and winget becomes an optional step type later.
-7. **UI: MDT Deployment Workbench.** See §4.
+7. **UI: MDT Deployment Workbench.** See section 4.
 8. **Live data, not cached.** See `docs/DATA_FRESHNESS.md`.
 9. **No plug-in registry, no theme packages.** Both were inherited and both were
    deleted. Every node always exists; there are exactly two colour modes.
 
 ---
 
-## 3. Current state — what actually works
+## 3. Current state - what actually works
 
 ### Verified working (2026-08-21)
 
@@ -212,26 +212,26 @@ a cache description, correctly left alone.
   `GetPxeBootImagingClients`, `GetPxeBootLogTail`, `GetEvalIsoCatalog`,
   `GetAria2Downloads`.
 - LAN adapter detection works (`lanIp` resolves).
-- Vendor driver catalogs load — **1,456 driver rows** from the bundled JSON.
+- Vendor driver catalogs load - **1,456 driver rows** from the bundled JSON.
 - Console tree navigates; each node renders only its own sections; zero console
   errors in a headless browser check.
 
 ### Carried in from USM, 2026-08-21 (see `usm-reference/HANDOVER_TO_USM_AGENT.md`)
 
-- **Lenovo catalog fix.** `$bestScore = -1` → `[int]::MinValue` at three sites.
+- **Lenovo catalog fix.** `$bestScore = -1` -> `[int]::MinValue` at three sites.
   Lenovo is the only *signed* scorer of the five (win10 = -100), so the old seed
   discarded every Win10-only model. Measured on the bundled 372-model catalog:
-  **80 unmatched → 0**. Acer and Dell use `-1` **correctly** and now carry a
-  comment at the seed saying so — do not pattern-match them.
+  **80 unmatched -> 0**. Acer and Dell use `-1` **correctly** and now carry a
+  comment at the seed saying so - do not pattern-match them.
 - **All-arch TFTP staging.** `Sync-AppPxeBootBundledArchTftpTrees` replaces the
   single-tree, hash-short-circuited Secure Boot sync. Never writes the TFTP root
-  (our `snponly.efi` is the byte-patched build). Assets still missing — see §6.
-- **`.gitattributes` created** — we had none. A line-ending-normalised `.efi`
+  (our `snponly.efi` is the byte-patched build). Assets still missing - see section 6.
+- **`.gitattributes` created** - we had none. A line-ending-normalised `.efi`
   fails Secure Boot with no useful error.
 - **Gateway `catch { }`** in `Get-AppPxeBootNetworkAdapters` (line ~4639) now
-  logs instead of discarding — the bug that cost the original "No LAN IP" hunt.
+  logs instead of discarding - the bug that cost the original "No LAN IP" hunt.
 
-### Scope sweep, 2026-08-21 — removed what is not an MDT/PXE replacement
+### Scope sweep, 2026-08-21 - removed what is not an MDT/PXE replacement
 
 Craig: *"All we are doing is MDT/WDS and PXE imaging."* Everything below was
 upstream tooling with no path to a WinDeployKit feature, and all of it was
@@ -239,18 +239,18 @@ verified unreachable before removal.
 
 | Removed | Size | Why it was dead |
 | --- | --- | --- |
-| `sidecar/lib/AppLazyPlugins.ps1` | 140 lines | A lazy **plug-in registry** for 11 upstream plug-ins (Mist, Meraki, SolarWinds, PaperCut, ServiceNow, WMS, Oliver, MDM, ASM, Arcade, SiteBuild). **None of those files exist here** and nothing wired the loader. Directly contradicted §2.9 |
+| `sidecar/lib/AppLazyPlugins.ps1` | 140 lines | A lazy **plug-in registry** for 11 upstream plug-ins (Mist, Meraki, SolarWinds, PaperCut, ServiceNow, WMS, Oliver, MDM, ASM, Arcade, SiteBuild). **None of those files exist here** and nothing wired the loader. Directly contradicted section 2.9 |
 | `app/src/lib/cacheTtls.ts` | 200 lines | Cache catalog for staff/students/groups/MDM device lists. Not imported anywhere |
 | `Ipc.ps1` boot ladder + NPS gate | ~110 lines | Bootstrap-phase overlay and an NPS-mount boot gate. Nothing called `Write-SidecarBootstrapPhase`; there is no NPS feature here |
 | `SidecarParams.ps1` group parser | 32 lines | `Read-AppSchoolGroupMembershipSidecarParams`, no callers |
-| `sidecar.rs` timeout table | ~30 lines | Per-command timeouts for WLC probes, switch CLI/audit bundles, ServiceNow and SiteBuild — none of which have handlers |
-| `index.css` | **544 lines** | Theme-package system, skin audio, the animated startup experience (orbs, circuit art, brand glow), boot-progress dots, the site-switcher/site card, drag-reorderable nav. §2.9 and §10 say these were deleted; the CSS had survived |
+| `sidecar.rs` timeout table | ~30 lines | Per-command timeouts for WLC probes, switch CLI/audit bundles, ServiceNow and SiteBuild - none of which have handlers |
+| `index.css` | **544 lines** | Theme-package system, skin audio, the animated startup experience (orbs, circuit art, brand glow), boot-progress dots, the site-switcher/site card, drag-reorderable nav. section 2.9 and section 10 say these were deleted; the CSS had survived |
 | `AppIcon.tsx` | 43 lines | 30+ glyphs for AD/staff/student/printer/wireless panels. Trimmed to the 12 the console tree can actually reach, plus the fallback |
 | `types.ts` | 36 lines | 14 event names nothing emits or consumes, and the LDAP/sites-catalog half of `ApplyRuntimeConfigParams` |
 
 **Kept deliberately**, despite being unused: `badge-*`, `data-card`, `detail-pane*`,
-`btn-*` and the nav primitives. `docs/WINDEPLOYKIT_App_StyleGuide.md` §5–§6 specifies
-them as the design system — unused is not the same as unwanted.
+`btn-*` and the nav primitives. `docs/WINDEPLOYKIT_App_StyleGuide.md` section 5-section 6 specifies
+them as the design system - unused is not the same as unwanted.
 
 Also kept, because they are genuinely Windows deployment and not upstream residue:
 the `Intune`/Autopilot clean-OOBE task-sequence option, VPN/Tailscale adapter
@@ -260,54 +260,54 @@ guidance, `GPO-disable` step sets, and the vendor SCCM driver catalogs.
 
 | Node | State |
 | --- | --- |
-| Netboot | **Wired** — services, DHCP options 66/67, adapter/port/mode |
-| Boot Images | **Wired** — boot WIM library |
-| Operating Systems | **Wired** — OS image catalog + acquisition |
-| Out-of-Box Drivers | **Wired** — vendor catalogs + driver store |
-| Task Sequences | **Wired** — sequence editor |
-| Monitoring | **Wired** — PXE log + imaging clients, both clearable |
-| Transfers | **Wired** — download client |
-| Applications | Placeholder (deferred, §2.6) |
-| Site Profile | **Placeholder — needed**, see §5 |
+| Netboot | **Wired** - services, DHCP options 66/67, adapter/port/mode |
+| Boot Images | **Wired** - boot WIM library |
+| Operating Systems | **Wired** - OS image catalog + acquisition |
+| Out-of-Box Drivers | **Wired** - vendor catalogs + driver store |
+| Task Sequences | **Wired** - sequence editor |
+| Monitoring | **Wired** - PXE log + imaging clients, both clearable |
+| Transfers | **Wired** - download client |
+| Applications | Placeholder (deferred, section 2.6) |
+| Site Profile | **Placeholder - needed**, see section 5 |
 | Sidecar Log | Placeholder |
 | Deployment Share (root) | Placeholder |
 
-### Unwired — code exists, nothing reaches it (found 2026-08-21)
+### Unwired - code exists, nothing reaches it (found 2026-08-21)
 
 These are **incomplete ports, not residue**. Do not delete them; finish them.
 
 | Gap | Evidence | Consequence |
 | --- | --- | --- |
-| **Deploy$ base cannot be set** | `DownloadSettingsSection.tsx` is the only caller of `pushImageLibraryRoot()` and `SETTING_IMAGE_LIBRARY_DIR`, and it is mounted in **no** panel | The sidecar honours a user-chosen image library root, but nothing can set one, so it always uses the default. **This is what makes §3b's storage split real** — wire it before claiming the Deploy$ base is user-selectable |
-| **Credentials overlay is non-functional** | All 7 IPC commands it invokes (`ListInfraSshCredentials`, `SetInfraSshCredential`, `GetLocalMachineCredential`, …) have **no `Handle-*` anywhere** | The "Credentials" button in Netboot opens a dialog where every action fails. The vault lib exists and `PxeBootPlugin` reads it for the `vault:<id>` Deploy$ credential — but nothing can populate it |
+| **Deploy$ base cannot be set** | `DownloadSettingsSection.tsx` is the only caller of `pushImageLibraryRoot()` and `SETTING_IMAGE_LIBRARY_DIR`, and it is mounted in **no** panel | The sidecar honours a user-chosen image library root, but nothing can set one, so it always uses the default. **This is what makes section 3b's storage split real** - wire it before claiming the Deploy$ base is user-selectable |
+| **Credentials overlay is non-functional** | All 7 IPC commands it invokes (`ListInfraSshCredentials`, `SetInfraSshCredential`, `GetLocalMachineCredential`, ...) have **no `Handle-*` anywhere** | The "Credentials" button in Netboot opens a dialog where every action fails. The vault lib exists and `PxeBootPlugin` reads it for the `vault:<id>` Deploy$ credential - but nothing can populate it |
 | **Runtime config never pushed** | `buildSidecarSpawnEnv()` / `buildRuntimeConfigForSidecar()` in `runtimeConfig.ts` have no callers | Verbose logging and TLS-skip settings never reach the sidecar |
 
 12 of the 67 commands in `types.ts` have no handler: the 7 credential ones above,
 `ClearMacOsAdminCredentialCache`, `PrefetchMacOsAdminCredential`,
-`DeleteInfraSshCredential`, and `GetSiteProfile`/`SetSiteProfile` (expected — §5).
+`DeleteInfraSshCredential`, and `GetSiteProfile`/`SetSiteProfile` (expected - section 5).
 
 ### Not built yet
 
-- Phase-C first-boot runner (§2.3)
-- The WinPE client rewrite (§2.1)
-- Site Profile (§5) — several TODOs block on it
+- Phase-C first-boot runner (section 2.3)
+- The WinPE client rewrite (section 2.1)
+- Site Profile (section 5) - several TODOs block on it
 - Boot-image creation UI over the existing wimlib overlay engine
 
 ---
 
-## 3b. Where data lives — the storage split (enforced)
+## 3b. Where data lives - the storage split (enforced)
 
 **Craig, 2026-08-21:** boot images and the TFTP root may live in central app data;
 **large ISOs and drivers go wherever the user sets the Deploy$ base.**
 
 | Category | Location | Why |
 | --- | --- | --- |
-| TFTP root, boot WIMs, `wimboot`, `snponly.efi`, configs, logs | **App data** — `~/Library/Application Support/WinDeployKit` / `%LOCALAPPDATA%\WinDeployKit` | Small, fixed, machine-local. Must be where the services expect it |
-| ISOs, imageable/SOE WIMs, driver packs, download staging | **Image library = the Deploy$ base** — user-chosen, default `~/Public/WinDeployKit` (macOS) / `~/Downloads/WinDeployKit` (Windows) | Multi-GB. Must never fill the system drive |
+| TFTP root, boot WIMs, `wimboot`, `snponly.efi`, configs, logs | **App data** - `~/Library/Application Support/WinDeployKit` / `%LOCALAPPDATA%\WinDeployKit` | Small, fixed, machine-local. Must be where the services expect it |
+| ISOs, imageable/SOE WIMs, driver packs, download staging | **Image library = the Deploy$ base** - user-chosen, default `~/Public/WinDeployKit` (macOS) / `~/Downloads/WinDeployKit` (Windows) | Multi-GB. Must never fill the system drive |
 
 ### The rule
 
-> **Nothing multi-GB may resolve into the app-data store — including on a fallback
+> **Nothing multi-GB may resolve into the app-data store - including on a fallback
 > path.** The store is on the system drive. If the image library is unavailable,
 > fall back to `Get-AppImageLibraryDefaultRoot` (which is deliberately off the
 > app-data tree), never to the plug-in store, and **log it**.
@@ -318,8 +318,8 @@ This is not theoretical. USM filled an SSD by writing a **~60 GB WIM to
 here had the same shape and were fixed on 2026-08-21:
 
 - `Get-AppAria2EffectiveDownloadDir` defaulted to `<store>/plugins/aria2/downloads`
-- `Get-AppPxeBootLayoutPaths` routed `isoDir`/`imageWimsDir` into `<store>/http/…`
-  when the image library failed to resolve — behind a **bare `catch { }`**, so it
+- `Get-AppPxeBootLayoutPaths` routed `isoDir`/`imageWimsDir` into `<store>/http/...`
+  when the image library failed to resolve - behind a **bare `catch { }`**, so it
   was silent
 
 Both now resolve to the image library. Verified by resolving all nine paths and
@@ -328,15 +328,15 @@ either resolver.
 
 ### The spaces trap (carried from USM, keep it working)
 
-`~/Library/Application Support/…` contains a space, and **`Start-Process
+`~/Library/Application Support/...` contains a space, and **`Start-Process
 -ArgumentList` joins an argument array with spaces WITHOUT quoting**, so every
 app-data path splits into multiple arguments. USM shipped this bug to the field in
 aria2, dnsmasq, RDP/SSH launch and folder reveals.
 
-- Always: `Start-Process … -ArgumentList (Format-AppProcessArgumentList -Arguments @(…))`
+- Always: `Start-Process ... -ArgumentList (Format-AppProcessArgumentList -Arguments @(...))`
   (`sidecar/lib/AppPlatform.ps1`). **Never pass a raw array.**
 - Need exact argv: `Start-AppNativeProcess` (`ProcessStartInfo.ArgumentList`).
-- `& tool $path` is safe — the bug is specific to `Start-Process`'s array join.
+- `& tool $path` is safe - the bug is specific to `Start-Process`'s array join.
 
 Both live call sites (aria2 daemon, dnsmasq) use the helper and were verified
 against a spaced path.
@@ -348,7 +348,7 @@ against a spaced path.
 Governing doc: **`docs/WINDEPLOYKIT_App_StyleGuide.md`**. Direction and the MDT
 node mapping: `docs/UI_DIRECTION.md`.
 
-The short version — violating any of these is a defect:
+The short version - violating any of these is a defect:
 
 - **Two modes only**: light and dark. `:root` holds the complete light palette;
   dark is redefined under both `prefers-color-scheme` *and* `[data-theme="dark"]`.
@@ -368,19 +368,19 @@ The short version — violating any of these is a defect:
 ### Structure
 
 ```
-app/src/components/navConfig.ts   the console tree (a plain array — no registry)
+app/src/components/navConfig.ts   the console tree (a plain array - no registry)
 app/src/panels/<Node>Panel.tsx    one thin file per node; routing + title
 app/src/workspaces/               shared state containers; panels render sections
 ```
 
-Nav order is **deployment order, not MDT's**: Netboot (owns the services) → Boot
-Images (what they serve) → Operating Systems → Out-of-Box Drivers → Applications
-→ Task Sequences → Monitoring.
+Nav order is **deployment order, not MDT's**: Netboot (owns the services) -> Boot
+Images (what they serve) -> Operating Systems -> Out-of-Box Drivers -> Applications
+-> Task Sequences -> Monitoring.
 
 The two workspaces are shared because the state genuinely is (one config poll,
 one status poll feed several nodes). `PxeWorkspace` takes a `sections` prop;
 `ContentWorkspace` takes a `tabs` prop. A section that owns its whole panel
-(`solo`) hides its heading and disclosure caret — the panel title already says it.
+(`solo`) hides its heading and disclosure caret - the panel title already says it.
 
 **Sibling project:** `/Volumes/Data/projects/PSOpenAD-FE` shares this exact design
 system (`docs/PSOPENAD_FE_StyleGuide.md`), adapted for ADUC. Style-guide changes
@@ -388,7 +388,7 @@ belong in both.
 
 ---
 
-## 5. Site Profile — the main outstanding design task
+## 5. Site Profile - the main outstanding design task
 
 The upstream tool sourced site-specific values from a school-directory feature
 that was not extracted. Every consumer is now a `TODO(Site Profile)` in the code:
@@ -403,7 +403,7 @@ site id (for the `{{SITE}}` naming token), org name and time zone for generated
 unattend files.
 
 Until it exists, `Get-AppPxeBootTaskSequencePublishContext` returns nulls
-**deliberately** — so token expansion fails loudly rather than publishing a
+**deliberately** - so token expansion fails loudly rather than publishing a
 wrong-but-plausible value. Do not "fix" that by adding fallbacks.
 
 > **Security note:** the upstream version fell back to two hardcoded department
@@ -416,7 +416,7 @@ wrong-but-plausible value. Do not "fix" that by adding fallbacks.
 
 ### Silent `catch { }` blocks
 
-Ported code is full of bare `try { … } catch { }` with empty handlers —
+Ported code is full of bare `try { ... } catch { }` with empty handlers -
 **40 of them in `PxeBootPlugin.ps1` alone**. During the port, a missing function
 inside `Get-AppPxeBootNetworkAdapters` produced
 **"No LAN IP" with no log line at all** and took a direct function call to
@@ -434,18 +434,18 @@ them is in `usm-reference/HANDOVER_TO_USM_AGENT.md`.
 
 ### `$script:AppSidecarProjectRoot`
 
-Must be set **before any lib is dot-sourced** — ~20 call sites resolve
+Must be set **before any lib is dot-sourced** - ~20 call sites resolve
 `vendor/binaries` and `packaging/*.json` through it. The sidecar bootstrap does
 this; if you write a new entry point, do it there too.
 
 ### Other
 
-- **Never edit `usm-reference/` originals** expecting it to affect the build —
+- **Never edit `usm-reference/` originals** expecting it to affect the build -
   they are reference copies, not sources.
 - `wim-inject/` (615 MB) is gitignored: ADK-derived WinPE system files, EULA-scoped.
 - `vendor/binaries/pxe-mdt-boot/` and `sidecar/pxe/mdt-boot-x64/` are Microsoft
-  boot binaries — gitignored, never redistribute.
-- **Secure Boot cannot work yet — the arch trees are not in this repo.**
+  boot binaries - gitignored, never redistribute.
+- **Secure Boot cannot work yet - the arch trees are not in this repo.**
   `vendor/binaries/pxe-secure-boot-x64/` is README-only and `sidecar/pxe/x86_64-sb/`
   does not exist, so `Sync-AppPxeBootBundledArchTftpTrees` has nothing to stage
   while the default Option 67 (`x86_64-sb/shimx64.efi`) points at that path.
@@ -457,10 +457,10 @@ this; if you write a new entry point, do it there too.
 - The bundled `snponly.efi` carries a **byte-patched embed** (an upstream WAN
   fallback removed). The ipxeboot source embed still needs the matching change
   at next rebuild.
-- `packaging/aria2-tracker.json` is an **empty skeleton** — the original catalog
+- `packaging/aria2-tracker.json` is an **empty skeleton** - the original catalog
   was org-specific and was removed. Point `manifestUrl` at your own artifact
   host. **7 URL constants** across `sidecar/lib/` still reference
-  `artifacts.example.com` — grep for it.
+  `artifacts.example.com` - grep for it.
 
 ---
 
@@ -468,14 +468,14 @@ this; if you write a new entry point, do it there too.
 
 - **Sidecar IPC**: one JSON object per line on stdin
   (`{"id":N,"cmd":"Name","params":{}}`); responses NDJSON on **stdout only**;
-  all human logging to **stderr**. Commands resolve by convention —
+  all human logging to **stderr**. Commands resolve by convention -
   `"Foo"` runs `Handle-Foo`. Adding a command = adding a function.
 - **PowerShell**: pwsh 7 compatible, `Set-StrictMode -Version Latest`. Watch two
-  known traps — `ConvertFrom-Json` hydrates ISO-8601 into `[DateTime]`, and
+  known traps - `ConvertFrom-Json` hydrates ISO-8601 into `[DateTime]`, and
   parameter names that collide with automatic variables.
 - **Verify by running, not by reading.** The sidecar can be driven from a shell
   (see README). The frontend can be checked headlessly for console errors. Every
-  claim in §3 was verified that way.
+  claim in section 3 was verified that way.
 
 ---
 
@@ -485,10 +485,10 @@ this; if you write a new entry point, do it there too.
 2. `cd app && npm install && npm run tauri:dev`.
 3. Smoke-test the sidecar from a shell before blaming the UI.
 4. Highest-value next steps, in order:
-   1. **Site Profile** (§5) — unblocks 10 `TODO(Site Profile)` sites and the
+   1. **Site Profile** (section 5) - unblocks 10 `TODO(Site Profile)` sites and the
       task-sequence token expansion
-   2. **Phase-C first-boot runner** (§2.3) — unblocks Applications and everything
+   2. **Phase-C first-boot runner** (section 2.3) - unblocks Applications and everything
       MDT did after the first reboot
-   3. **WinPE client rewrite** (§2.1) — grow `fieldiso/run.ps1` into the agent
+   3. **WinPE client rewrite** (section 2.1) - grow `fieldiso/run.ps1` into the agent
    4. Boot Images UI over the existing overlay engine
-5. Commit early and often — the tree is committed now, so keep it that way.
+5. Commit early and often - the tree is committed now, so keep it that way.

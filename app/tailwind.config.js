@@ -1,5 +1,5 @@
 /** @type {import('tailwindcss').Config} */
-// Tokens mirror docs/WINDEPLOYKIT_App_StyleGuide.md §2-§7.
+// Tokens mirror docs/WINDEPLOYKIT_App_StyleGuide.md section 2-section 7.
 // If a token is added there, add it here. The style guide is the source of truth.
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
@@ -32,7 +32,7 @@ export default {
         cond: ['"IBM Plex Sans Condensed"', '"IBM Plex Sans"', "sans-serif"],
       },
       fontSize: {
-        // Slightly denser scale than Tailwind defaults — matches the style guide.
+        // Slightly denser scale than Tailwind defaults - matches the style guide.
         xxs: ["9px", "12px"],
         xs: ["10px", "14px"],
         sm: ["11px", "15px"],

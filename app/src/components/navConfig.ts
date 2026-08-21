@@ -1,8 +1,8 @@
-// Sidebar nav — the MDT Deployment Workbench console tree.
+// Sidebar nav - the MDT Deployment Workbench console tree.
 //
 // One vertical tree down the left, exactly like the Workbench: a Deployment
 // Share root with its child nodes nested under it, then Monitoring and Advanced
-// Configuration as siblings. No plug-in registry, no theme packages — every
+// Configuration as siblings. No plug-in registry, no theme packages - every
 // node below is always present, and `id` is the panel key the router dispatches.
 
 export interface NavNode {
@@ -11,7 +11,7 @@ export interface NavNode {
   icon: string;
   /** Nested child nodes, rendered indented under this one. */
   children?: NavNode[];
-  /** Root nodes render as a tree parent — bold, always expanded. */
+  /** Root nodes render as a tree parent - bold, always expanded. */
   root?: boolean;
   badge?: string | number;
   badgeVariant?: "ok" | "warn";

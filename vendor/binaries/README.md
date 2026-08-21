@@ -4,16 +4,16 @@ Prebuilt tools copied into `packaging/staged/` during `prepare-bundle-deps.ps1`.
 
 | Path | Platform | Shipped in |
 |------|----------|------------|
-| `intune-macos/windeploykit-intunewin-pack-aarch64-apple-darwin` | macOS Apple Silicon | `.app` → `Resources/binaries/` |
-| `intune-macos/windeploykit-intunewin-pack-x86_64-apple-darwin` | macOS Intel | `.app` → `Resources/binaries/` |
-| `dialog-macos/windeploykit-dialog-universal` | macOS (Intel + Apple Silicon) | `.app` → `Resources/binaries/` (native admin/password prompts) |
-| `pxe-macos/dnsmasq-universal` | macOS (Intel + Apple Silicon) | `.app` → `Resources/binaries/` (Netboot TFTP) |
-| `pxe-macos/wimlib-imagex-universal` | macOS (Intel + Apple Silicon) | `.app` → `Resources/binaries/` (Netboot boot assets) |
-| `pxe-wimboot/wimboot` | macOS + Windows | `resources/sidecar/pxe/wimboot` → user store on field PXE start |
-| `pxe-secure-boot-x64/x86_64-sb/` | macOS + Windows | `resources/sidecar/pxe/x86_64-sb/` → `tftp/x86_64-sb/` on Netboot enable / Start Imaging Services |
-| `pxe-mdt-boot/x64/` | macOS + Windows | `resources/sidecar/pxe/mdt-boot-x64/` → `http/wim-boot/<ImageDeployer*>` on import |
+| `intune-macos/windeploykit-intunewin-pack-aarch64-apple-darwin` | macOS Apple Silicon | `.app` -> `Resources/binaries/` |
+| `intune-macos/windeploykit-intunewin-pack-x86_64-apple-darwin` | macOS Intel | `.app` -> `Resources/binaries/` |
+| `dialog-macos/windeploykit-dialog-universal` | macOS (Intel + Apple Silicon) | `.app` -> `Resources/binaries/` (native admin/password prompts) |
+| `pxe-macos/dnsmasq-universal` | macOS (Intel + Apple Silicon) | `.app` -> `Resources/binaries/` (Netboot TFTP) |
+| `pxe-macos/wimlib-imagex-universal` | macOS (Intel + Apple Silicon) | `.app` -> `Resources/binaries/` (Netboot boot assets) |
+| `pxe-wimboot/wimboot` | macOS + Windows | `resources/sidecar/pxe/wimboot` -> user store on field PXE start |
+| `pxe-secure-boot-x64/x86_64-sb/` | macOS + Windows | `resources/sidecar/pxe/x86_64-sb/` -> `tftp/x86_64-sb/` on Netboot enable / Start Imaging Services |
+| `pxe-mdt-boot/x64/` | macOS + Windows | `resources/sidecar/pxe/mdt-boot-x64/` -> `http/wim-boot/<ImageDeployer*>` on import |
 | `pxe-windows/wimlib/` | Windows x64 + ARM64 | `Resources/binaries/wimlib/` (Netboot boot assets) |
-| *(none)* | Windows x64 TFTP | Use **Tftpd64** on the laptop — dnsmasq is not buildable for native Windows |
+| *(none)* | Windows x64 TFTP | Use **Tftpd64** on the laptop - dnsmasq is not buildable for native Windows |
 | `../intune-win-app-util/IntuneWinAppUtil.exe` | Windows x64 | `resources/sidecar/tools/` |
 
 ## Refresh macOS packagers
@@ -30,7 +30,7 @@ git add vendor/binaries/intune-macos/
 ## Refresh windeploykit-dialog (native macOS prompts)
 
 Tiny AppKit helper (`tools/windeploykit-dialog/main.swift`) for admin-password / confirm / notify
-dialogs — used instead of osascript, which security tooling can deny. Requires Xcode CLT.
+dialogs - used instead of osascript, which security tooling can deny. Requires Xcode CLT.
 
 ```bash
 ./scripts/build-windeploykit-dialog.sh
@@ -81,7 +81,7 @@ git add vendor/binaries/pxe-windows/wimlib/ vendor/binaries/pxe-wimlib/SHA256SUM
 
 Requires macOS build tools for the universal binary (`bash`, `clang`, autotools). Windows zips download on any host.
 
-Windows (Tftpd64 — no vendored dnsmasq; upstream is POSIX-only):
+Windows (Tftpd64 - no vendored dnsmasq; upstream is POSIX-only):
 
 Install Tftpd64 on tech laptops; optional path in Netboot Settings.
 

@@ -1,4 +1,4 @@
-# Acer SCCM driver pack catalog — scrape global-download URLs from Acer's SCCM page.
+# Acer SCCM driver pack catalog - scrape global-download URLs from Acer's SCCM page.
 # Entry: https://www.acer.com/sccm/ (redirects to Community KB; fallback URL if redirect fails).
 # Resolved landing page may change; we cache the effective URL from curl -L.
 
@@ -6,12 +6,12 @@ $script:AppAcerSccmEntryUrl = 'https://www.acer.com/sccm/'
 $script:AppAcerSccmFallbackUrls = @(
     'https://community.acer.com/en/kb/articles/15378-microsoft-system-center-configuration-manager-sccm?expandedToggles=toggle-travelmate'
 )
-# Structured XML catalog Acer publishes for MSEndpointMgr's Driver Automation Tool —
+# Structured XML catalog Acer publishes for MSEndpointMgr's Driver Automation Tool -
 # hosted on the open pack CDN, so plain curl works (unlike the KB pages, which sit behind
 # fingerprint-level bot mitigation). Rich: friendly model names + per-pack os/version/date
 # and MD5. Narrow: current TravelMate P-lines only (no B/X-series, no legacy), and its
-# pack URLs are a subset of the KB list — so it is merged into the URL cache, never a
-# replacement for the browser-harvested coverage (AGENT_NOTES_PXE_DRIVERS §12).
+# pack URLs are a subset of the KB list - so it is merged into the URL cache, never a
+# replacement for the browser-harvested coverage (AGENT_NOTES_PXE_DRIVERS section 12).
 $script:AppAcerSccmXmlCatalogUrl = 'https://global-download.acer.com/supportfiles/files/support/sourcefile/msepm/AcerCatalog.xml'
 $script:AppAcerSccmCatalogCacheHours = 168
 $script:AppAcerSccmCatalogLastError = $null
@@ -584,7 +584,7 @@ function Get-AppAcerSccmXmlCatalog {
     $models = [System.Collections.Generic.List[hashtable]]::new()
     $urls = [System.Collections.Generic.List[string]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    # Set-StrictMode: $doc.ModelList.Model throws if the XML shape changes — tag lookup
+    # Set-StrictMode: $doc.ModelList.Model throws if the XML shape changes - tag lookup
     # degrades to an empty list instead.
     foreach ($model in @($doc.GetElementsByTagName('Model'))) {
         if (-not $model) { continue }
@@ -632,7 +632,7 @@ function Update-AppAcerSccmCatalogFromXml {
     }
 
     # harvestedAt survives the round trip as either a string or (via PS7's
-    # ConvertFrom-Json hydration) a [DateTime] — normalise BEFORE stringifying.
+    # ConvertFrom-Json hydration) a [DateTime] - normalise BEFORE stringifying.
     $harvestedParsed = [DateTime]::MinValue
     $harvestedAtText = $null
     if ($existing) {
@@ -655,7 +655,7 @@ function Update-AppAcerSccmCatalogFromXml {
         -ResolvedUrl $script:AppAcerSccmXmlCatalogUrl -Models @($xml.models) -HarvestedAt $harvestedAtText
 
     # Recommend a browser harvest when there has never been one, or it is older than 60
-    # days — the XML cannot cover B/X-series or legacy packs, only the KB page can.
+    # days - the XML cannot cover B/X-series or legacy packs, only the KB page can.
     $harvestAgeDays = $null
     if ($harvestedParsed -ne [DateTime]::MinValue) {
         $harvestAgeDays = [int]((Get-Date).ToUniversalTime() - $harvestedParsed.ToUniversalTime()).TotalDays
@@ -717,7 +717,7 @@ function Get-AppAcerSccmDriverUrlCatalog {
 
     $errors = [System.Collections.Generic.List[string]]::new()
 
-    # AcerCatalog.xml first — the only Acer discovery source plain curl can still reach
+    # AcerCatalog.xml first - the only Acer discovery source plain curl can still reach
     # (the HTML pages fingerprint-block/tarpit curl from any network). Union-merges the
     # XML's pack URLs into the cached list, so KB-harvested coverage is never lost.
     try {
@@ -735,7 +735,7 @@ function Get-AppAcerSccmDriverUrlCatalog {
             }
         }
     } catch {
-        [void]$errors.Add("AcerCatalog.xml → $($_.Exception.Message)")
+        [void]$errors.Add("AcerCatalog.xml -> $($_.Exception.Message)")
     }
 
     $tryUrls = [System.Collections.Generic.List[string]]::new()
@@ -752,7 +752,7 @@ function Get-AppAcerSccmDriverUrlCatalog {
             $effectiveUrl = [string]$resp.EffectiveUrl
             $urls = @(Parse-AppAcerSccmDriverUrlsFromHtml -Html $html)
             if ($urls.Count -eq 0) {
-                [void]$errors.Add("$fetchUrl → no global-download URLs (landed $effectiveUrl)")
+                [void]$errors.Add("$fetchUrl -> no global-download URLs (landed $effectiveUrl)")
                 continue
             }
             Write-AppAcerSccmCatalogCache -Urls $urls -SourceUrl $SourceUrl -ResolvedUrl $effectiveUrl
@@ -765,14 +765,14 @@ function Get-AppAcerSccmDriverUrlCatalog {
                 stale       = $false
             }
         } catch {
-            [void]$errors.Add("$fetchUrl → $($_.Exception.Message)")
+            [void]$errors.Add("$fetchUrl -> $($_.Exception.Message)")
         }
     }
 
     $script:AppAcerSccmCatalogLastError = ($errors -join '; ')
     $cached = Read-AppAcerSccmCatalogCache
     if ($cached -and $cached.urls) {
-        Write-SidecarLog "Acer SCCM catalog: live fetch failed — $($script:AppAcerSccmCatalogLastError); using stale cache."
+        Write-SidecarLog "Acer SCCM catalog: live fetch failed - $($script:AppAcerSccmCatalogLastError); using stale cache."
         return @{
             sourceUrl   = if ($cached.sourceUrl) { [string]$cached.sourceUrl } else { $SourceUrl }
             resolvedUrl = if ($cached.resolvedUrl) { [string]$cached.resolvedUrl } else { $null }

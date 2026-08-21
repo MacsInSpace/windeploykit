@@ -1,15 +1,15 @@
-# EvalIsoCatalog.ps1 — Microsoft Evaluation Center ISO discovery + fetch.
+# EvalIsoCatalog.ps1 - Microsoft Evaluation Center ISO discovery + fetch.
 #
 # Why this exists: WinDeployKit needs a legal, no-account, zero-setup source of
 # Windows media so a fresh install can be tested end to end. Evaluation Center
 # ISOs are freely downloadable from Microsoft and time-limited (180 days for
-# Server, 90 for client) — fine for lab, imaging tests and CI.
+# Server, 90 for client) - fine for lab, imaging tests and CI.
 #
 # Ported from Craig's GetWinISOs.ps1 with three changes:
 #   1. Cross-platform: Start-BitsTransfer (Windows-only) -> the shared aria2 /
 #      direct-HTTP rail, so this works on macOS.
 #   2. Fixed the malformed `and (` filter clause (was a parse error).
-#   3. No hardcoded E:\ISOs — lands in the image library `iso/` folder, which is
+#   3. No hardcoded E:\ISOs - lands in the image library `iso/` folder, which is
 #      what Caddy and the SMB share already serve.
 #
 # Evaluation Center markup changes without notice: Get-AppEvalIsoDirectUrl is
@@ -28,7 +28,7 @@ function Get-AppEvalIsoCatalog {
     <#
     .SYNOPSIS
         The static list of Evaluation Center editions WinDeployKit can fetch.
-        No network access — the download URL is resolved on demand.
+        No network access - the download URL is resolved on demand.
     #>
     $libRoot = $null
     try { $libRoot = (Get-AppImageLibraryPaths).isoDir } catch { }

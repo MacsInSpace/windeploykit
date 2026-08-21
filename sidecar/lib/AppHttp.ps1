@@ -1,4 +1,4 @@
-# AppHttp.ps1 — minimal HTTP helpers for WinDeployKit.
+# AppHttp.ps1 - minimal HTTP helpers for WinDeployKit.
 #
 # The USM original carried a corp/split-DNS routing table, per-host override cache
 # and a TLS probe for department services; none of that applies to a generic

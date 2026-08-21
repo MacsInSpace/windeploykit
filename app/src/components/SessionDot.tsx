@@ -26,7 +26,7 @@ function dotClass(state: SessionState | string): string {
 
 export function SessionDot({ label, state, message }: SessionDotProps) {
   const display = normalizeSessionState(state);
-  const title = message ? `${label} — ${display} (${message})` : `${label} — ${display}`;
+  const title = message ? `${label} - ${display} (${message})` : `${label} - ${display}`;
   return (
     <div className="flex items-center gap-[6px]" title={title}>
       <span className={dotClass(display)} aria-hidden />

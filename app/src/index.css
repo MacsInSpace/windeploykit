@@ -3,7 +3,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design tokens — see docs/WINDEPLOYKIT_App_StyleGuide.md §2.
+/* Design tokens - see docs/WINDEPLOYKIT_App_StyleGuide.md section 2.
    Two modes only: light and dark. No theme packages.
    :root is the complete light palette; the dark values are redefined for the
    system preference and for an explicit data-theme="dark", so all three viewer
@@ -41,7 +41,7 @@
   --sans: var(--font-sans);
   --cond: var(--font-display);
 
-  /* Geometry — square-ish tool chrome, per style guide §8 (3-5px max). */
+  /* Geometry - square-ish tool chrome, per style guide section 8 (3-5px max). */
   --radius-control: 4px;
   --radius-card: 5px;
   --radius-shell: 0px;
@@ -54,7 +54,7 @@
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none'%3E%3Cpath d='m2.5 4.25 3.5 3.5 3.5-3.5' stroke='%235a7089' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
-/* Dark — system preference, unless the viewer explicitly chose light. */
+/* Dark - system preference, unless the viewer explicitly chose light. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #08111f;
@@ -84,7 +84,7 @@
   }
 }
 
-/* Dark — explicit choice wins in both directions. */
+/* Dark - explicit choice wins in both directions. */
 :root[data-theme="dark"] {
   --bg: #08111f;
   --surface: #0d1828;
@@ -321,7 +321,7 @@ body {
     -webkit-text-fill-color: var(--text3);
     opacity: 1;
   }
-  /* .input-box on the control itself (no wrapper) — common in modals */
+  /* .input-box on the control itself (no wrapper) - common in modals */
   input.input-box,
   textarea.input-box {
     width: 100%;
@@ -445,7 +445,7 @@ body {
     box-shadow: var(--shadow-soft);
   }
 
-  /* Data table — see style guide §5 */
+  /* Data table - see style guide section 5 */
   .dk-table {
     @apply w-full border-collapse text-[12px];
   }
@@ -1179,16 +1179,16 @@ html[data-sidebar="collapsed"] .user-footer { justify-content: center; padding: 
 
 /* The retro packages deliberately replace the modern acrylic vocabulary. */
 
-/* Synthwave — retro-future night drive: violet dusk, neon pink interaction,
+/* Synthwave - retro-future night drive: violet dusk, neon pink interaction,
    cyan horizon grid. The shell grid alone is invisible in practice (the opaque
-   .app-main covers it — 2026-08-12 field feedback), so the grid also lives on
+   .app-main covers it - 2026-08-12 field feedback), so the grid also lives on
    .app-main with a top-anchored fade: strongest at the horizon (bottom), gone
    behind the header. Content sits on its own surfaces and stays clean. */
-/* Cyan grid at row granularity — table rules read as horizon lines. */
-/* The sidebar avatar is the synthwave sun — striped orange disc, dark-orange
-   initials (#5c1e00 ≥7:1 on the yellow/orange bands the text sits on).
+/* Cyan grid at row granularity - table rules read as horizon lines. */
+/* The sidebar avatar is the synthwave sun - striped orange disc, dark-orange
+   initials (#5c1e00 >=7:1 on the yellow/orange bands the text sits on).
    !important: the component sets background/color inline (Sidebar.tsx). */
-/* White button text needs its own deeper pink ramp — white on the shared
+/* White button text needs its own deeper pink ramp - white on the shared
    accent gradient top stop (#ff4fc3) is 2.9:1, below AA. These stops pass. */
 
 @media (max-width: 1280px) {
@@ -1211,8 +1211,8 @@ html[data-sidebar="collapsed"] .user-footer { justify-content: center; padding: 
 }
 
 /* Stack the toolbar under the title before it can collide with it. 1440 (not 1120)
-   because busy toolbars (ServiceAccounts) overflow a maximized 1366x768 laptop —
-   14" site devices at 100% scale — and the old overflow-x scroll just hid the
+   because busy toolbars (ServiceAccounts) overflow a maximized 1366x768 laptop -
+   14" site devices at 100% scale - and the old overflow-x scroll just hid the
    primary action (+ New) off the right edge with no visible scrollbar. */
 @media (max-width: 1440px) {
   .panel-header { flex-wrap: wrap; align-content: center; }
@@ -1247,8 +1247,8 @@ html[data-sidebar="collapsed"] .user-footer { justify-content: center; padding: 
 }
 
 /* ---------------------------------------------------------------------------
-   InfoTip — hover/focus detail for panel headers and dense controls.
-   Style guide § "Help text & tooltips": the header carries one scannable fact;
+   InfoTip - hover/focus detail for panel headers and dense controls.
+   Style guide section "Help text & tooltips": the header carries one scannable fact;
    supporting detail lives in here instead of a wrapping subtitle line.
    --------------------------------------------------------------------------- */
 
@@ -1291,7 +1291,7 @@ html[data-sidebar="collapsed"] .user-footer { justify-content: center; padding: 
   color: var(--text2, var(--text));
   font-size: 11px;
   line-height: 1.45;
-  pointer-events: none;       /* purely informational — never eats clicks */
+  pointer-events: none;       /* purely informational - never eats clicks */
 }
 
 .info-tip-rows {
@@ -1338,7 +1338,7 @@ html[data-sidebar="collapsed"] .user-footer { justify-content: center; padding: 
   min-width: 0;
 }
 
-/* ── Console tree (MDT Deployment Workbench left pane) ───────────────────── */
+/* -- Console tree (MDT Deployment Workbench left pane) --------------------- */
 /* One vertical tree. Rows are single-line; depth adds indent, never columns. */
 
 .app-sidebar {

@@ -1,4 +1,4 @@
-# aria2 ↔ Netboot PXE store integration — staging, promote, driver alias resolver, tracker catalog.
+# aria2 <-> Netboot PXE store integration - staging, promote, driver alias resolver, tracker catalog.
 # Loaded after PxeBootPlugin.ps1 (see windeploykit-sidecar.ps1).
 
 $script:AppAria2TrackerManifestCacheHours = 168
@@ -51,14 +51,15 @@ function Read-AppAria2JobsStore {
         if ([string]::IsNullOrWhiteSpace($raw)) { return @{ jobs = @{} } }
         $obj = $raw | ConvertFrom-Json
         $jobs = @{}
-        if ($obj.jobs) {
-            foreach ($prop in $obj.jobs.PSObject.Properties) {
+        $objJobs = Get-AppSidecarJsonProp -Item $obj -Name 'jobs'
+        if ($objJobs) {
+            foreach ($prop in $objJobs.PSObject.Properties) {
                 $jobs[$prop.Name] = $prop.Value
             }
         }
         return @{ jobs = $jobs }
     } catch {
-        Write-SidecarLog "aria2: jobs store read failed — $($_.Exception.Message)"
+        Write-SidecarLog "aria2: jobs store read failed - $($_.Exception.Message)"
         return @{ jobs = @{} }
     }
 }
@@ -317,7 +318,7 @@ function New-AppAria2DownloadPlan {
             $promoteTarget = New-AppAria2DriverPromoteTargetFromVendorFolder -Vendor $Vendor -Folder $Folder
         }
         if (-not $promoteTarget) {
-            throw "aria2: unknown driver model — use a WMI alias (e.g. P414-53), folder name, or pick from Tracker."
+            throw "aria2: unknown driver model - use a WMI alias (e.g. P414-53), folder name, or pick from Tracker."
         }
     }
 
@@ -328,7 +329,7 @@ function New-AppAria2DownloadPlan {
     if ($useStaging) {
         $incomingRoot = Get-AppAria2PxeIncomingRoot
         if (-not $incomingRoot) {
-            throw 'aria2: Netboot store unavailable — enable Netboot once or disable PXE staging.'
+            throw 'aria2: Netboot store unavailable - enable Netboot once or disable PXE staging.'
         }
         $stagingDir = Join-Path $incomingRoot ([guid]::NewGuid().ToString('N'))
         $null = New-Item -Path $stagingDir -ItemType Directory -Force
@@ -356,7 +357,7 @@ function Register-AppAria2Job {
     param(
         [Parameter(Mandatory)][string]$Gid,
         [Parameter(Mandatory)]$Plan,
-        # Tracker catalog row id (e.g. 'site-soe-win11-24h2-v2') — lets the OS
+        # Tracker catalog row id (e.g. 'site-soe-win11-24h2-v2') - lets the OS
         # images table match its rows to live transfers without name guessing
         # (aria2 row names are file paths / torrent info names, never the
         # manifest display string).
@@ -416,7 +417,7 @@ function Invoke-AppAria2PromoteJobFiles {
     }
     $files = @(Get-AppAria2StagingFiles -StagingDir $staging)
     if ($files.Count -eq 0) {
-        throw 'aria2: staging folder is empty — nothing to promote.'
+        throw 'aria2: staging folder is empty - nothing to promote.'
     }
 
     $result = @{ assetKind = $kind; files = @() }
@@ -434,7 +435,7 @@ function Invoke-AppAria2PromoteJobFiles {
             }
             $srcFile = $src[0]
 
-            # Drivers/<Make>/<Model> — ImageDeployer 1.10's publish/search convention;
+            # Drivers/<Make>/<Model> - ImageDeployer 1.10's publish/search convention;
             # Caddy serves it at /drivers/<Make>/<Model>/ (see Write-AppPxeBootCaddyfile).
             # Vendor comes from the promote target; tolerate old job records without one.
             $vendorName = [string](Get-AppAria2JsonProp -Item $target -Name 'vendor')
@@ -523,7 +524,7 @@ function Sync-AppAria2RecoverIncomingDriverStaging {
             $recovered++
             Write-SidecarLog "aria2: recovered staged driver from $($dir.Name) -> $($target.folder)"
         } catch {
-            Write-SidecarLogVerbose "aria2: recover staged driver failed ($($dir.Name)) — $($_.Exception.Message)"
+            Write-SidecarLogVerbose "aria2: recover staged driver failed ($($dir.Name)) - $($_.Exception.Message)"
         }
     }
     return $recovered
@@ -586,7 +587,7 @@ function Sync-AppAria2PromoteJobs {
                 $store.jobs[$gid] = $jobHash
                 $changed = $true
                 $failed++
-                Write-SidecarLog "aria2: promote failed for $gid — $($_.Exception.Message)"
+                Write-SidecarLog "aria2: promote failed for $gid - $($_.Exception.Message)"
                 Write-SidecarEvent -EventName 'aria2-promote' -Data @{
                     gid     = [string]$gid
                     ok      = $false
@@ -615,7 +616,7 @@ function Sync-AppAria2PromoteJobs {
 # the single-threaded dispatch loop for the whole transfer (every other panel's
 # IPC queued behind it) and capped the app at one pack at a time. Each download
 # now runs in its own in-process runspace (the Start-Job-free pattern from
-# BootstrapNetwork.ps1 — Start-Job fails silently in packaged builds) writing
+# BootstrapNetwork.ps1 - Start-Job fails silently in packaged builds) writing
 # byte counts into a synchronized hashtable; the main loop's housekeeping tick
 # (Sync-AppAria2DirectDownloadJobs) emits the progress events, verifies, and
 # promotes each pack as it lands. The handler returns immediately.
@@ -631,7 +632,7 @@ $script:AppAria2DirectDownloadWorker = {
     param($Uri, $OutFile, $TimeoutSec, $Sync, $ExpectedHash, $HashAlgorithm)
     $client = $null; $resp = $null; $inStream = $null; $outStream = $null; $hasher = $null
     try {
-        # Hash while streaming (catalog SHA-256/MD5 where published) — zero extra I/O
+        # Hash while streaming (catalog SHA-256/MD5 where published) - zero extra I/O
         # and no dispatch-loop stall; a mismatch fails the job before it can promote.
         if (-not [string]::IsNullOrWhiteSpace([string]$ExpectedHash)) {
             $algName = ([string]$HashAlgorithm).Trim().ToUpperInvariant()
@@ -719,10 +720,10 @@ function Sync-AppAria2DirectDownloadJobs {
         if (-not $err -and -not [bool]$sync['done']) { $err = 'download worker ended without completing' }
 
         if ($err) {
-            Write-SidecarLog "aria2: direct download failed for $($job.fileName) — $err"
+            Write-SidecarLog "aria2: direct download failed for $($job.fileName) - $err"
             # A bad file must never look Downloaded: purge the partial/corrupt file so
             # no store scan or staging-recovery sweep can promote it. The row keeps a
-            # failed note and the USER retries — no auto-retry (Craig, 2026-08-20).
+            # failed note and the USER retries - no auto-retry (Craig, 2026-08-20).
             # (v1 promoted the partial here, replacing a good pack with a truncated one.)
             if (Test-Path -LiteralPath $job.destPath) {
                 Remove-Item -LiteralPath $job.destPath -Force -ErrorAction SilentlyContinue
@@ -767,7 +768,7 @@ function Sync-AppAria2DirectDownloadJobs {
                     }
                 }
             } catch {
-                Write-SidecarLog "aria2: promote failed for $($job.fileName) — $($_.Exception.Message)"
+                Write-SidecarLog "aria2: promote failed for $($job.fileName) - $($_.Exception.Message)"
                 if ($canEmit) {
                     Write-SidecarEvent -EventName 'aria2-promote' -Data @{
                         ok       = $false
@@ -779,7 +780,7 @@ function Sync-AppAria2DirectDownloadJobs {
                 }
             }
         } elseif ($canEmit) {
-            # No staging route — the file already sits at its final destination,
+            # No staging route - the file already sits at its final destination,
             # but the row still needs releasing.
             Write-SidecarEvent -EventName 'aria2-promote' -Data @{
                 ok        = $true
@@ -848,7 +849,7 @@ function Add-AppAria2DirectHttpDownload {
     if ([string]::IsNullOrWhiteSpace($fileName)) {
         $fileName = 'download.bin'
     }
-    # Manual Add-tab driver URLs carry no row key — synthesize one so their
+    # Manual Add-tab driver URLs carry no row key - synthesize one so their
     # progress/completion events still have an address.
     if ([string]::IsNullOrWhiteSpace($ProgressKey)) {
         $ProgressKey = 'manual|' + $fileName
@@ -964,7 +965,7 @@ function Start-AppAria2QueuedDirectDownloads {
         try {
             Start-AppAria2DirectDownloadEntry -Entry $next
         } catch {
-            Write-SidecarLog "aria2: queued download failed to start ($($next.fileName)) — $($_.Exception.Message)"
+            Write-SidecarLog "aria2: queued download failed to start ($($next.fileName)) - $($_.Exception.Message)"
             if (Get-Command Write-SidecarEvent -ErrorAction SilentlyContinue) {
                 Write-SidecarEvent -EventName 'driver-download-progress' -Data @{
                     key = [string]$next.key; bytesDone = 0; totalBytes = 0
@@ -979,7 +980,7 @@ function Start-AppAria2QueuedDirectDownloads {
 function Stop-AppAria2DirectDownload {
     <#
     .SYNOPSIS
-        Cancel one direct download by row key — active (runspace stopped, partial file
+        Cancel one direct download by row key - active (runspace stopped, partial file
         purged) or still queued (dequeued). Emits a cancelled terminal event and starts
         the next queued entry. Returns $true when something was cancelled.
     #>
@@ -1051,7 +1052,7 @@ function Add-AppAria2ManagedDownload {
             -ExpectedHashAlgorithm $ExpectedHashAlgorithm
     }
     if (-not (Test-AppAria2DaemonRunning)) {
-        throw 'aria2: daemon is not running — start the daemon for torrent/magnet downloads, or use an HTTP driver pack from Tracker.'
+        throw 'aria2: daemon is not running - start the daemon for torrent/magnet downloads, or use an HTTP driver pack from Tracker.'
     }
     $plan = New-AppAria2DownloadPlan `
         -AssetKind $AssetKind `
@@ -1147,7 +1148,7 @@ function Set-AppAria2TrackerManifestMemoryCache {
         [Parameter(Mandatory)]$Manifest,
         # Switch, not [bool]: every caller passes a bare -Stale, which a [bool]
         # parameter rejects ("Missing an argument for parameter 'Stale'"). That
-        # broke the whole tracker catalog on the stale/bundled fallback path —
+        # broke the whole tracker catalog on the stale/bundled fallback path -
         # i.e. any machine that cannot reach the manifest host. (USM bug.)
         [switch]$Stale
     )
@@ -1197,7 +1198,7 @@ function Read-AppAria2TrackerManifestDiskCache {
         $manifest = Get-AppAria2JsonProp -Item $cached -Name 'manifest'
         if (-not $manifest) { return $null }
         if (-not $AllowStale -and $fetchedAtRaw) {
-            # PS7 ConvertFrom-Json hydrates ISO strings into [DateTime] — parse only strings.
+            # PS7 ConvertFrom-Json hydrates ISO strings into [DateTime] - parse only strings.
             $fetchedAt = if ($fetchedAtRaw -is [datetime]) {
                 [datetime]$fetchedAtRaw
             } else {
@@ -1221,7 +1222,7 @@ function Read-AppAria2TrackerManifestBundled {
     try {
         return Get-Content -LiteralPath $bundledPath -Raw -Encoding UTF8 | ConvertFrom-Json
     } catch {
-        Write-SidecarLogVerbose "aria2: bundled tracker manifest read failed — $($_.Exception.Message)"
+        Write-SidecarLogVerbose "aria2: bundled tracker manifest read failed - $($_.Exception.Message)"
         return $null
     }
 }
@@ -1323,7 +1324,7 @@ function New-AppAria2TorrentCatalogRowFromManifestEntry {
     $kindVal = Get-AppAria2JsonProp -Item $Entry -Name 'assetKind'
     $sizeVal = Get-AppAria2JsonProp -Item $Entry -Name 'sizeBytes'
     # Real payload size parsed from the torrent (sizeBytes is the .torrent file's
-    # own size — the publish script stamps it and the UI must not show it as the image).
+    # own size - the publish script stamps it and the UI must not show it as the image).
     $contentSizeVal = Get-AppAria2JsonProp -Item $Entry -Name 'contentSizeBytes'
     $groupVal = Get-AppAria2JsonProp -Item $Entry -Name 'catalogGroup'
     $subfolderVal = Get-AppAria2JsonProp -Item $Entry -Name 'subfolder'
@@ -1469,12 +1470,12 @@ function Add-AppAria2BundledTorrentDownload {
                 $bytes = [System.Text.Encoding]::Latin1.GetBytes($bytes)
             }
         } catch {
-            throw "aria2: torrent download failed ($downloadUrl) — $($_.Exception.Message)"
+            throw "aria2: torrent download failed ($downloadUrl) - $($_.Exception.Message)"
         }
     }
 
     if (-not $bytes) {
-        throw "aria2: torrent unavailable (not bundled, no downloadUrl) — $TorrentId"
+        throw "aria2: torrent unavailable (not bundled, no downloadUrl) - $TorrentId"
     }
 
     $b64 = [Convert]::ToBase64String($bytes)
@@ -1508,7 +1509,7 @@ function Get-AppAria2AcerCatalogDriverRows {
         [string[]]$SeedFolders = @(),
         [string[]]$SeedPatterns = @(),
         [Parameter(Mandatory)]$IndexReady,
-        # Structured entries from AcerCatalog.xml (name/url/os/version/md5) — used to give
+        # Structured entries from AcerCatalog.xml (name/url/os/version/md5) - used to give
         # non-TravelMate remainder rows their friendly names and hashes.
         $XmlModels = $null
     )
@@ -1578,7 +1579,7 @@ function Get-AppAria2AcerCatalogDriverRows {
             })
     }
 
-    # Every remaining catalog URL becomes a row too (Craig, 2026-08-18: show every pack —
+    # Every remaining catalog URL becomes a row too (Craig, 2026-08-18: show every pack -
     # the filter handles narrowing). These are the Veriton/desktop/Extensa/legacy packs the
     # TravelMate parser has no model entry for. Friendly names + MD5 come from the
     # AcerCatalog.xml entries when the URL matches.
@@ -1602,7 +1603,7 @@ function Get-AppAria2AcerCatalogDriverRows {
             $base = $stem.Substring(0, $m.Index)
             $osLabel = "Windows $($m.Groups[2].Value)"
             # Distinguish sibling packs that differ past the OS token (x64/x86, Wigig,
-            # revision numbers) — 'All' is the common no-op suffix and is dropped.
+            # revision numbers) - 'All' is the common no-op suffix and is dropped.
             $rest = $stem.Substring($m.Index + $m.Length)
             $restTokens = @($rest -split '[_ ]+' | Where-Object { $_ -and $_ -notmatch '^(?i)all$' })
             if ($restTokens.Count -gt 0) { $variant = ($restTokens -join ' ') }
@@ -1917,7 +1918,7 @@ function Get-AppAria2TrackerCatalogPayload {
 
     # Downloaded state ("Ready" in the panel) = what is actually in the driver store on
     # disk (<library>/Drivers/<Vendor>/<Model>/ holding a pack file), keyed vendor|folder.
-    # The old source — the FieldIso index — only ever listed seed models, so catalog-row
+    # The old source - the FieldIso index - only ever listed seed models, so catalog-row
     # downloads could never show as downloaded (Craig, 2026-08-18).
     $indexReady = @{}
     if (Get-Command Get-AppPxeBootFieldIsoDriversOsRoot -ErrorAction SilentlyContinue) {
@@ -1935,7 +1936,7 @@ function Get-AppAria2TrackerCatalogPayload {
                 }
             }
         } catch {
-            Write-SidecarLogVerbose "aria2: driver store ready scan failed — $($_.Exception.Message)"
+            Write-SidecarLogVerbose "aria2: driver store ready scan failed - $($_.Exception.Message)"
         }
     }
     $rows = [System.Collections.Generic.List[hashtable]]::new()
@@ -1948,35 +1949,35 @@ function Get-AppAria2TrackerCatalogPayload {
     if (Get-Command Get-AppAcerSccmDriverUrlCatalog -ErrorAction SilentlyContinue) {
         $acerCatalog = Get-AppAcerSccmDriverUrlCatalog -CacheOnly
         if (-not $acerCatalog -and (Get-AppAcerSccmCatalogLastError)) {
-            Write-SidecarLogVerbose "aria2: Acer SCCM catalog — $(Get-AppAcerSccmCatalogLastError)"
+            Write-SidecarLogVerbose "aria2: Acer SCCM catalog - $(Get-AppAcerSccmCatalogLastError)"
         }
     }
     $lenovoCatalog = $null
     if (Get-Command Get-AppLenovoSccmDriverCatalog -ErrorAction SilentlyContinue) {
         $lenovoCatalog = Get-AppLenovoSccmDriverCatalog -CacheOnly
         if (-not $lenovoCatalog -and (Get-AppLenovoSccmCatalogLastError)) {
-            Write-SidecarLogVerbose "aria2: Lenovo SCCM catalog — $(Get-AppLenovoSccmCatalogLastError)"
+            Write-SidecarLogVerbose "aria2: Lenovo SCCM catalog - $(Get-AppLenovoSccmCatalogLastError)"
         }
     }
     $dellCatalog = $null
     if (Get-Command Get-AppDellSccmDriverCatalog -ErrorAction SilentlyContinue) {
         $dellCatalog = Get-AppDellSccmDriverCatalog -CacheOnly
         if (-not $dellCatalog -and (Get-AppDellSccmCatalogLastError)) {
-            Write-SidecarLogVerbose "aria2: Dell SCCM catalog — $(Get-AppDellSccmCatalogLastError)"
+            Write-SidecarLogVerbose "aria2: Dell SCCM catalog - $(Get-AppDellSccmCatalogLastError)"
         }
     }
     $hpCatalog = $null
     if (Get-Command Get-AppHpSccmDriverCatalog -ErrorAction SilentlyContinue) {
         $hpCatalog = Get-AppHpSccmDriverCatalog -CacheOnly
         if (-not $hpCatalog -and (Get-AppHpSccmCatalogLastError)) {
-            Write-SidecarLogVerbose "aria2: HP SCCM catalog — $(Get-AppHpSccmCatalogLastError)"
+            Write-SidecarLogVerbose "aria2: HP SCCM catalog - $(Get-AppHpSccmCatalogLastError)"
         }
     }
     $microsoftCatalog = $null
     if (Get-Command Get-AppMicrosoftSccmDriverCatalog -ErrorAction SilentlyContinue) {
         $microsoftCatalog = Get-AppMicrosoftSccmDriverCatalog -CacheOnly
         if (-not $microsoftCatalog -and (Get-AppMicrosoftSccmCatalogLastError)) {
-            Write-SidecarLogVerbose "aria2: Microsoft SCCM catalog — $(Get-AppMicrosoftSccmCatalogLastError)"
+            Write-SidecarLogVerbose "aria2: Microsoft SCCM catalog - $(Get-AppMicrosoftSccmCatalogLastError)"
         }
     }
     $seedVendors = Get-AppAria2JsonProp -Item $seed -Name 'vendors'
@@ -1985,7 +1986,7 @@ function Get-AppAria2TrackerCatalogPayload {
             $vendorName = [string]$vendorProp.Name
             # Mirror-era ghosts (Craig, 2026-08-18): models.seed.json snapshots the retired
             # deploy.example.com OOBD folder tree, and its rows (bare codes like 20L/82V)
-            # rendered ahead of — and folded away — the better-named catalog rows. Catalog
+            # rendered ahead of - and folded away - the better-named catalog rows. Catalog
             # rows are canonical for catalog-covered vendors now; the seed keeps its other
             # jobs (FieldIso store/index + WinPE WMI matching, promote alias resolution).
             # Only vendors WITHOUT a vendor catalog (Proxmox VirtIO lab packs) still

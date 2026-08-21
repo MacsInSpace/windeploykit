@@ -1,4 +1,4 @@
-# aria2 plug-in — runtime binary install + local RPC daemon (Plug-ins panel).
+# aria2 plug-in - runtime binary install + local RPC daemon (Plug-ins panel).
 # Agent notes: docs/plugins/aria2/AGENT_NOTES_ARIA2.md
 
 # Canonical data-root resolvers (no-op when the sidecar already dot-sourced AppPaths.ps1;
@@ -7,7 +7,7 @@ if (-not (Get-Command Get-AppDataRoot -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot 'AppPaths.ps1')
 }
 
-# Keep in sync with packaging/aria2-tools.json (runtime install — not bundled in signed macOS pkg).
+# Keep in sync with packaging/aria2-tools.json (runtime install - not bundled in signed macOS pkg).
 $script:AppAria2PinnedVersion = '1.37.0'
 $script:AppAria2DefaultRpcPort = 16800
 $script:AppAria2InstallInProgress = $false
@@ -209,10 +209,10 @@ function Set-AppAria2PluginRuntimeEnabled {
     $script:AppState['RuntimeConfig']['aria2PluginEnabled'] = $Enabled
     if ($Enabled) {
         if ($script:AppState -and -not [bool]$script:AppState['IsReady']) {
-            # Pre-login ApplyRuntimeConfig (bootstrap) — store init runs from
+            # Pre-login ApplyRuntimeConfig (bootstrap) - store init runs from
             # Invoke-AppPostBootstrapPluginInit; every use path self-ensures anyway.
             $script:AppAria2StoreInitDeferred = $true
-            Write-SidecarLogVerbose 'aria2: plug-in enabled — store init deferred until after bootstrap.'
+            Write-SidecarLogVerbose 'aria2: plug-in enabled - store init deferred until after bootstrap.'
         } else {
             $script:AppAria2StoreInitDeferred = $false
             Ensure-AppAria2StoreLayout | Out-Null
@@ -222,7 +222,7 @@ function Set-AppAria2PluginRuntimeEnabled {
         try {
             Stop-AppAria2Daemon | Out-Null
         } catch {
-            Write-SidecarLog "aria2: stop on plug-in disable — $($_.Exception.Message)"
+            Write-SidecarLog "aria2: stop on plug-in disable - $($_.Exception.Message)"
         }
     }
 }
@@ -312,7 +312,7 @@ function Read-AppAria2Config {
         }
         return $map
     } catch {
-        Write-SidecarLog "aria2: config read failed — $($_.Exception.Message)"
+        Write-SidecarLog "aria2: config read failed - $($_.Exception.Message)"
         return @{}
     }
 }
@@ -321,7 +321,7 @@ function Write-AppAria2Config {
     param([Parameter(Mandatory)]$Config)
     $paths = Get-AppAria2LayoutPaths
     # -Depth matters: pxeIntegration / extensionRoutes[] nest to depth 3; the default
-    # -Depth 2 silently truncates them to type-name strings (see APP_DATA_LAYOUT.md §10).
+    # -Depth 2 silently truncates them to type-name strings (see APP_DATA_LAYOUT.md section 10).
     # Keep in step with the init write above, which already uses -Depth 6.
     ($Config | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath $paths.configPath -Encoding UTF8 -Force
 }
@@ -561,12 +561,12 @@ function Expand-AppAria2Archive {
 }
 
 function Sync-AppAria2InstallJob {
-    # Legacy no-op — packaged sidecar installs synchronously via Ensure-AppAria2Binary.
+    # Legacy no-op - packaged sidecar installs synchronously via Ensure-AppAria2Binary.
     return $null
 }
 
 function Start-AppAria2BinaryInstallJob {
-    # Back-compat alias — synchronous install (Start-Job failed silently in packaged builds).
+    # Back-compat alias - synchronous install (Start-Job failed silently in packaged builds).
     Ensure-AppAria2Binary
 }
 
@@ -628,11 +628,11 @@ function Ensure-AppAria2Binary {
                 $lastError = 'SHA256 or size mismatch after download'
             } catch {
                 $lastError = $_.Exception.Message
-                Write-SidecarLogVerbose "aria2: download failed from $url — $lastError"
+                Write-SidecarLogVerbose "aria2: download failed from $url - $lastError"
             }
         }
         if (-not $downloaded) {
-            throw "aria2: download failed — $lastError"
+            throw "aria2: download failed - $lastError"
         }
 
         $extractDir = Join-Path $tmpRoot 'extract'
@@ -730,7 +730,7 @@ function Start-AppAria2Daemon {
         Ensure-AppAria2Binary | Out-Null
         $binStatus = Get-AppAria2BinaryStatus
         if (-not $binStatus.ready) {
-            throw 'aria2: binary install failed or is still in progress — try again in a moment.'
+            throw 'aria2: binary install failed or is still in progress - try again in a moment.'
         }
     }
     if (Test-AppAria2DaemonRunning) {
@@ -780,7 +780,7 @@ function Start-AppAria2Daemon {
     }
     Start-Sleep -Milliseconds 400
     if ($proc.HasExited) {
-        throw 'aria2: daemon exited immediately after start — check Sidecar Log and aria2.log in the plug-in store.'
+        throw 'aria2: daemon exited immediately after start - check Sidecar Log and aria2.log in the plug-in store.'
     }
     Set-Content -LiteralPath $paths.pidPath -Value ([string]$proc.Id) -Encoding ASCII -Force
     Write-SidecarLog "aria2: daemon started (pid $($proc.Id), rpc port $rpcPort)"
@@ -826,7 +826,7 @@ function Invoke-AppAria2Rpc {
         [object[]]$Params = @()
     )
     if (-not (Test-AppAria2DaemonRunning)) {
-        throw 'aria2: daemon is not running — click Start daemon.'
+        throw 'aria2: daemon is not running - click Start daemon.'
     }
     $cfg = Read-AppAria2Config
     $rpcPortRaw = Get-AppAria2JsonProp -Item $cfg -Name 'rpcPort'
@@ -958,7 +958,7 @@ function Get-AppAria2DownloadsPayload {
             stopped       = @($stoppedRows)
         }
     } catch {
-        Write-SidecarLog "aria2: GetAria2Downloads failed — $($_.Exception.Message)"
+        Write-SidecarLog "aria2: GetAria2Downloads failed - $($_.Exception.Message)"
         return @{
             daemonRunning = $true
             globalStat    = $null
@@ -1033,7 +1033,7 @@ function Set-AppAria2PluginConfig {
 }
 
 function Open-AppAria2DownloadFolder {
-    # Open the ISO & driver root — where this panel's content actually lands (iso/,
+    # Open the ISO & driver root - where this panel's content actually lands (iso/,
     # Drivers/, WIMs/ via the promote rails; follows Settings -> Downloads, including
     # the macOS TCC divert). The raw aria2 downloadDir only holds unrouted 'other'
     # downloads and previously sent techs to ~/Downloads (Craig, 2026-08-18).

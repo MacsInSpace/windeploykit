@@ -9,18 +9,18 @@ export interface PanelTab {
 }
 
 interface PanelShellProps {
-  /** Icon name for the header — usually the nav node id. */
+  /** Icon name for the header - usually the nav node id. */
   icon?: string;
   title: ReactNode;
   /**
-   * ONE scannable fact — counts, or the current target. Keep it short enough to
-   * never wrap; anything longer belongs in `details`. Style guide § "Help text
+   * ONE scannable fact - counts, or the current target. Keep it short enough to
+   * never wrap; anything longer belongs in `details`. Style guide section "Help text
    * & tooltips": less is more.
    */
   subtitle?: ReactNode;
   /**
    * Supporting context (source host, cache age, filters, hints) shown on hover
-   * of an info dot beside the subtitle. Values are live — they re-render while
+   * of an info dot beside the subtitle. Values are live - they re-render while
    * the tip is open. Falsy entries are dropped, so inline conditionals are fine.
    */
   details?: MaybeInfoTipRow[];
@@ -33,7 +33,7 @@ interface PanelShellProps {
    * appears / disappears.
    */
   toolbarLeft?: ReactNode;
-  /** Optional tab bar (style guide §4 "[Optional tab bar] (36px)"). */
+  /** Optional tab bar (style guide section 4 "[Optional tab bar] (36px)"). */
   tabs?: PanelTab[];
   activeTabId?: string;
   onTabSelect?: (id: string) => void;

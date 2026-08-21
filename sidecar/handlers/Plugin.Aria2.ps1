@@ -44,7 +44,7 @@ function Handle-GetAria2TrackerCatalog {
 
 function Handle-RefreshVendorSccmCatalogs {
     param([int]$Id, $Params)
-    # An absent param yields @($null) — filter to real names so the default list applies.
+    # An absent param yields @($null) - filter to real names so the default list applies.
     $vendors = @(Get-AppSidecarParam -Params $Params -Name 'vendors' |
         Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
     # Background child pwsh (2026-08-20): the synchronous refresh blocked the whole

@@ -1,16 +1,16 @@
 //! Acer SCCM catalog harvest via a hidden app webview.
 //!
-//! Acer's discovery pages (www.acer.com/sccm → community.acer.com KB) sit behind
+//! Acer's discovery pages (www.acer.com/sccm -> community.acer.com KB) sit behind
 //! fingerprint-level bot mitigation: curl is tarpitted or served a Cloudflare JS
 //! challenge from ANY network, while a real browser engine passes (see
-//! docs/plugins/netboot/AGENT_NOTES_PXE_DRIVERS.md §12). So the app loads the KB in a
+//! docs/plugins/netboot/AGENT_NOTES_PXE_DRIVERS.md section 12). So the app loads the KB in a
 //! hidden webview and harvests the `global-download.acer.com` pack links after the page
-//! renders. Supply-side only — one technician machine refreshing a catalog, never fleet
+//! renders. Supply-side only - one technician machine refreshing a catalog, never fleet
 //! clients scraping.
 //!
 //! Data path back from the (remote, untrusted) page: the injected script navigates to
 //! `https://dk-harvest.invalid/#<base64 urls>`, which `on_navigation` intercepts and
-//! cancels — the remote page is never granted Tauri IPC access, and the sidecar
+//! cancels - the remote page is never granted Tauri IPC access, and the sidecar
 //! re-validates every URL before the catalog cache is touched.
 
 use std::sync::{Arc, Mutex};
@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use base64::Engine;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
-/// Runs on every document load in the harvest window (Cloudflare interstitial included —
+/// Runs on every document load in the harvest window (Cloudflare interstitial included -
 /// it simply finds no links there and keeps polling until the real article renders).
 const HARVEST_SCRIPT: &str = r#"
 (function () {
@@ -35,7 +35,7 @@ const HARVEST_SCRIPT: &str = r#"
         var h = links[i].href;
         if (h && !seen[h]) { seen[h] = 1; urls.push(h); }
       }
-      // Wait until the count is non-zero and stable for two ticks — the KB renders its
+      // Wait until the count is non-zero and stable for two ticks - the KB renders its
       // accordion content after DOMContentLoaded.
       if (urls.length > 0 && urls.length === last) { stable += 1; } else { stable = 0; }
       last = urls.length;
@@ -75,7 +75,7 @@ pub async fn harvest_acer_sccm_urls(
         app.clone()
             .run_on_main_thread(move || {
                 let result = WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(parsed))
-                    .title("Refreshing Acer driver catalog… (closes automatically)")
+                    .title("Refreshing Acer driver catalog... (closes automatically)")
                     .inner_size(980.0, 720.0)
                     .center()
                     .visible(show)
@@ -125,7 +125,7 @@ pub async fn harvest_acer_sccm_urls(
         Ok(Ok(_)) => Err("harvest reported no URLs".into()),
         Ok(Err(_)) => Err("harvest window closed before reporting".into()),
         Err(_) => Err(format!(
-            "harvest timed out after {}s — the page or its bot challenge did not finish rendering (try again; hidden windows are throttled on macOS, so keep visible: true)",
+            "harvest timed out after {}s - the page or its bot challenge did not finish rendering (try again; hidden windows are throttled on macOS, so keep visible: true)",
             timeout.as_secs()
         )),
     }

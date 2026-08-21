@@ -8,7 +8,7 @@ interface ModalProps {
   onClose: () => void;
   /** Disable Escape + click-outside closing while a write is in flight. */
   lock?: boolean;
-  /** When locked, still allow X / Escape — runs onCancelWhileBusy (or onClose). */
+  /** When locked, still allow X / Escape - runs onCancelWhileBusy (or onClose). */
   allowBusyCancel?: boolean;
   onCancelWhileBusy?: () => void;
   width?: CSSProperties["width"];
@@ -50,7 +50,7 @@ export function Modal({
   // for onClose (e.g. `onCancel={closeDialog}` where closeDialog is defined in
   // the panel body), so `requestClose` gets a new identity on every parent
   // render. Keying this effect on it re-ran .focus() constantly while the
-  // parent was re-rendering — say, after a site switch, as queries settle —
+  // parent was re-rendering - say, after a site switch, as queries settle -
   // which yanked the caret back to the dialog's first field. Radio buttons
   // still toggled (a click commits their state without keeping focus), so it
   // presented as "only the text boxes and dropdown are dead".
@@ -123,7 +123,7 @@ export function Modal({
             style={{ color: lock && allowBusyCancel ? "var(--err)" : "var(--text3)" }}
             aria-label={lock && allowBusyCancel ? "Cancel" : "Close"}
           >
-            ×
+            x
           </button>
         </div>
         <div className="modal-body min-h-0 flex-1 overflow-auto">{children}</div>

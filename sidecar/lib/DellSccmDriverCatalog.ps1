@@ -1,4 +1,4 @@
-# Dell Command Deploy driver pack catalog — parse DriverPackCatalog.cab → DriverPackCatalog.xml
+# Dell Command Deploy driver pack catalog - parse DriverPackCatalog.cab -> DriverPackCatalog.xml
 # Primary: https://downloads.dell.com/catalog/DriverPackCatalog.cab
 # See https://www.dell.com/support/kbdoc/en-us/000122176/driver-pack-catalog
 
@@ -578,7 +578,7 @@ function Get-AppDellSccmDriverCatalog {
         if (-not $ForceRefresh) {
             $cached = Read-AppDellSccmCatalogCache
             if ($cached -and $cached.models) {
-                Write-SidecarLog "Dell SCCM catalog: live fetch failed — $($_.Exception.Message); using stale cache."
+                Write-SidecarLog "Dell SCCM catalog: live fetch failed - $($_.Exception.Message); using stale cache."
                 return @{
                     sourceUrl = if ($cached.sourceUrl) { [string]$cached.sourceUrl } else { $script:AppDellSccmCatalogCabUrl }
                     fetchedAt = [string]$cached.fetchedAt

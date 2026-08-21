@@ -377,7 +377,7 @@ function Handle-SavePxeBootTaskSequences {
     param([int]$Id, $Params)
     Set-AppImageLibraryRuntimeRootFromParams -Params $Params
     $sequences = Get-AppSidecarParam -Params $Params -Name 'sequences'
-    # $null = param missing (malformed call — refuse, never wipe the store).
+    # $null = param missing (malformed call - refuse, never wipe the store).
     # An empty ARRAY is a legitimate "delete them all" save (Craig, 2026-08-20).
     if ($null -eq $sequences) { throw 'SavePxeBootTaskSequences: sequences is required.' }
     $list = @()

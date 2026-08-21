@@ -125,7 +125,7 @@ export function DownloadSettingsSection() {
               {configuredDir || "(system Downloads)"}
             </div>
             <button type="button" className="btn" onClick={() => void browseFolder()}>
-              Browse…
+              Browse...
             </button>
             <button
               type="button"
@@ -156,7 +156,7 @@ export function DownloadSettingsSection() {
           />
           <span style={{ color: "var(--text2)" }}>
             <span style={{ color: "var(--text)" }}>Site subfolder</span>
-            {" — "}
+            {" - "}
             append the active site id (e.g.{" "}
             <span className="mono">5573</span>) so files land in a per-site folder
             when you change context. The subfolder is created automatically if missing.
@@ -173,7 +173,7 @@ export function DownloadSettingsSection() {
           {siteSubdir && !siteId && (
             <span style={{ color: "var(--amber)" }}>
               {" "}
-              (no site context — subfolder skipped until you connect)
+              (no site context - subfolder skipped until you connect)
             </span>
           )}
         </div>
@@ -202,7 +202,7 @@ export function DownloadSettingsSection() {
               {imageRoot || "(follows Downloads folder)"}
             </div>
             <button type="button" className="btn" onClick={() => void browseImageRoot()}>
-              Browse…
+              Browse...
             </button>
             <button
               type="button"

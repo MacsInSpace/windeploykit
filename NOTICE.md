@@ -20,8 +20,8 @@ release, the build script used is in `scripts/`.
 
 Microsoft components are **never** committed to this repository. You supply them:
 
-- `boot.wim` / `install.wim` — from your own licensed Windows ISO
-- `bootmgfw.efi`, `BCD`, `boot.sdi` — from your own Windows/ADK installation
-- WinPE optional components — exported from your own Windows ADK install
+- `boot.wim` / `install.wim` - from your own licensed Windows ISO
+- `bootmgfw.efi`, `BCD`, `boot.sdi` - from your own Windows/ADK installation
+- WinPE optional components - exported from your own Windows ADK install
 
 Their use is governed by your Windows and ADK licence terms.

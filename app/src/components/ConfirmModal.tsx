@@ -56,7 +56,7 @@ export function ConfirmModal({
             onClick={run}
             disabled={busy || confirmDisabled}
           >
-            {busy ? "Working…" : confirmLabel}
+            {busy ? "Working..." : confirmLabel}
           </button>
         </>
       }

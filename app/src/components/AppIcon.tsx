@@ -9,7 +9,7 @@ interface AppIconProps {
   className?: string;
 }
 
-/** Every glyph this component can draw — the keys of PATHS below. */
+/** Every glyph this component can draw - the keys of PATHS below. */
 type IconKind = keyof typeof PATHS;
 
 function iconKind(name: string): IconKind {

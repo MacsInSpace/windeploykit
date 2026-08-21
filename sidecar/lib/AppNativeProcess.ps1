@@ -1,10 +1,10 @@
-# AppNativeProcess.ps1 — generic detached-process launcher.
+# AppNativeProcess.ps1 - generic detached-process launcher.
 # Extracted from USM RdpLauncher.ps1 (Start-AppNativeProcess) during the windeploykit port.
 
 function Start-AppNativeProcess {
     <#
     .SYNOPSIS
-        Launch an executable with EXACT arguments — no shell, no re-parsing.
+        Launch an executable with EXACT arguments - no shell, no re-parsing.
         Start-Process -ArgumentList joins array items with spaces WITHOUT quoting,
         so any path containing spaces (the app data root is
         ".../Application Support/WinDeployKit/..." on macOS and

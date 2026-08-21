@@ -1,4 +1,4 @@
-# BitTorrent tracker scrape — seeders / leechers for aria2 Tracker torrent rows.
+# BitTorrent tracker scrape - seeders / leechers for aria2 Tracker torrent rows.
 # Agent notes: docs/plugins/aria2/AGENT_NOTES_ARIA2.md
 
 $script:AppAria2TrackerPeerCacheTtlMinutes = 10
@@ -26,7 +26,7 @@ function Read-AppAria2TrackerPeerCache {
             rows      = $rows
         }
     } catch {
-        Write-SidecarLogVerbose "aria2: tracker peer cache read failed — $($_.Exception.Message)"
+        Write-SidecarLogVerbose "aria2: tracker peer cache read failed - $($_.Exception.Message)"
         return @{ fetchedAt = $null; rows = @{} }
     }
 }
@@ -205,7 +205,7 @@ function Invoke-AppAria2TrackerScrapeForInfoHash {
                 $bestLeechers = $parsed.Leechers
             }
         } catch {
-            Write-SidecarLogVerbose "aria2: scrape $uri failed — $($_.Exception.Message)"
+            Write-SidecarLogVerbose "aria2: scrape $uri failed - $($_.Exception.Message)"
         }
     }
     if ($null -eq $bestSeeders) { return $null }
@@ -237,7 +237,7 @@ function Get-AppAria2TorrentFileBytesForCatalogRow {
         $resp = Invoke-WebRequest -Uri $downloadUrl -Method Get -UseBasicParsing -TimeoutSec 120
         return Get-AppWebResponseBytes -Response $resp
     } catch {
-        Write-SidecarLogVerbose "aria2: torrent fetch failed ($downloadUrl) — $($_.Exception.Message)"
+        Write-SidecarLogVerbose "aria2: torrent fetch failed ($downloadUrl) - $($_.Exception.Message)"
         return $null
     }
 }
@@ -278,8 +278,8 @@ function Add-AppAria2TorrentPeerCountsToRows {
                     if ($age.TotalMinutes -lt $script:AppAria2TrackerPeerCacheTtlMinutes) {
                         $seedVal = Get-AppAria2JsonProp -Item $cached -Name 'seeders'
                         $leechVal = Get-AppAria2JsonProp -Item $cached -Name 'leechers'
-                        $updated['seeders'] = if ($null -ne $seedVal) { [int]$seedVal } elseif ($null -ne $cached.seeders) { [int]$cached.seeders } else { $null }
-                        $updated['leechers'] = if ($null -ne $leechVal) { [int]$leechVal } elseif ($null -ne $cached.leechers) { [int]$cached.leechers } else { $null }
+                        $updated['seeders'] = if ($null -ne $seedVal) { [int]$seedVal } elseif ($null -ne (Get-AppSidecarJsonProp -Item $cached -Name 'seeders')) { [int](Get-AppSidecarJsonProp -Item $cached -Name 'seeders') } else { $null }
+                        $updated['leechers'] = if ($null -ne $leechVal) { [int]$leechVal } elseif ($null -ne (Get-AppSidecarJsonProp -Item $cached -Name 'leechers')) { [int](Get-AppSidecarJsonProp -Item $cached -Name 'leechers') } else { $null }
                         $updated['peerCountsAt'] = $fetchedAt
                         [void]$out.Add($updated)
                         continue
@@ -311,7 +311,7 @@ function Add-AppAria2TorrentPeerCountsToRows {
                 $cacheDirty = $true
             }
         } catch {
-            Write-SidecarLogVerbose "aria2: peer scrape failed for $id — $($_.Exception.Message)"
+            Write-SidecarLogVerbose "aria2: peer scrape failed for $id - $($_.Exception.Message)"
         }
         [void]$out.Add($updated)
     }

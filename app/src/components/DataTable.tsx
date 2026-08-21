@@ -7,7 +7,7 @@ export interface DataTableColumn<R> {
   label: string;
   width?: number | string;
   render?: (row: R) => ReactNode;
-  /** Default true — render as monospace (data). Set false for sans columns. */
+  /** Default true - render as monospace (data). Set false for sans columns. */
   mono?: boolean;
   /** When `onSortColumn` is set, column is sortable unless explicitly false. */
   sortable?: boolean;
@@ -140,7 +140,7 @@ export function DataTable<R>(props: DataTableProps<R>) {
                     {c.label}
                     {active ? (
                       <span className="mono text-[9px]" style={{ color: "var(--accent)" }}>
-                        {sortDir === "asc" ? "▲" : "▼"}
+                        {sortDir === "asc" ? "^" : "v"}
                       </span>
                     ) : null}
                   </span>
@@ -245,9 +245,9 @@ export function DataTable<R>(props: DataTableProps<R>) {
                         <span
                           className="mono text-[10px]"
                           style={{ color: "var(--text3)" }}
-                          title="Removal pending — waiting for directory replication"
+                          title="Removal pending - waiting for directory replication"
                         >
-                          Removing…
+                          Removing...
                         </span>
                       ) : (
                         <span
@@ -270,13 +270,13 @@ export function DataTable<R>(props: DataTableProps<R>) {
 
 function formatScalar(v: unknown): ReactNode {
   if (v === null || v === undefined || v === "") {
-    return <span style={{ color: "var(--text3)" }}>—</span>;
+    return <span style={{ color: "var(--text3)" }}>-</span>;
   }
   if (Array.isArray(v)) {
     return `${v.length} item${v.length === 1 ? "" : "s"}`;
   }
   if (typeof v === "object") {
-    return <span style={{ color: "var(--text3)" }}>{"{ … }"}</span>;
+    return <span style={{ color: "var(--text3)" }}>{"{ ... }"}</span>;
   }
   return String(v);
 }

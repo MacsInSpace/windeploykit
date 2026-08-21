@@ -1,4 +1,4 @@
-/** Per-site mapping from infrastructure device id → saved SSH credential id. */
+/** Per-site mapping from infrastructure device id -> saved SSH credential id. */
 
 const ASSIGNMENTS_KEY = "windeploykit.infrastructure.credentialAssignments.v1";
 

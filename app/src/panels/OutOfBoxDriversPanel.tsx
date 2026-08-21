@@ -1,5 +1,5 @@
 /**
- * Out-of-Box Drivers — the Drivers/<Make>/<Model> store plus vendor catalog
+ * Out-of-Box Drivers - the Drivers/<Make>/<Model> store plus vendor catalog
  * downloads (Dell, HP, Lenovo, Acer, Microsoft Surface).
  */
 import { ContentWorkspace } from "../workspaces/ContentWorkspace";

@@ -115,7 +115,7 @@ export function invalidatePrefix(prefix: string): void {
   }
 }
 
-/** Soft-invalidate every key under a prefix — data stays on screen during refetch. */
+/** Soft-invalidate every key under a prefix - data stays on screen during refetch. */
 export function revalidatePrefix(prefix: string): void {
   for (const [key, entry] of cache.entries()) {
     if (key !== prefix && !key.startsWith(prefix + ":")) continue;

@@ -1,9 +1,9 @@
 # Optional local-machine administrator credential (this Mac / this PC).
-# Stored as PSCredential via Export-Clixml — same DPAPI / user-only semantics as infrastructure-ssh.
+# Stored as PSCredential via Export-Clixml - same DPAPI / user-only semantics as infrastructure-ssh.
 #
 # Host-side: macOS sudo elevation (TFTP port 69, sharing -a/-r, routes) without re-prompting.
 # Client-side: when Site Build (or similar) exports an SMB share, Windows/Linux clients often need
-# this machine's local admin username + password — the login name is surfaced on share status;
+# this machine's local admin username + password - the login name is surfaced on share status;
 # password stays in vault (same entry technicians save here).
 # Windows host elevation: stored for future workflows; SMB share creation uses current token when admin.
 
