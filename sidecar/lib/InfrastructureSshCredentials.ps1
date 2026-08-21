@@ -1,6 +1,12 @@
-# Infrastructure SSH credential vault (switch / gear passwords).
+# Device credential store (Deploy$ share auth, task-sequence domain join).
 #
-# Passwords are stored as PSCredential via Export-Clixml - same approach as
+# Passwords live in the SHARED SECRET VAULT under contract name netboot/join/<id>
+# (SHARED_SECRET_VAULT_CONTRACT.md section 3). The legacy Export-Clixml files below
+# remain the fallback for one release: every function here works with the vault
+# unavailable, so a vault problem degrades to yesterday's behaviour rather than
+# locking a technician out.
+#
+# Legacy path - passwords were stored as PSCredential via Export-Clixml, same as
 # StoredCredentials.xml: DPAPI on Windows; user-readable-only on macOS/Linux.
 #
 # Stored under plugins/infrastructure-ssh/ beneath the canonical app data root
@@ -38,9 +44,12 @@ function Read-AppInfraSshIndex {
 }
 
 function Write-AppInfraSshIndex {
-    param([Parameter(Mandatory)]$Items)
+    param([Parameter(Mandatory)][AllowEmptyCollection()]$Items)
     $path = Get-AppInfraSshIndexPath
-    $json = $Items | ConvertTo-Json -Compress
+    # -AsArray: ConvertTo-Json collapses a ONE-element array to a bare object and an
+    # empty one to nothing at all, so the index would round-trip wrong at both ends
+    # (AGENT_NOTES section 7 records the same trap on IPC responses).
+    $json = @($Items) | ConvertTo-Json -Compress -AsArray
     Set-Content -LiteralPath $path -Value $json -Encoding UTF8 -Force -ErrorAction Stop
 }
 
@@ -86,6 +95,8 @@ function Get-AppInfraSshCredentialPath {
 
 function Test-AppInfraSshCredentialExists {
     param([Parameter(Mandatory)][string]$Id)
+    $safeId = Normalize-AppInfraSshCredentialId -Id $Id
+    if (Test-AppVaultSecret -Name (Get-AppVaultNetbootJoinName -Id $safeId)) { return $true }
     Test-Path -LiteralPath (Get-AppInfraSshCredentialPath -Id $Id)
 }
 
@@ -98,8 +109,15 @@ function Get-AppInfraSshPlainPassword {
         try { return [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
         finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
     }
+    # Vault first. Falls through to the legacy file when the vault is unavailable
+    # or has not yet adopted this id.
+    $safeId = Normalize-AppInfraSshCredentialId -Id $Id
+    $fromVault = Get-AppVaultPlainSecret -Name (Get-AppVaultNetbootJoinName -Id $safeId)
+    if (-not [string]::IsNullOrEmpty($fromVault)) { return $fromVault }
+
     $path = Get-AppInfraSshCredentialPath -Id $Id
     if (-not (Test-Path -LiteralPath $path)) { return $null }
+    Write-AppSharedSecretVaultFallbackOnce -Store 'device credentials'
     try {
         $cred = Import-Clixml -LiteralPath $path
         if (-not $cred -or -not $cred.Password) { return $null }
@@ -243,11 +261,16 @@ function Ensure-AppInfraSshDefaultCredentials {
 function Clear-AppInfraSshCredentialPassword {
     param([Parameter(Mandatory)][string]$Id)
     $safeId = Normalize-AppInfraSshCredentialId -Id $Id
+    # NOT `$x = [void](Remove-...)`. PowerShell treats [void] on the right-hand side
+    # of an assignment as a cast that never invokes the call - measured: the function
+    # body does not run. Assign the [bool] result, or call it as a bare statement.
+    $cleared = [bool](Remove-AppVaultSecret -Name (Get-AppVaultNetbootJoinName -Id $safeId))
     $path = Get-AppInfraSshCredentialPath -Id $safeId
     if (Test-Path -LiteralPath $path) {
         Remove-Item -LiteralPath $path -Force -ErrorAction Stop
-        Write-SidecarLog "Infra SSH credential password cleared: $safeId"
+        $cleared = $true
     }
+    Write-SidecarLog "Device credential password cleared: $safeId (cleared=$cleared)"
 }
 
 function Get-AppInfraSshCredentials {
@@ -282,7 +305,9 @@ function Get-AppInfraSshCredentials {
             label        = [string]$item.label
             loginName    = Get-AppInfraSshCredentialLoginName -Item $item -SafeId $safeId -Label ([string]$item.label)
             updatedAt    = [string](Get-AppInfraSshIndexProp -Item $item -Name 'updatedAt')
-            configured   = (Test-Path -LiteralPath $path)
+            # Vault-first: the secret normally lives in netboot/join/<id> now, so a
+            # file check alone reports every vault-stored credential as unconfigured.
+            configured   = (Test-AppInfraSshCredentialExists -Id $safeId)
             isDefault    = $isDefault
             siteId = $credSn
         })
@@ -320,9 +345,10 @@ function Save-AppInfraSshCredential {
             $credSn = Get-AppInfraSshCredentialSiteId -Item $existing -SafeId $safeId
         }
     }
-    if (-not $credSn -and -not (Test-AppInfraSshDefaultCredentialId -Id $safeId)) {
-        throw 'SetInfraSshCredential: siteId is required for site-specific credentials.'
-    }
+    # Site is OPTIONAL metadata here, not a requirement. Upstream scoped every
+    # credential to a school; our contract name is netboot/join/<id> with no site
+    # in it (contract section 3), and Site Profile does not exist yet (AGENT_NOTES
+    # section 5) - so demanding a siteId made it impossible to save any credential.
 
     $existing = $index | Where-Object { [string]$_.id -eq $safeId } | Select-Object -First 1
     $loginTrim = $null
@@ -337,8 +363,22 @@ function Save-AppInfraSshCredential {
     $path = Get-AppInfraSshCredentialPath -Id $safeId
     if (-not [string]::IsNullOrWhiteSpace($PlainPassword)) {
         $secure = ConvertTo-SecureString -String $PlainPassword -AsPlainText -Force
-        $cred = [PSCredential]::new("infra@$safeId", $secure)
-        $cred | Export-Clixml -LiteralPath $path -Force -ErrorAction Stop
+        $userForCred = if ([string]::IsNullOrWhiteSpace($loginTrim)) { "infra@$safeId" } else { $loginTrim }
+        $cred = [PSCredential]::new($userForCred, $secure)
+        $vaultName = Get-AppVaultNetbootJoinName -Id $safeId
+        $wroteVault = Set-AppVaultSecret -Name $vaultName -Secret $cred -Metadata @{
+            label = $labelTrim
+            site  = [string]$credSn
+        }
+        if (-not $wroteVault) {
+            Write-AppSharedSecretVaultFallbackOnce -Store 'device credentials'
+            $cred | Export-Clixml -LiteralPath $path -Force -ErrorAction Stop
+        } elseif (Test-Path -LiteralPath $path) {
+            # Vault now owns it; drop the weaker on-disk copy rather than leaving a
+            # hex-encoded password behind (legacy files are only kept where the vault
+            # could NOT take the secret).
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
     } elseif (-not (Test-Path -LiteralPath $path)) {
         throw 'Infrastructure SSH credential password is required.'
     }
@@ -385,11 +425,15 @@ function Remove-AppInfraSshCredential {
     if (Test-AppInfraSshDefaultCredentialId -Id $safeId) {
         throw 'Default site credentials cannot be deleted - clear the password instead.'
     }
+    [void](Remove-AppVaultSecret -Name (Get-AppVaultNetbootJoinName -Id $safeId))
     $path = Get-AppInfraSshCredentialPath -Id $safeId
     if (Test-Path -LiteralPath $path) {
         Remove-Item -LiteralPath $path -Force -ErrorAction Stop
     }
-    $index = @(Read-AppInfraSshIndex) | Where-Object { [string]$_.id -ne $safeId }
+    # @(...) around the pipeline: filtering the LAST entry yields nothing, which
+    # binds as $null to the mandatory -Items and throws. Deleting your only
+    # credential used to fail with "Cannot bind argument to parameter 'Items'".
+    $index = @(@(Read-AppInfraSshIndex) | Where-Object { [string]$_.id -ne $safeId })
     Write-AppInfraSshIndex -Items $index
     Write-SidecarLog "Infra SSH credential removed: $safeId"
 }

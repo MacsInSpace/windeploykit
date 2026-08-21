@@ -41,6 +41,7 @@ $libRoot = Join-Path $script:SidecarRoot 'lib'
 . (Join-Path $libRoot 'AppElevation.ps1')
 . (Join-Path $libRoot 'AppNativeProcess.ps1')
 . (Join-Path $libRoot 'AppPluginGates.ps1')
+. (Join-Path $libRoot 'AppSharedSecretVault.ps1')
 . (Join-Path $libRoot 'LocalMachineCredentials.ps1')
 . (Join-Path $libRoot 'InfrastructureSshCredentials.ps1')
 . (Join-Path $libRoot 'AcerSccmDriverCatalog.ps1')
@@ -206,6 +207,12 @@ function Invoke-SidecarDispatchOnce {
 try {
     Initialize-SidecarHostBridge
     [WinDeployKitSidecar.SidecarHost]::StartStdinPump()
+
+    # Shared secret vault: register once, by path, before we announce ready. This
+    # cannot throw (Initialize- catches and records state), so a missing or
+    # foreign-machine store degrades credential features rather than blocking boot.
+    # Contract: one vault name 'shared', no reset, no prompt, no OS credential UI.
+    [void](Initialize-AppSharedSecretVault -ProjectRoot $script:AppSidecarProjectRoot)
 
     $script:AppState.IsReady = $true
     $script:AppState.Lifecycle = 'ready'

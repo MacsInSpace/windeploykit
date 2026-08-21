@@ -58,6 +58,8 @@ function Write-AppLocalMachineCredentialMeta {
 }
 
 function Test-AppLocalMachineCredentialConfigured {
+    # Vault is authoritative; the legacy file is the fallback for one release.
+    if (Test-AppVaultSecret -Name 'local-machine/admin') { return $true }
     $clixml = Get-AppLocalMachineCredentialClixmlPath
     if (-not (Test-Path -LiteralPath $clixml)) { return $false }
     $meta = Read-AppLocalMachineCredentialMeta
@@ -67,6 +69,13 @@ function Test-AppLocalMachineCredentialConfigured {
 }
 
 function Get-AppLocalMachineCredentialLoginName {
+    # Contract section 3 / USM 2026-08-21: for local-machine/admin the PSCredential
+    # UserName IS the login (e.g. st00447), not a tag. Prefer it over local metadata
+    # so a credential USM wrote is described correctly here.
+    $vaultCred = Get-AppVaultLocalMachineAdmin
+    if ($vaultCred -and -not [string]::IsNullOrWhiteSpace($vaultCred.UserName) -and $vaultCred.UserName.Trim() -ne ' ') {
+        return $vaultCred.UserName.Trim()
+    }
     $meta = Read-AppLocalMachineCredentialMeta
     if ($meta -and $meta.loginName) {
         return [string]$meta.loginName
@@ -79,7 +88,16 @@ function Get-AppLocalMachineCredentialLoginName {
 
 function Get-AppLocalMachineCredentialSecure {
     if (-not (Test-AppLocalMachineCredentialConfigured)) { return $null }
+    $vaultCred = Get-AppVaultLocalMachineAdmin
+    if ($vaultCred -and $vaultCred.Password) {
+        return @{
+            LoginName      = Get-AppLocalMachineCredentialLoginName
+            SecurePassword = $vaultCred.Password
+        }
+    }
     $path = Get-AppLocalMachineCredentialClixmlPath
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    Write-AppSharedSecretVaultFallbackOnce -Store 'local machine credential'
     try {
         $cred = Import-Clixml -LiteralPath $path
         if (-not $cred -or -not $cred.Password) { return $null }
@@ -128,10 +146,17 @@ function Save-AppLocalMachineCredential {
     $path = Get-AppLocalMachineCredentialClixmlPath
     if (-not [string]::IsNullOrWhiteSpace($PlainPassword)) {
         $secure = ConvertTo-SecureString -String $PlainPassword -AsPlainText -Force
-        $cred = [PSCredential]::new("local@$($script:AppLocalMachineCredentialId)", $secure)
-        $cred | Export-Clixml -LiteralPath $path -Force -ErrorAction Stop
+        # UserName IS the login for this contract name - USM reads it that way.
+        $cred = [PSCredential]::new($loginTrim, $secure)
+        $wroteVault = Set-AppVaultSecret -Name 'local-machine/admin' -Secret $cred -Metadata @{ loginName = $loginTrim }
+        if (-not $wroteVault) {
+            Write-AppSharedSecretVaultFallbackOnce -Store 'local machine credential'
+            $cred | Export-Clixml -LiteralPath $path -Force -ErrorAction Stop
+        } elseif (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
         Write-AppLocalMachineCredentialMeta -LoginName $loginTrim
-    } elseif (-not (Test-Path -LiteralPath $path)) {
+    } elseif (-not (Test-Path -LiteralPath $path) -and -not (Test-AppVaultSecret -Name 'local-machine/admin')) {
         throw 'Local machine credential: password is required on first save.'
     } else {
         Write-AppLocalMachineCredentialMeta -LoginName $loginTrim
@@ -143,6 +168,7 @@ function Save-AppLocalMachineCredential {
 }
 
 function Clear-AppLocalMachineCredentialPassword {
+    [void](Remove-AppVaultSecret -Name 'local-machine/admin')
     $path = Get-AppLocalMachineCredentialClixmlPath
     if (Test-Path -LiteralPath $path) {
         Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue

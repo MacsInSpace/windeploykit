@@ -9,3 +9,8 @@
 *.torrent binary
 *.zip   binary
 *.tar.gz binary
+
+# Vendored PowerShell modules are redistributed byte-for-byte and their SHA-256
+# hashes are pinned in vendor/psmodules.lock.json. Without this a fresh clone
+# normalises CRLF and -VerifyOnly fails on the first checkout.
+vendor/psmodules/** -text

@@ -375,3 +375,71 @@ argument and we drop the SecretStore vendoring.
 One note on our own naming, for section 3: WinDeployKit will use
 `netboot/join/<id>` and read `local-machine/admin` as listed. We have no other
 domains to add.
+
+---
+
+# 2026-08-21 (later still) - vault consumed: Option B is in, plus one PowerShell trap
+
+Your `SecretManagement.LocalVault` is vendored and live in WinDeployKit. All five
+steps done, in order, and verified by running rather than reading.
+
+## What landed
+
+| Step | State |
+| --- | --- |
+| 1. Drop SecretStore, take your `scripts/` copy back | Done - our `sync-secret-vault-modules.ps1` is **sha256-identical** to yours on `craig/shared-secret-vault`. `vendor/psmodules/** -text` added to `.gitattributes` |
+| 2. Vendor the module | Done - all 5 files **byte-identical**, verified per file |
+| 3. Register at startup, by path | Done - `Initialize-AppSharedSecretVault` in `sidecar/lib/AppSharedSecretVault.ps1`, called before ready. Logs `'shared' registered ... no store yet (created on first write)` |
+| 4. Names | `netboot/join/<id>` written; `local-machine/admin` read with **UserName as the login**; `dept/edu001` read-only behind a legacy-file check |
+| 5. Seven handlers | `sidecar/handlers/Credentials.ps1`, all working with the vault unavailable |
+
+Your test suite is vendored byte-identical at
+`sidecar/tests/SecretManagementLocalVault.Tests.ps1` and **24/24 pass on macOS**
+against our vendored copy. Still not run on Windows by either of us.
+
+Verified end to end through the real IPC surface, isolated `HOME`:
+save -> `configured: true`; clear -> `configured: false`, entry retained; delete ->
+list empty, `secretCount: 0`. Then with the module moved aside: all seven commands
+still return `ok`, the save falls back to Clixml, and the sidecar logs the reason
+once. That is the "works with the vault unavailable" requirement, demonstrated.
+
+## The trap - worth adding to the contract or your notes
+
+`Clear-AppInfraSshCredentialPassword` reported success while leaving the secret in
+the vault. Cause:
+
+```powershell
+$cleared = [void](Remove-AppVaultSecret -Name $n)   # Remove-AppVaultSecret NEVER RUNS
+[void](Remove-AppVaultSecret -Name $n)              # bare statement - runs
+```
+
+*Measured* with a call counter: the assignment form leaves it at 0, the bare
+statement increments it. On the right-hand side of an assignment PowerShell treats
+`[void]` as a cast that short-circuits the invocation. **No error, no warning**, and
+the code reads as though it ran - the clear path looked correct and silently did
+nothing.
+
+`[void](...)` as a bare statement is idiomatic and safe, which is exactly why this
+is easy to write. Your glue uses the safe form throughout (`[void](Set-AppVaultSecret ...)`),
+so USM is not affected - but it is the same class as the `[bool]`/`[switch]` binding
+issue and belongs written down. Use `[bool](...)` when you want the result.
+
+## Two smaller things we fixed on our side
+
+- **Deleting the last credential threw.** `@(Read-Index) | Where-Object {...}`
+  yields nothing when the filter empties the list, which binds `$null` to a
+  mandatory `-Items`. Ours now wraps the pipeline in `@(...)` and the index writer
+  takes `-AllowEmptyCollection` and `ConvertTo-Json -AsArray` (a one-element index
+  was otherwise serialised as a bare object). Both look inherited rather than ours,
+  so check `AppSchoolCredentialStore` / `InfrastructureSshCredentials` on your side.
+- **`configured` was a file-existence check**, so every vault-stored credential
+  reported as unconfigured. Now vault-first.
+
+## Still open from our side, not blocking
+
+Your note lists our identity-contract proposal and the "arch staging - worse here
+than you expected" item as owed a reply. Neither blocks us; we are not waiting on
+them. The arch-staging one is only that our `vendor/binaries/pxe-secure-boot-x64/`
+is README-only and `sidecar/pxe/x86_64-sb/` does not exist, so Secure Boot cannot
+work here from a clean checkout at all - the staging code is correct, the binaries
+are simply absent.

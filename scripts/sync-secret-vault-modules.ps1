@@ -1,17 +1,22 @@
 <#
 .SYNOPSIS
-    Vendor the shared secret vault modules into vendor/psmodules/ and pin them.
+    Vendor Microsoft.PowerShell.SecretManagement into vendor/psmodules/ and pin it.
 
 .DESCRIPTION
     Implements the vendoring half of docs/handover/SHARED_SECRET_VAULT_CONTRACT.md
     section 5: PSGallery is unreachable behind the F5 and in CI, so Install-Module at
-    runtime is not an option. The modules are downloaded here, staged into
+    runtime is not an option. The module is downloaded here, staged into
     vendor/psmodules/<Name>/<Version>/, and pinned in vendor/psmodules.lock.json with
-    a SHA-256 per file.
+    a SHA-256 per file and per nupkg.
 
-    House pattern, matching vendor/mdmkit (USM) and vendor/psopenad (PSOpenAD-FE):
-    a sync script, a lockfile with exact versions, and a -VerifyOnly drift check that
-    exits non-zero and names what moved.
+    Only SecretManagement (the API). The vault behind it is first-party -
+    sidecar/psmodules/SecretManagement.LocalVault - so nothing else is vendored.
+    Microsoft.PowerShell.SecretStore was deliberately dropped (contract section 4a).
+
+    House pattern, matching vendor/mdmkit: a sync script, a lockfile with exact
+    versions, and a -VerifyOnly drift check that exits non-zero and names what moved.
+    Authored in WinDeployKit (scripts/sync-secret-vault-modules.ps1) and taken back
+    here as runtime core; keep the two files identical.
 
 .PARAMETER VerifyOnly
     Do not download. Re-hash what is vendored and compare against the lockfile.
@@ -34,7 +39,6 @@ $lockPath = Join-Path $projectRoot 'vendor/psmodules.lock.json'
 # so the change shows up in review rather than arriving silently from the gallery.
 $modules = @(
     @{ Name = 'Microsoft.PowerShell.SecretManagement'; Version = '1.1.2' }
-    @{ Name = 'Microsoft.PowerShell.SecretStore';      Version = '1.0.6' }
 )
 
 function Get-FileHashMap {
@@ -107,7 +111,7 @@ if ($VerifyOnly) {
 
 $null = New-Item -Path $vendorRoot -ItemType Directory -Force
 $lockModules = [ordered]@{}
-$staging = Join-Path ([IO.Path]::GetTempPath()) ("wdk-psmod-" + [guid]::NewGuid())
+$staging = Join-Path ([IO.Path]::GetTempPath()) ("psmod-sync-" + [guid]::NewGuid())
 $null = New-Item -Path $staging -ItemType Directory -Force
 
 try {
@@ -140,7 +144,7 @@ try {
 
     $lock = [ordered]@{
         note    = 'Pinned by scripts/sync-secret-vault-modules.ps1. See docs/handover/SHARED_SECRET_VAULT_CONTRACT.md section 5.'
-        license = 'Both modules are MIT (Microsoft). Redistributed unmodified.'
+        license = 'MIT (Microsoft). Redistributed unmodified.'
         modules = $lockModules
     }
     ($lock | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $lockPath -Encoding UTF8 -Force

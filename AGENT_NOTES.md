@@ -272,6 +272,47 @@ guidance, `GPO-disable` step sets, and the vendor SCCM driver catalogs.
 | Sidecar Log | Placeholder |
 | Deployment Share (root) | Placeholder |
 
+### Shared secret vault (built 2026-08-21)
+
+Credentials live in the **shared secret vault** defined by USM's
+`SHARED_SECRET_VAULT_CONTRACT.md` - one per-user store shared by USM,
+WinDeployKit and PSOpenAD-FE, the SecretManagement API in front, and
+**no OS credential UI** behind it (no Keychain, no Credential Manager,
+no secret-tool). Craig closed section 6 as **Option B**.
+
+| Piece | Where |
+| --- | --- |
+| Vault module (USM owns) | `sidecar/psmodules/SecretManagement.LocalVault/` - vendored **byte-identical**, 5 files. Do not edit here; fixes go through the handover channel |
+| API module | `vendor/psmodules/Microsoft.PowerShell.SecretManagement/1.1.2/`, pinned in `vendor/psmodules.lock.json` |
+| Sync + drift check | `scripts/sync-secret-vault-modules.ps1` (USM's copy, verbatim; `-VerifyOnly` for CI) |
+| Our glue | `sidecar/lib/AppSharedSecretVault.ps1` |
+| Handlers | `sidecar/handlers/Credentials.ps1` - the 7 commands that had none, plus `GetSecretVaultStatus` |
+| Tests | `sidecar/tests/SecretManagementLocalVault.Tests.ps1` (USM's, byte-identical). 24/24 pass on macOS |
+
+Names we use, from contract section 3:
+
+- **`netboot/join/<id>`** - ours to write. Task-sequence domain-join and Deploy$
+  share credentials.
+- **`local-machine/admin`** - read. **UserName IS the login** (e.g. `st00447`),
+  not a tag.
+- **`dept/edu001`** - read-only *unless* USM has no legacy `DeptCredentials.xml`.
+  That file is the source of truth while `Set-DeptCreds`-era tools exist and USM
+  refreshes the vault from it, so writing over it is pointless - USM wins on its
+  next read. When no file exists, a sign-in here IS adopted and promoted by USM.
+
+Rules that are not negotiable:
+
+> Registration is **by full path**, once at startup, guarded. There is no reset
+> concept in this vault - the SecretStore bootstrap that had one was withdrawn
+> (contract section 4a) after it was shown to wipe every kit's secrets.
+> **Every credential function must work with the vault unavailable**, falling
+> back to the legacy Clixml file, so a vault fault degrades to yesterday's
+> behaviour and never locks a technician out. Verified by moving the module aside
+> and re-running all seven handlers.
+
+`keyMatches = false` means the store came from another machine or user. Surface
+it as **"sign in again"**, never as corruption.
+
 ### Setup and the Deploy$ base (built 2026-08-21)
 
 The Deploy$ base is chosen in a **first-run wizard** and changed afterwards from
@@ -302,7 +343,6 @@ These are **incomplete ports, not residue**. Do not delete them; finish them.
 
 | Gap | Evidence | Consequence |
 | --- | --- | --- |
-| **Credentials overlay is non-functional** | All 7 IPC commands it invokes (`ListInfraSshCredentials`, `SetInfraSshCredential`, `GetLocalMachineCredential`, ...) have **no `Handle-*` anywhere** | The "Credentials" button in Netboot opens a dialog where every action fails. The vault lib exists and `PxeBootPlugin` reads it for the `vault:<id>` Deploy$ credential - but nothing can populate it |
 | **Runtime config never pushed** | `buildSidecarSpawnEnv()` / `buildRuntimeConfigForSidecar()` in `runtimeConfig.ts` have no callers | Verbose logging and TLS-skip settings never reach the sidecar |
 
 12 of the 67 commands in `types.ts` have no handler: the 7 credential ones above,
@@ -447,6 +487,20 @@ diagnose.
 
 > If something fails inexplicably, **look for an empty catch first.** Consider
 > making them `Write-SidecarLogVerbose` instead of discarding.
+
+### `$x = [void](Some-Function)` never calls the function
+
+Measured, and it silently broke the credential clear path:
+
+```powershell
+$a = [void](Do-Thing)   # Do-Thing is NEVER invoked
+[void](Do-Thing)        # bare statement - DOES invoke
+```
+
+On the right-hand side of an assignment PowerShell treats `[void]` as a cast that
+short-circuits the call. Use `[bool](...)` when you want the result, or call it as
+a bare statement when you do not. There is no error, no warning, and the
+surrounding code reads as though it ran.
 
 ### `[bool]` vs `[switch]` parameter binding
 
