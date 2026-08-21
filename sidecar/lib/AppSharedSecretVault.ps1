@@ -271,20 +271,36 @@ function Set-AppVaultDeptCredentialIfAbsent {
 
 function Test-AppVaultDeptLegacyFilePresent {
     <#
-        USM keeps DeptCredentials.xml under a shared DECreds folder that several
-        first-party tools read. We only need to know whether it EXISTS, never to
-        read it - reading is USM's job.
+    .SYNOPSIS
+        Does USM's legacy DeptCredentials.xml exist? Existence only - never read it.
+    .DESCRIPTION
+        Mirrors USM sidecar/lib/Credentials.ps1 exactly (branch craig/shared-secret-vault).
+        Getting this wrong fails OPEN: a missed path means we think USM has no file and
+        write dept/edu001 when we must not. Keep it in step with USM's resolver.
+
+          durable, Windows : %LOCALAPPDATA%\DECreds\DeptCredentials.xml
+          durable, else    : $XDG_DATA_HOME/DECreds/DeptCredentials.xml
+                             (defaults to ~/.local/share/DECreds/DeptCredentials.xml)
+          legacy, all      : <temp>/DeptCredentials/DeptCredentials.xml
+                             (the original Set-DeptCreds location; macOS reaps it)
+
+        DECreds is deliberately generic - a shared cache for any DE tool wanting the
+        same EDU001 login, not a USM-private folder.
     #>
-    $candidates = @()
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
-        $base = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' }
-        $candidates += (Join-Path $base 'DECreds/DeptCredentials.xml')
+        $base = $env:LOCALAPPDATA
+        if (-not $base) { $base = Join-Path $env:USERPROFILE 'AppData/Local' }
+        $durable = Join-Path $base 'DECreds/DeptCredentials.xml'
     } else {
-        $candidates += (Join-Path $HOME 'Library/Application Support/DECreds/DeptCredentials.xml')
-        $candidates += (Join-Path $HOME '.local/share/DECreds/DeptCredentials.xml')
+        $base = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME '.local/share' }
+        $durable = Join-Path $base 'DECreds/DeptCredentials.xml'
     }
-    foreach ($p in $candidates) {
-        if (Test-Path -LiteralPath $p -PathType Leaf) { return $true }
+
+    $tempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { [System.IO.Path]::GetTempPath() }
+    $legacy = Join-Path $tempDir 'DeptCredentials/DeptCredentials.xml'
+
+    foreach ($p in @($durable, $legacy)) {
+        if ($p -and (Test-Path -LiteralPath $p -PathType Leaf)) { return $true }
     }
     return $false
 }
