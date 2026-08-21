@@ -701,7 +701,7 @@ pub fn check_pwsh_prerequisite<R: Runtime>(app: &AppHandle<R>) -> PwshPrerequisi
 /// real install exists. PowerShell is a directory install on macOS/Windows - cwd
 /// must be the install root.
 fn resolve_pwsh_launch<R: Runtime>(app: &AppHandle<R>) -> Option<(PathBuf, PathBuf)> {
-    if let Ok(p) = std::env::var("STMC_PWSH") {
+    if let Ok(p) = std::env::var("WINDEPLOYKIT_PWSH") {
         let pb = PathBuf::from(p.trim());
         if pb.is_file() {
             let cwd = pb
@@ -791,7 +791,7 @@ fn resolve_sidecar_project_root<R: Runtime>(
 fn resolve_sidecar_script<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<PathBuf> {
     // Allow override for dev environments where the bundled resource layout
     // doesn't apply (we want the script the user is editing live).
-    if let Ok(p) = std::env::var("STMC_SIDECAR_SCRIPT") {
+    if let Ok(p) = std::env::var("WINDEPLOYKIT_SIDECAR_SCRIPT") {
         let pb = PathBuf::from(p);
         if pb.is_file() {
             return Ok(pb);
@@ -821,6 +821,6 @@ fn resolve_sidecar_script<R: Runtime>(app: &AppHandle<R>) -> anyhow::Result<Path
     }
 
     anyhow::bail!(
-        "could not locate windeploykit-sidecar.ps1 - set STMC_SIDECAR_SCRIPT or place the sidecar next to the app"
+        "could not locate windeploykit-sidecar.ps1 - set WINDEPLOYKIT_SIDECAR_SCRIPT or place the sidecar next to the app"
     )
 }

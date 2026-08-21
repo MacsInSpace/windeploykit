@@ -19,6 +19,7 @@ import { OperatingSystemsPanel } from "./panels/OperatingSystemsPanel";
 import { OutOfBoxDriversPanel } from "./panels/OutOfBoxDriversPanel";
 import { TransfersPanel } from "./panels/TransfersPanel";
 import { DeploymentSharePanel } from "./panels/DeploymentSharePanel";
+import { SidecarLogPanel } from "./panels/SidecarLogPanel";
 import { SETTING_SETUP_COMPLETED } from "./lib/setupSettings";
 import { getSetting } from "./lib/settings";
 import { pushImageLibraryRoot } from "./lib/imageLibrary";
@@ -59,12 +60,14 @@ function renderPanel(id: string) {
       return <MonitoringPanel />;
     case "transfers":
       return <TransfersPanel />;
+    case "logs":
+      return <SidecarLogPanel />;
     default:
       return <NotBuiltYet id={id} />;
   }
 }
 
-/** Placeholder for nodes with no panel yet (Applications, Site Profile, Sidecar Log). */
+/** Placeholder for nodes with no panel yet (Applications, Site Profile). */
 function NotBuiltYet({ id }: { id: string }) {
   const label = findNavNode(id)?.label ?? id;
   return (

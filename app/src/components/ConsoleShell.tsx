@@ -32,8 +32,6 @@ const TREE_W_DEFAULT = 268;
 const TREE_W_MIN = 160;
 const TREE_W_MAX = 560;
 
-type SidecarState = "connecting" | "ready" | "error" | "exited";
-
 interface VaultStatus {
   ready?: boolean;
   keyMatches?: boolean;
@@ -181,8 +179,7 @@ export function ConsoleShell({
     return () => window.removeEventListener("keydown", onKey);
   }, [actions]);
 
-  /* -- title-bar status: sidecar + vault ----------------------------------- */
-  const [sidecarState, setSidecarState] = useState<SidecarState>("connecting");
+  /* -- title-bar status: vault ------------------------------------------- */
   const [vault, setVault] = useState<VaultStatus | null>(null);
   useEffect(() => {
     if (!isTauri()) return;
@@ -197,11 +194,7 @@ export function ConsoleShell({
     void sidecar
       .onEvent((ev) => {
         if (!live) return;
-        if (ev.event === "ready") {
-          setSidecarState("ready");
-          probeVault();
-        } else if (ev.event === "error") setSidecarState("error");
-        else if (ev.event === "exited") setSidecarState("exited");
+        if (ev.event === "ready") probeVault();
       })
       .then((fn) => {
         unlisten = fn;
@@ -211,10 +204,7 @@ export function ConsoleShell({
       .then((s) => {
         if (!live) return;
         const running = (s as { running?: boolean }).running;
-        if (running) {
-          setSidecarState("ready");
-          probeVault();
-        }
+        if (running) probeVault();
       })
       .catch(() => undefined);
     return () => {
@@ -291,8 +281,6 @@ export function ConsoleShell({
     [actions, activeNode, nodeVerbs, expandAll, collapseAll, navigate],
   );
 
-  const sidecarDot =
-    sidecarState === "ready" ? "dot-ok" : sidecarState === "connecting" ? "dot-pending" : "dot-err";
   const vaultBadge = !vault
     ? null
     : vault.ready
@@ -312,10 +300,6 @@ export function ConsoleShell({
               {vaultBadge.text}
             </span>
           )}
-          <span className="titlebar-session" title={`Sidecar ${sidecarState}`}>
-            <span className={`dot-status ${sidecarDot}`} aria-hidden />
-            <span className="mono">SIDECAR</span>
-          </span>
           <span className="badge badge-dim mono" title="Build">
             v{APP_VERSION}
           </span>

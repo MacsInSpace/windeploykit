@@ -271,6 +271,7 @@ export function PxeWorkspace({
   const {
     data,
     loading: configLoading,
+    error: configError,
     refetch: refetchConfig,
   } = useCachedQuery<PxeBootPluginConfigResponse>(
     PXE_BOOT_CONFIG_CACHE_KEY,
@@ -1341,7 +1342,16 @@ export function PxeWorkspace({
   // panel header. Service lifecycle belongs to Netboot, which owns the services;
   // other nodes only consume what those services produce.
   const showHost = show("host");
-  const lanIpText = status?.lanIp ? `LAN ${status.lanIp}` : "No LAN IP";
+  // Three states, not two: "No LAN IP" is only true once the sidecar has
+  // answered. Before that it is waiting, or it failed - and a failed call used
+  // to read as "no IP found", which sent people checking cables.
+  const lanIpText = !status
+    ? configError
+      ? `Sidecar error - ${configError}`
+      : "Waiting for sidecar..."
+    : status.lanIp
+      ? `LAN ${status.lanIp}`
+      : "No LAN IP";
   const running = Boolean(status?.running);
   const consoleActions = useMemo<ConsoleNodeActions>(
     () => ({
@@ -1369,7 +1379,9 @@ export function PxeWorkspace({
       <PanelShell
         title={title ?? PLUGIN_TITLE}
         subtitle={
-          status?.lanIp ? (
+          !status ? (
+            <span style={{ color: configError ? "var(--red)" : "var(--text3)" }}>{lanIpText}</span>
+          ) : status.lanIp ? (
             <span>LAN {status.lanIp}</span>
           ) : (
             <span style={{ color: "var(--amber)" }}>No LAN IP</span>
@@ -1443,10 +1455,14 @@ export function PxeWorkspace({
                 </p>
                 {!hasLanIp && (
                   <p className="mb-3 text-[12px] leading-snug" style={{ color: "var(--amber)" }}>
-                    {status?.lanIpHint ??
-                      (adapters.length > 0
-                        ? "Select the Ethernet adapter below - the default route is not a usable PXE address."
-                        : "No usable IPv4 - plug in Ethernet and wait for DHCP. PXE needs a real LAN address.")}
+                    {!status
+                      ? configError
+                        ? `The sidecar did not answer: ${configError}`
+                        : "Waiting for the sidecar to report adapters..."
+                      : (status.lanIpHint ??
+                        (adapters.length > 0
+                          ? "Select the Ethernet adapter below - the default route is not a usable PXE address."
+                          : "No usable IPv4 - plug in Ethernet and wait for DHCP. PXE needs a real LAN address."))}
                   </p>
                 )}
 
@@ -1774,7 +1790,7 @@ export function PxeWorkspace({
                     >
                       {adapters.length === 0 ? (
                         <option value="" disabled>
-                          No usable IPv4 adapters
+                          {status ? "No usable IPv4 adapters" : "Waiting for sidecar..."}
                         </option>
                       ) : (
                         <>
@@ -1955,7 +1971,7 @@ export function PxeWorkspace({
                         title="Remove all stored imaging logs on this host"
                         onClick={() => void clearImagingLogs()}
                       >
-                        Clear logs
+                        Clear
                       </button>
                     </div>
                     {(imagingClients?.length ?? 0) === 0 ? (

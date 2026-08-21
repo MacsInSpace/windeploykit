@@ -1090,14 +1090,6 @@ select.input:focus {
   margin-left: auto;
 }
 
-.titlebar-session {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--text3);
-}
 
 .console {
   display: flex;
