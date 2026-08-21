@@ -282,21 +282,32 @@ function Write-AppPxeBootConfig {
 
 function Get-AppPxeBootLayoutPaths {
     $root = Get-AppPxeBootStoreRoot
-    # ISOs and imageable/SOE WIMs live under the user-chosen ISO & driver root
-    # (off the system drive), served via Caddy /iso and /WIMs routes. Boot WIMs
-    # (ImageDeployer.wim/FieldIso.wim) stay in http/wim. Fall back to the PXE
-    # store if the image library is unavailable so this never throws.
+    # STORAGE POLICY (see AGENT_NOTES.md section 'Where data lives'):
+    #   app-data store ($root)   -> TFTP root, boot WIMs, wimboot, configs. SMALL.
+    #   image library (Deploy$)  -> ISOs, imageable/SOE WIMs, driver packs. LARGE.
+    # The store sits on the SYSTEM DRIVE (%LOCALAPPDATA% / ~/Library/Application
+    # Support), so nothing multi-GB may resolve into it. USM filled an SSD by writing
+    # a ~60 GB WIM to %LOCALAPPDATA%; that is the bug this split exists to prevent.
     $libIso = $null; $libWims = $null
     try {
         # -NoCreate: merely resolving layout paths must not create the default
-        # Downloads folder before the frontend pushes the user's chosen root.
+        # library folder before the frontend pushes the user's chosen root.
         $libRoot = Get-AppImageLibraryRoot -NoCreate
         $lib = Get-AppImageLibraryPaths -Root $libRoot
         $libIso = $lib.isoDir
         $libWims = $lib.wimsDir
-    } catch { }
-    if (-not $libIso) { $libIso = Join-Path $root 'http/iso' }
-    if (-not $libWims) { $libWims = Join-Path $root 'http/WIMs' }
+    } catch {
+        # Was a bare catch {} - it silently routed ISOs into the app-data store.
+        Write-SidecarLog "PXE boot: image library unavailable, falling back to the default library root - $($_.Exception.Message)"
+    }
+    if (-not $libIso -or -not $libWims) {
+        # Fall back to the image library DEFAULT root, never to $root. The default is
+        # deliberately off the app-data tree (~/Public on macOS, ~/Downloads on
+        # Windows) so a fallback still keeps GBs out of Application Support.
+        $fallbackRoot = Get-AppImageLibraryDefaultRoot
+        if (-not $libIso) { $libIso = Join-Path $fallbackRoot 'iso' }
+        if (-not $libWims) { $libWims = Join-Path $fallbackRoot 'WIMs' }
+    }
     @{
         storeRoot   = $root
         tftpRoot    = Join-Path $root 'tftp'
@@ -471,7 +482,7 @@ function Ensure-AppPxeBootStoreLayoutLite {
         '# Share (reserved)'
         ' '
         'Future: peer/torrent plug-in to seed OOBD driver archives and DE official ISOs to other'
-        'School Manager laptops on the LAN. Not active yet — folder created when Netboot is enabled.'
+        'WinDeployKit laptops on the LAN. Not active yet — folder created when Netboot is enabled.'
     )
 
     if (-not (Test-Path -LiteralPath (Get-AppPxeBootConfigPath))) {
@@ -1348,7 +1359,7 @@ function Invoke-AppPxeBootWimlibExtract {
     )
     $wimlib = Get-AppPxeBootWimlibImagexPath
     if (-not $wimlib) {
-        throw 'PXE boot: WIM tools are missing from this app install — reinstall School Manager or contact support.'
+        throw 'PXE boot: WIM tools are missing from this app install — reinstall WinDeployKit or contact support.'
     }
     if (-not (Test-Path -LiteralPath $DestDir)) {
         $null = New-Item -Path $DestDir -ItemType Directory -Force
@@ -2172,12 +2183,12 @@ function Get-AppPxeBootWimBootAssetsFailureMessage {
     )
     if (Test-AppPxeBootWimUsesBundledMdtBootAssets -WimFileName $WimFileName) {
         if (-not (Get-AppPxeBootBundledMdtBootAssetsDir)) {
-            return 'PXE boot: this app install is missing ImageDeployer boot files. Reinstall School Manager or contact support.'
+            return 'PXE boot: this app install is missing ImageDeployer boot files. Reinstall WinDeployKit or contact support.'
         }
         return "PXE boot: could not install ImageDeployer boot files for $WimFileName."
     }
     if (-not (Get-AppPxeBootWimlibImagexPath)) {
-        return 'PXE boot: this app install is missing WIM tools needed to prepare boot files. Reinstall School Manager or contact support.'
+        return 'PXE boot: this app install is missing WIM tools needed to prepare boot files. Reinstall WinDeployKit or contact support.'
     }
     return "PXE boot: could not prepare boot files (BCD, boot.sdi, boot manager) from $WimFileName. The WIM may be corrupt or unsupported."
 }
@@ -2486,7 +2497,7 @@ function Write-AppPxeBootMenuFiles {
         Write http/boot.ipxe (+ menu.ipxe) for field PXE.
         - defaultBootWim = local WIM (not FieldIso) → auto-boot that WIM (WDS-style); :start menu if boot returns
         - defaultBootWim = FieldIso + defaultBootIso → auto-boot that ISO via FieldIso WinPE
-        - defaultBootWim = FieldIso (no defaultBootIso) → chain straight to ISO catalog (School Manager local or WAN)
+        - defaultBootWim = FieldIso (no defaultBootIso) → chain straight to ISO catalog (WinDeployKit local or WAN)
         - defaultBootWim unset → choose menu; first non-FieldIso WIM or ISO catalog when only FieldIso + ISOs
     #>
     param(
@@ -2557,7 +2568,7 @@ function Write-AppPxeBootMenuFiles {
 
     if ($directBootWim) {
         $defaultMenuId = 'boot_default'
-        [void]$bootMenuLines.Add("# School Manager field PXE — auto-boot $directBootWim — generated $generated")
+        [void]$bootMenuLines.Add("# WinDeployKit field PXE — auto-boot $directBootWim — generated $generated")
         if ($autoBoot) {
             [void]$bootMenuLines.Add('goto boot_default_run')
         } else {
@@ -2643,11 +2654,11 @@ function Write-AppPxeBootMenuFiles {
             $defaultIsoMenuId = if ($defaultIso) { Get-AppPxeBootIsoCatalogMenuId -FileName $defaultIso } else { $null }
             $defaultIsoLabel = if ($defaultIso) { Get-AppPxeBootIsoDisplayLabel -FileName $defaultIso } else { $null }
             if ($autoIsoCatalog -and $defaultIso -and $fieldIsoWim) {
-                [void]$bootMenuLines.Add("# School Manager field PXE — default FieldIso → auto-boot $defaultIso — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE — default FieldIso → auto-boot $defaultIso — generated $generated")
             } elseif ($autoIsoCatalog) {
-                [void]$bootMenuLines.Add("# School Manager field PXE — default FieldIso → ISO catalog — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE — default FieldIso → ISO catalog — generated $generated")
             } else {
-                [void]$bootMenuLines.Add("# School Manager field PXE — local menu — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE — local menu — generated $generated")
             }
             if ($autoBoot -and $autoIsoCatalog -and $defaultIso -and $fieldIsoWim) {
                 [void]$bootMenuLines.Add("goto $($defaultIsoMenuId)_run")
@@ -2757,7 +2768,7 @@ function Write-AppPxeBootMenuFiles {
             }
         } else {
             if ($wanDeployEnabled) {
-                [void]$bootMenuLines.Add("# School Manager field PXE — deploy ISO catalog — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE — deploy ISO catalog — generated $generated")
                 [void]$bootMenuLines.Add('echo Loading deploy ISO menu...')
                 [void]$bootMenuLines.Add('chain ${deploy_base}/menu.ipxe?t=${buildsign} || chain ${deploy_base}/menu.ipxe || goto failed')
                 [void]$bootMenuLines.Add(':failed')
@@ -2765,9 +2776,9 @@ function Write-AppPxeBootMenuFiles {
                 [void]$bootMenuLines.Add('shell')
                 Write-SidecarLog "PXE boot: boot.ipxe chains deploy ISO catalog ($deployBase)"
             } else {
-                [void]$bootMenuLines.Add("# School Manager field PXE — no local boot assets — generated $generated")
+                [void]$bootMenuLines.Add("# WinDeployKit field PXE — no local boot assets — generated $generated")
                 [void]$bootMenuLines.Add('echo No local boot WIM or ISO on this workstation.')
-                [void]$bootMenuLines.Add('echo Open Netboot in School Manager — add FieldIso.wim plus ISOs or a boot WIM.')
+                [void]$bootMenuLines.Add('echo Open Netboot in WinDeployKit — add FieldIso.wim plus ISOs or a boot WIM.')
                 [void]$bootMenuLines.Add('echo Enable HTTP + TFTP, then reboot the client.')
                 [void]$bootMenuLines.Add('shell')
                 Write-SidecarLog 'PXE boot: boot.ipxe has no local menu assets (local HTTP only — add WIM/ISO in Netboot)'
@@ -2812,7 +2823,7 @@ function Get-AppPxeBootAutoexecScriptText {
     $httpLiteral = if ($lanIp) { "http://${lanIp}:$port/boot.ipxe" } else { $null }
     $lines = [System.Collections.Generic.List[string]]::new()
     [void]$lines.Add('#!ipxe')
-    [void]$lines.Add('# School Manager — TFTP/HTTP autoexec (regenerated on menu sync)')
+    [void]$lines.Add('# WinDeployKit — TFTP/HTTP autoexec (regenerated on menu sync)')
     if ($wanDeployEnabled) {
         [void]$lines.Add("set deploy_base $deployBase")
     }
@@ -2880,7 +2891,7 @@ function Ensure-AppPxeBootAutoexecIfMissing {
     if ($port -lt 1 -or $port -gt 65535) { $port = 8080 }
     $stub = @(
         '#!ipxe'
-        '# School Manager — placeholder autoexec (full script written on menu sync / Start PXE)'
+        '# WinDeployKit — placeholder autoexec (full script written on menu sync / Start PXE)'
         'chain tftp://${next-server}/boot.ipxe || chain http://${next-server}:' + $port + '/boot.ipxe || shell'
     ) -join "`n"
     Set-AppPxeBootAutoexecScriptContent -Content $stub | Out-Null
@@ -3154,7 +3165,7 @@ function Invoke-AppPxeBootP7zipArtifactDownload {
         $null = New-Item -Path $parent -ItemType Directory -Force
     }
     Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing `
-        -UserAgent 'Unofficial-School-Manager' -MaximumRedirection 5
+        -UserAgent 'WinDeployKit' -MaximumRedirection 5
 }
 
 function Test-AppPxeBootP7zipArchiveFile {
@@ -3707,8 +3718,8 @@ function Get-AppPxeBootWanIsoCatalogUrl {
     return $url.Trim().TrimEnd('/')
 }
 
-function Get-AppPxeBootSchoolIsoCatalogMenuLabel {
-    'School Manager boot ISO catalog'
+function Get-AppPxeBootSiteIsoCatalogMenuLabel {
+    'WinDeployKit boot ISO catalog'
 }
 
 function Get-AppPxeBootBrandingPictureFileName {
@@ -3893,7 +3904,7 @@ function Write-AppPxeBootLocalIsoCatalog {
     $catalogIpxeAcc = [System.Collections.Generic.List[string]]::new()
     [void]$catalogIpxeAcc.Add('#!ipxe')
     [void]$catalogIpxeAcc.Add("# fieldiso-ipxe-rev: $($script:AppPxeBootFieldIsoIpxeCatalogRevision)")
-    [void]$catalogIpxeAcc.Add('# Generated by School Manager — School Manager boot ISO catalog')
+    [void]$catalogIpxeAcc.Add('# Generated by WinDeployKit — WinDeployKit boot ISO catalog')
     [void]$catalogIpxeAcc.Add("# $generated")
     [void]$catalogIpxeAcc.Add("set http_port $port")
     if ($wanDeployEnabled) {
@@ -3904,9 +3915,9 @@ function Write-AppPxeBootLocalIsoCatalog {
     [void]$catalogIpxeAcc.Add('')
     [void]$catalogIpxeAcc.Add(':start')
     foreach ($line in @(Get-AppPxeBootMenuBrandingConsoleIpxeLines)) { [void]$catalogIpxeAcc.Add([string]$line) }
-    [void]$catalogIpxeAcc.Add('menu School Manager boot ISO catalog')
+    [void]$catalogIpxeAcc.Add('menu WinDeployKit boot ISO catalog')
     foreach ($line in @(Get-AppPxeBootMenuBrandingSubtitleIpxeLines)) { [void]$catalogIpxeAcc.Add([string]$line) }
-    [void]$catalogIpxeAcc.Add('item --gap -- ----- School Manager (HTTP) -----')
+    [void]$catalogIpxeAcc.Add('item --gap -- ----- WinDeployKit (HTTP) -----')
     if ($fieldIsoWim) {
         [void]$catalogIpxeAcc.Add('item --gap -- ----- Lab -----')
         [void]$catalogIpxeAcc.Add((Format-AppPxeBootIpxeMenuItemLine -Id 'fieldiso_smb_test' -Label 'FieldIso SMB test (macOS share)'))
@@ -3969,13 +3980,13 @@ function Get-AppPxeBootIsoCatalogMenuIpxeLines {
         if (-not (Test-AppPxeBootLocalIsoCatalogReady)) {
             return @()
         }
-        $schoolCatalog = Get-AppPxeBootSchoolIsoCatalogMenuLabel
-        return @("item iso_catalog`t$schoolCatalog")
+        $siteCatalog = Get-AppPxeBootSiteIsoCatalogMenuLabel
+        return @("item iso_catalog`t$siteCatalog")
     }
-    $schoolCatalog = Get-AppPxeBootSchoolIsoCatalogMenuLabel
+    $siteCatalog = Get-AppPxeBootSiteIsoCatalogMenuLabel
     $useLocalPrimary = ([string]$Config.isoCatalogSource -ne 'wan') -and (Test-AppPxeBootLocalIsoCatalogReady)
     if ($useLocalPrimary) {
-        return @("item iso_catalog`t$schoolCatalog")
+        return @("item iso_catalog`t$siteCatalog")
     }
     return @((Format-AppPxeBootIpxeMenuItemLine -Id 'iso_catalog' -Label 'Deploy server ISO catalog (WAN)'))
 }
@@ -3988,11 +3999,11 @@ function Get-AppPxeBootIsoCatalogBootIpxeBlock {
     $block = [System.Collections.Generic.List[string]]::new()
     $wanDeployEnabled = Test-AppPxeBootWanDeployMenuEnabled
     $useLocalPrimary = ([string]$Config.isoCatalogSource -ne 'wan') -and (Test-AppPxeBootLocalIsoCatalogReady)
-    $schoolCatalog = Get-AppPxeBootSchoolIsoCatalogMenuLabel
+    $siteCatalog = Get-AppPxeBootSiteIsoCatalogMenuLabel
     [void]$block.Add(':iso_catalog')
     if ($useLocalPrimary -or -not $wanDeployEnabled) {
         if (Test-AppPxeBootLocalIsoCatalogReady) {
-            [void]$block.Add("echo Loading $schoolCatalog...")
+            [void]$block.Add("echo Loading $siteCatalog...")
             if ($wanDeployEnabled) {
                 [void]$block.Add('chain ${catalog_base}/menu.ipxe?t=${buildsign} || chain ${catalog_base}/menu.ipxe || goto iso_catalog_wan')
                 [void]$block.Add(':iso_catalog_wan')
@@ -4682,7 +4693,7 @@ function Test-AppIsExcludedLocationIPv4 {
           * multicast/reserved  224.0.0.0/4 and above
         Everything else — RFC1918 LAN ranges and public addresses — is allowed.
     .NOTES
-        Replaces the USM original, which filtered against a school sites-catalog.
+        Replaces the USM original, which filtered against an org site catalog.
     #>
     param([string]$Address)
 
@@ -4956,7 +4967,7 @@ function New-AppPxeBootDnsmasqConfig {
     $tftpRootNorm = ($TftpRoot -replace '\\', '/')
     $logFile = Join-Path (Get-AppPxeBootStoreRoot) 'dnsmasq.log'
     $lines = [System.Collections.Generic.List[string]]::new()
-    [void]$lines.Add("# School Manager PXE boot — generated $(Get-Date -Format 'o')")
+    [void]$lines.Add("# WinDeployKit PXE boot — generated $(Get-Date -Format 'o')")
     [void]$lines.Add("interface=$iface")
     [void]$lines.Add('bind-interfaces')
     switch ($Mode) {
@@ -5060,8 +5071,8 @@ function Test-AppPxeBootCaddyInstalled {
 }
 
 function Get-AppPxeBootCaddyPath {
-    if ($env:SCHOOL_MANAGER_PXE_CADDY -and (Test-Path -LiteralPath $env:SCHOOL_MANAGER_PXE_CADDY -PathType Leaf)) {
-        return (Resolve-Path -LiteralPath $env:SCHOOL_MANAGER_PXE_CADDY).Path
+    if ($env:WINDEPLOYKIT_PXE_CADDY -and (Test-Path -LiteralPath $env:WINDEPLOYKIT_PXE_CADDY -PathType Leaf)) {
+        return (Resolve-Path -LiteralPath $env:WINDEPLOYKIT_PXE_CADDY).Path
     }
     $paths = Get-AppPxeBootLayoutPaths
     $bin = Join-Path $paths.caddyBinaryDir (Get-AppPxeBootCaddyBinaryFileName)
@@ -5174,7 +5185,7 @@ function Invoke-AppPxeBootCaddyArtifactDownload {
     )
     try {
         Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing `
-            -UserAgent 'Unofficial-School-Manager' -MaximumRedirection 5 -TimeoutSec 600 -ErrorAction Stop
+            -UserAgent 'WinDeployKit' -MaximumRedirection 5 -TimeoutSec 600 -ErrorAction Stop
     } catch {
         $status = $null
         if ($_.Exception.Response) {
@@ -5414,7 +5425,7 @@ function Write-AppPxeBootCaddyfile {
     }
 
     $lines = @(
-        "# School Manager Netboot — generated $(Get-Date -Format 'o')"
+        "# WinDeployKit Netboot — generated $(Get-Date -Format 'o')"
         '{'
         '    auto_https off'
         '}'
@@ -5498,8 +5509,8 @@ function Test-AppPxeBootTftpd64Installed {
 }
 
 function Get-AppPxeBootTftpd64Path {
-    if ($env:SCHOOL_MANAGER_PXE_TFTPD64 -and (Test-Path -LiteralPath $env:SCHOOL_MANAGER_PXE_TFTPD64 -PathType Leaf)) {
-        return (Resolve-Path -LiteralPath $env:SCHOOL_MANAGER_PXE_TFTPD64).Path
+    if ($env:WINDEPLOYKIT_PXE_TFTPD64 -and (Test-Path -LiteralPath $env:WINDEPLOYKIT_PXE_TFTPD64 -PathType Leaf)) {
+        return (Resolve-Path -LiteralPath $env:WINDEPLOYKIT_PXE_TFTPD64).Path
     }
     $paths = Get-AppPxeBootLayoutPaths
     $bin = Join-Path $paths.tftpd64BinaryDir (Get-AppPxeBootTftpd64BinaryFileName)
@@ -5720,8 +5731,8 @@ function Ensure-AppPxeBootWindowsFirewallRules {
     $added = [System.Collections.Generic.List[string]]::new()
 
     $portRules = @(
-        @{ DisplayName = 'School Manager Netboot TFTP (UDP 69)'; Protocol = 'UDP'; LocalPort = 69 }
-        @{ DisplayName = "School Manager Netboot HTTP (TCP $HttpPort)"; Protocol = 'TCP'; LocalPort = $HttpPort }
+        @{ DisplayName = 'WinDeployKit Netboot TFTP (UDP 69)'; Protocol = 'UDP'; LocalPort = 69 }
+        @{ DisplayName = "WinDeployKit Netboot HTTP (TCP $HttpPort)"; Protocol = 'TCP'; LocalPort = $HttpPort }
     )
 
     if (Get-Module -ListAvailable -Name NetSecurity) {
@@ -5738,7 +5749,7 @@ function Ensure-AppPxeBootWindowsFirewallRules {
             }
         }
         if ($Tftpd64Exe -and (Test-Path -LiteralPath $Tftpd64Exe)) {
-            $progName = 'School Manager Netboot Tftpd64'
+            $progName = 'WinDeployKit Netboot Tftpd64'
             $existing = Get-NetFirewallRule -DisplayName $progName -ErrorAction SilentlyContinue
             if (-not $existing) {
                 try {
@@ -6033,11 +6044,11 @@ function Stop-AppPxeBootDnsmasq {
         $before = Get-AppPxeBootPort69ProcessId
         $cleared = Clear-AppPxeBootPort69Mac
         if ($before -gt 0 -and $cleared) {
-            Write-SidecarLog "PXE boot: stopped School Manager dnsmasq (port 69 cleared, pid $before)"
+            Write-SidecarLog "PXE boot: stopped WinDeployKit dnsmasq (port 69 cleared, pid $before)"
             return $true
         }
         if ($before -gt 0) {
-            Write-SidecarLog "PXE boot: School Manager dnsmasq still holding port 69 (pid $before)"
+            Write-SidecarLog "PXE boot: WinDeployKit dnsmasq still holding port 69 (pid $before)"
             return $false
         }
         return $false
@@ -6073,12 +6084,12 @@ function Stop-AppPxeBootDnsmasq {
         }
         Clear-AppPxeBootTftpTracking
         if ($procIds.Count -gt 0) {
-            Write-SidecarLog "PXE boot: stopped School Manager dnsmasq (pids: $($procIds -join ', '))"
+            Write-SidecarLog "PXE boot: stopped WinDeployKit dnsmasq (pids: $($procIds -join ', '))"
         }
         return $procIds.Count -gt 0
     }
 
-    Write-SidecarLog "PXE boot: School Manager dnsmasq still running (pids: $($stillAlive -join ', '))"
+    Write-SidecarLog "PXE boot: WinDeployKit dnsmasq still running (pids: $($stillAlive -join ', '))"
     return $false
 }
 
@@ -6124,14 +6135,14 @@ function Get-AppPxeBootPort69ConflictMessage {
             if (-not ($lines | Where-Object { $_ -match '\.69\s' })) { return $null }
             return @(
                 'PXE boot: UDP port 69 is already in use on this workstation.'
-                'Stop PXE services in School Manager, or stop brew dnsmasq / another TFTP server, then retry.'
+                'Stop PXE services in WinDeployKit, or stop brew dnsmasq / another TFTP server, then retry.'
             ) -join ' '
         }
 
         if (Test-AppPxeBootDnsmasqIsOurs -ProcessId $holder -ConfPath $confPath) {
             return @(
-                "PXE boot: UDP port 69 is held by a previous School Manager dnsmasq (pid $holder)."
-                'School Manager will try to clear this automatically when you start TFTP.'
+                "PXE boot: UDP port 69 is held by a previous WinDeployKit dnsmasq (pid $holder)."
+                'WinDeployKit will try to clear this automatically when you start TFTP.'
             ) -join ' '
         }
 
@@ -6518,7 +6529,7 @@ function Start-AppPxeBootTftpServer {
                 return @{ ok = $true; backend = 'tftpd64'; detail = $exe }
             }
             $detail = Get-AppPxeBootTftpd64StartFailureDetail -IniPath $iniPath -TftpRoot $TftpRoot
-            $hint = if ($detail) { $detail } else { 'check Windows Firewall (School Manager adds rules automatically when permitted)' }
+            $hint = if ($detail) { $detail } else { 'check Windows Firewall (WinDeployKit adds rules automatically when permitted)' }
             throw "PXE boot: Tftpd64 exited immediately — $hint"
         }
         throw 'PXE boot: Tftpd64 could not be installed — enable Netboot and retry, or set a custom path in Settings.'
@@ -6872,7 +6883,7 @@ function Get-AppPxeBootHttpPortConflictMessage {
 
         if (Test-AppPxeBootHttpProcessIsOurs -ProcessId $holder -CaddyConfigPath $caddyConfig -StoreRoot (Get-AppPxeBootStoreRoot)) {
             return @(
-                "PXE boot: TCP port $Port is held by a previous School Manager HTTP server (pid $holder)."
+                "PXE boot: TCP port $Port is held by a previous WinDeployKit HTTP server (pid $holder)."
                 'Netboot will try to clear this automatically when you start HTTP.'
             ) -join ' '
         }
@@ -7208,7 +7219,7 @@ function Start-AppPxeBootHttpServer {
 
     if ($holder -gt 0) {
         if (Test-AppPxeBootHttpProcessIsOurs -ProcessId $holder -CaddyConfigPath $caddyConfig -StoreRoot $storeRoot) {
-            Write-SidecarLog "PXE boot: port $Port blocked by previous School Manager Caddy (pid $holder) — clearing"
+            Write-SidecarLog "PXE boot: port $Port blocked by previous WinDeployKit Caddy (pid $holder) — clearing"
             Clear-AppPxeBootHttpPort -Port $Port | Out-Null
         } elseif ($orphanIds.Count -gt 0) {
             Write-SidecarLog "PXE boot: clearing orphan HTTP server process(es) on port $Port"
@@ -7787,7 +7798,7 @@ function Ensure-AppPxeBootWindowsSmbThrowawayCredential {
     } catch { }
 
     if (-not $userExists -and -not $isAdmin) {
-        Write-SidecarLog "PXE boot: throwaway SMB user '$user' is missing and this app is not elevated; cannot create local account. Run School Manager as Administrator once or switch overlay credentials mode to blank."
+        Write-SidecarLog "PXE boot: throwaway SMB user '$user' is missing and this app is not elevated; cannot create local account. Run WinDeployKit as Administrator once or switch overlay credentials mode to blank."
         return $null
     }
 
@@ -7796,7 +7807,7 @@ function Ensure-AppPxeBootWindowsSmbThrowawayCredential {
             if (Get-Command New-LocalUser -ErrorAction SilentlyContinue) {
                 $sec = ConvertTo-SecureString $pass -AsPlainText -Force
                 New-LocalUser -Name $user -Password $sec `
-                    -FullName 'School Manager imaging throwaway SMB' `
+                    -FullName 'WinDeployKit imaging throwaway SMB' `
                     -Description 'Read-only Deploy$ SMB account for overlay' `
                     -AccountNeverExpires -PasswordNeverExpires | Out-Null
             } else {
@@ -7910,7 +7921,7 @@ P='$p'
 ROOT='$rootEsc'
 SHARE='$name'
 if ! id "`$U" >/dev/null 2>&1; then
-  sysadminctl -addUser "`$U" -fullName "School Manager imaging throwaway SMB" -password "`$P" -home /var/empty -shell /usr/bin/false
+  sysadminctl -addUser "`$U" -fullName "WinDeployKit imaging throwaway SMB" -password "`$P" -home /var/empty -shell /usr/bin/false
 fi
 dscl . -create "/Users/`$U" IsHidden 1
 dscl . -create "/Users/`$U" NFSHomeDirectory /var/empty
@@ -8048,7 +8059,7 @@ function Ensure-AppPxeBootImageLibraryShare {
             }
             if (-not $existing) {
                 New-SmbShare -Name $name -Path $root -ReadAccess 'Everyone' `
-                    -Description 'School Manager imaging library (read-only)' -ErrorAction Stop | Out-Null
+                    -Description 'WinDeployKit imaging library (read-only)' -ErrorAction Stop | Out-Null
                 Write-SidecarLog "PXE boot: SMB share $name -> $root"
             }
             $credsMode = Get-AppPxeBootImageDeployerOverlayCredsMode -Cfg $cfg

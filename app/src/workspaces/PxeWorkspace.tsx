@@ -40,7 +40,7 @@ import type {
   StopPxeBootServicesParams,
 } from "../lib/types";
 import { getImageLibraryRoot } from "../lib/imageLibrary";
-import { useSchoolNumberForQueries } from "../state/appStore";
+import { useSiteIdForQueries } from "../state/appStore";
 import { toast } from "../state/toastStore";
 
 const PLUGIN_TITLE = "Netboot";
@@ -267,7 +267,7 @@ export function PxeWorkspace({
   // A section that owns its whole panel doesn't need a heading (the panel title
   // says it) or a disclosure caret (there is nothing to collapse away from).
   const solo = sections.length === 1;
-  const schoolNumber = useSchoolNumberForQueries();
+  const siteId = useSiteIdForQueries();
   const {
     data,
     loading: configLoading,
@@ -2075,7 +2075,7 @@ export function PxeWorkspace({
                         style={{ color: "var(--text3)" }}
                         title={
                           "Published to TaskSequences/ in the deploy share — pick one in ImageDeployer's Task Sequence menu. " +
-                          "{{SN}}, {{SERIAL}} and the connect credentials fill on the device at deploy time, so no secrets are stored here."
+                          "{{SITE}}, {{SERIAL}} and the connect credentials fill on the device at deploy time, so no secrets are stored here."
                         }
                       >
                         Named first-boot setups ImageDeployer can apply after imaging.
@@ -2239,7 +2239,7 @@ export function PxeWorkspace({
                                         key === "joinCredential"
                                           ? "Join credentials are filled in on the device at deploy time, or taken from a stored credential when one is selected — never written into the published file."
                                           : key === "computerName"
-                                            ? "Always prefixed with the school number — servers as {{SN}}…, everything else as {{SN}}-… (enforced at publish)."
+                                            ? "Always prefixed with the site id — servers as {{SITE}}…, everything else as {{SITE}}-… (enforced at publish)."
                                             : undefined
                                       }
                                     >
@@ -2250,9 +2250,9 @@ export function PxeWorkspace({
                                         <span
                                           className="mono rounded border px-1.5 text-[11px] leading-[24px]"
                                           style={{ borderColor: "var(--border)", color: "var(--text3)", background: "var(--surface2)" }}
-                                          title="School number prefix — locked; resolved on the device at deploy"
+                                          title="Site id prefix — locked; resolved on the device at deploy"
                                         >
-                                          {(schoolNumber ?? "{{SN}}") + (seq.kind === "server" ? "" : "-")}
+                                          {(siteId ?? "{{SITE}}") + (seq.kind === "server" ? "" : "-")}
                                         </span>
                                         <input
                                           className="input-box mono h-[26px] flex-1 text-[11px]"
@@ -2853,7 +2853,7 @@ export function PxeWorkspace({
       <InfrastructureCredentialsOverlay
         open={credentialsOpen}
         onClose={() => setCredentialsOpen(false)}
-        schoolNumber={schoolNumber ?? undefined}
+        siteId={siteId ?? undefined}
         onVaultChange={() => reloadConfig()}
       />
     </>

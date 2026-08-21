@@ -46,7 +46,7 @@ export interface ImageLibraryPaths {
 /**
  * Resolved ISO & driver root. Explicit override wins; otherwise it follows the
  * main Downloads location under an "WinDeployKit" subfolder. The
- * imaging library is global (not per-school), so the school subfolder option is
+ * imaging library is global (not per-site), so the site subfolder option is
  * intentionally ignored here.
  */
 export async function getImageLibraryRoot(): Promise<string> {

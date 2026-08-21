@@ -222,7 +222,7 @@ export function resetAllSettings(): void {
 /**
  * Notify settings subscribers of an external change that alters derived
  * values without touching `windeploykit.settings.v1` — device-local overrides
- * and active-school switches (lib/pluginSchoolOverrides.ts). Everything that
+ * and active-site switches (lib/pluginSiteOverrides.ts). Everything that
  * re-reads plug-in enablement (sidebar nav, router, App effects) already
  * listens via `subscribeSettings`, so those changes reuse the same channel.
  */

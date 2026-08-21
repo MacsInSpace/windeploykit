@@ -356,7 +356,7 @@ function Register-AppAria2Job {
     param(
         [Parameter(Mandatory)][string]$Gid,
         [Parameter(Mandatory)]$Plan,
-        # Tracker catalog row id (e.g. 'school-soe-win11-24h2-v2') — lets the OS
+        # Tracker catalog row id (e.g. 'site-soe-win11-24h2-v2') — lets the OS
         # images table match its rows to live transfers without name guessing
         # (aria2 row names are file paths / torrent info names, never the
         # manifest display string).
@@ -1894,7 +1894,7 @@ function Get-AppAria2TrackerCatalogPayload {
         oemIsos     = $oemIsoRows
         announceUrl = [string](Get-AppAria2JsonProp -Item $tracker -Name 'announceUrl')
         statsUrl       = [string](Get-AppAria2JsonProp -Item $tracker -Name 'statsUrl')
-        schoolStatsUrl = [string](Get-AppAria2JsonProp -Item $tracker -Name 'schoolStatsUrl')
+        siteStatsUrl = [string](Get-AppAria2JsonProp -Item $tracker -Name 'siteStatsUrl')
         trackerUrl  = [string](Get-AppAria2JsonProp -Item $tracker -Name 'manifestUrl')
         generatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
@@ -2177,7 +2177,7 @@ function Get-AppAria2TrackerCatalogPayload {
         drivers          = @($rows)
         announceUrl      = $catalogMeta['announceUrl']
         statsUrl         = $catalogMeta['statsUrl']
-        schoolStatsUrl   = $catalogMeta['schoolStatsUrl']
+        siteStatsUrl   = $catalogMeta['siteStatsUrl']
         trackerUrl       = $catalogMeta['trackerUrl']
         generatedAt      = $catalogMeta['generatedAt']
         acerCatalogAt      = if ($acerCatalog) { [string](Get-AppAria2JsonProp -Item $acerCatalog -Name 'fetchedAt') } else { $null }

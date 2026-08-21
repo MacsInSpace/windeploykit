@@ -50,7 +50,7 @@ export function Modal({
   // for onClose (e.g. `onCancel={closeDialog}` where closeDialog is defined in
   // the panel body), so `requestClose` gets a new identity on every parent
   // render. Keying this effect on it re-ran .focus() constantly while the
-  // parent was re-rendering — say, after a school switch, as queries settle —
+  // parent was re-rendering — say, after a site switch, as queries settle —
   // which yanked the caret back to the dialog's first field. Radio buttons
   // still toggled (a click commits their state without keeping focus), so it
   // presented as "only the text boxes and dropdown are dead".

@@ -8,7 +8,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
  * React children, so live values update while the tip is open.
  *
  * Rendered in a fixed-position layer above panel chrome so it can never be
- * clipped by the header's `overflow` or pushed under the school switcher.
+ * clipped by the header's `overflow` or pushed under the site switcher.
  */
 
 export interface InfoTipRow {

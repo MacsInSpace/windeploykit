@@ -61,7 +61,6 @@ const FETCH_SWITCH_AUDIT_BUNDLE_BATCH_TIMEOUT_SECS: u64 = 18_000;
 /// AireOS 3504: platform precheck + one slow show command (up to 90s) per diagnostic.
 const FETCH_WLC_CLI_TIMEOUT_SECS: u64 = 150;
 /// First GPO settings load may read Registry.pol + GPP XML over SMB.
-const GET_SCHOOL_GPO_REGISTRY_SUMMARY_TIMEOUT_SECS: u64 = 300;
 /// Microsoft SAML SSO + SP page can exceed 120s on slow links.
 const SERVICENOW_PLUGIN_TIMEOUT_SECS: u64 = 240;
 /// Host and Guest Site Build runs can legitimately take hours while Windows setup,
@@ -80,13 +79,10 @@ fn request_timeout_secs(cmd: &str) -> u64 {
         "FetchSwitchAuditBundle" => FETCH_SWITCH_AUDIT_BUNDLE_TIMEOUT_SECS,
         "FetchSwitchAuditBundleBatch" => FETCH_SWITCH_AUDIT_BUNDLE_BATCH_TIMEOUT_SECS,
         "FetchWlcCliOutput" => FETCH_WLC_CLI_TIMEOUT_SECS,
-        "GetSchoolGpoRegistrySummary" | "GetLocalDomainGpoRegistrySummary" | "GetCentralGpoRegistrySummary" => {
-            GET_SCHOOL_GPO_REGISTRY_SUMMARY_TIMEOUT_SECS
-        }
         "TestServiceNowPluginConnection"
         | "GetServiceNowMyRequests"
         | "GetServiceNowRequestDetail" => SERVICENOW_PLUGIN_TIMEOUT_SECS,
-        // Stages ~25 MB of Cisco IOS images over the school WAN; the default 120 s
+        // Stages ~25 MB of Cisco IOS images over the site WAN; the default 120 s
         // timeout would free the UI while the single-threaded sidecar is still blocked,
         // queueing every later command behind it.
         // Line-at-a-time config push: ~760 ms fixed overhead per line, so a 300-line
@@ -448,7 +444,7 @@ impl Sidecar {
             .arg("-File")
             .arg(&script);
         // Hide the console via CREATE_NO_WINDOW below — do not pass pwsh -WindowStyle;
-        // it is missing on several school pwsh builds and aborts before windeploykit-sidecar.ps1 runs.
+        // it is missing on several site pwsh builds and aborts before windeploykit-sidecar.ps1 runs.
         if let Some(root) = project_root {
             child_cmd.arg("-ProjectRoot").arg(root);
         }

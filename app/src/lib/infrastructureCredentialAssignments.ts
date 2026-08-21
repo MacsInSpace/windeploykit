@@ -1,9 +1,9 @@
-/** Per-school mapping from infrastructure probe id → saved SSH credential id. */
+/** Per-site mapping from infrastructure device id → saved SSH credential id. */
 
 const ASSIGNMENTS_KEY = "windeploykit.infrastructure.credentialAssignments.v1";
 
-type SchoolAssignments = Record<string, string>;
-type AssignmentMap = Record<string, SchoolAssignments>;
+type SiteAssignments = Record<string, string>;
+type AssignmentMap = Record<string, SiteAssignments>;
 
 function readMap(): AssignmentMap {
   if (typeof localStorage === "undefined") return {};
@@ -29,51 +29,54 @@ function writeMap(map: AssignmentMap): void {
   }
 }
 
-function schoolKey(schoolNumber: string): string {
-  return schoolNumber.padStart(4, "0");
+// Site ids are free-form (Site Profile owns the value), so the key is the trimmed
+// id as-is. The previous implementation zero-padded to four digits, which only
+// made sense for the numeric site ids this was extracted from.
+function siteKey(siteId: string): string {
+  return siteId.trim();
 }
 
 export function getCredentialAssignment(
-  schoolNumber: string,
+  siteId: string,
   deviceId: string,
 ): string | undefined {
   const map = readMap();
-  const id = map[schoolKey(schoolNumber)]?.[deviceId]?.trim();
+  const id = map[siteKey(siteId)]?.[deviceId]?.trim();
   return id || undefined;
 }
 
 export function setCredentialAssignment(
-  schoolNumber: string,
+  siteId: string,
   deviceId: string,
   credentialId: string | null | undefined,
 ): void {
   const map = readMap();
-  const key = schoolKey(schoolNumber);
-  const school = { ...(map[key] ?? {}) };
+  const key = siteKey(siteId);
+  const site = { ...(map[key] ?? {}) };
   const cred = credentialId?.trim();
   if (cred) {
-    school[deviceId] = cred;
+    site[deviceId] = cred;
   } else {
-    delete school[deviceId];
+    delete site[deviceId];
   }
-  if (Object.keys(school).length === 0) {
+  if (Object.keys(site).length === 0) {
     delete map[key];
   } else {
-    map[key] = school;
+    map[key] = site;
   }
   writeMap(map);
 }
 
-/** Drop assignments pointing at a deleted vault entry (all schools). */
+/** Drop assignments pointing at a deleted vault entry (all sites). */
 export function clearCredentialAssignmentsForId(credentialId: string): void {
   const target = credentialId.trim();
   if (!target) return;
   const map = readMap();
   let changed = false;
-  for (const sn of Object.keys(map)) {
-    const school = map[sn];
-    const next: SchoolAssignments = {};
-    for (const [deviceId, credId] of Object.entries(school)) {
+  for (const key of Object.keys(map)) {
+    const site = map[key];
+    const next: SiteAssignments = {};
+    for (const [deviceId, credId] of Object.entries(site)) {
       if (credId === target) {
         changed = true;
       } else {
@@ -81,9 +84,9 @@ export function clearCredentialAssignmentsForId(credentialId: string): void {
       }
     }
     if (Object.keys(next).length === 0) {
-      delete map[sn];
+      delete map[key];
     } else {
-      map[sn] = next;
+      map[key] = next;
     }
   }
   if (changed) writeMap(map);

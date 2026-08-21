@@ -1484,7 +1484,7 @@ export function ContentWorkspace({
                 <button type="button" style={tabBtn(imagesView === "oem")} onClick={() => setImagesView("oem")}>
                   OEM OS ({tracker?.oemIsos?.length ?? 0})
                 </button>
-                {(tracker?.statsUrl || tracker?.schoolStatsUrl) && (
+                {(tracker?.statsUrl || tracker?.siteStatsUrl) && (
                   <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 self-center">
                     {tracker.statsUrl && (
                       <a
@@ -1497,15 +1497,15 @@ export function ContentWorkspace({
                         DE tracker ↗
                       </a>
                     )}
-                    {tracker.schoolStatsUrl && (
+                    {tracker.siteStatsUrl && (
                       <a
-                        href={tracker.schoolStatsUrl}
+                        href={tracker.siteStatsUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="text-[11px]"
                         style={{ color: "var(--text2)" }}
                       >
-                        School tracker ↗
+                        Site tracker ↗
                       </a>
                     )}
                   </span>

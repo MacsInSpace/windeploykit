@@ -16,7 +16,7 @@ function Format-AppProcessArgumentList {
         Join process arguments into ONE pre-quoted string for Start-Process -ArgumentList.
         Start-Process joins an argument ARRAY with spaces WITHOUT quoting, so any spaced
         value — e.g. paths under the app data root ".../Application Support/Unofficial
-        School Manager/..." (macOS) or "...\AppData\Roaming\WinDeployKit\..."
+        WinDeployKit/..." (macOS) or "...\AppData\Roaming\WinDeployKit\..."
         (Windows) — splits into multiple arguments (0.4.0 field bug: RDP/SSH/aria2/PXE).
         Double-quoting spaced items survives both CommandLineToArgvW (Windows) and .NET's
         Unix argument parser. Use for EVERY Start-Process whose arguments can contain a

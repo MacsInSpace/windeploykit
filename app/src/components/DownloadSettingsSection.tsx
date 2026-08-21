@@ -9,7 +9,7 @@ import {
 } from "../lib/downloadPath";
 import {
   SETTING_DOWNLOAD_DIR,
-  SETTING_DOWNLOAD_SCHOOL_SUBDIR,
+  SETTING_DOWNLOAD_SITE_SUBDIR,
   SETTING_IMAGE_LIBRARY_DIR,
 } from "../lib/downloadSettings";
 import {
@@ -22,17 +22,17 @@ import {
   setSetting,
   subscribeSettings,
 } from "../lib/settings";
-import { useSchoolNumberForQueries } from "../state/appStore";
+import { useSiteIdForQueries } from "../state/appStore";
 
 export function DownloadSettingsSection() {
   const [, setTick] = useState(0);
   useEffect(() => subscribeSettings(() => setTick((n) => n + 1)), []);
 
-  const schoolNumber = useSchoolNumberForQueries();
+  const siteId = useSiteIdForQueries();
   const configuredDir = String(getSetting(SETTING_DOWNLOAD_DIR)).trim();
-  const schoolSubdir = Boolean(getSetting(SETTING_DOWNLOAD_SCHOOL_SUBDIR));
+  const siteSubdir = Boolean(getSetting(SETTING_DOWNLOAD_SITE_SUBDIR));
   const dirSource = getSettingSource(SETTING_DOWNLOAD_DIR);
-  const subdirSource = getSettingSource(SETTING_DOWNLOAD_SCHOOL_SUBDIR);
+  const subdirSource = getSettingSource(SETTING_DOWNLOAD_SITE_SUBDIR);
 
   const imageRoot = String(getSetting(SETTING_IMAGE_LIBRARY_DIR)).trim();
   const imageRootSource = getSettingSource(SETTING_IMAGE_LIBRARY_DIR);
@@ -46,8 +46,8 @@ export function DownloadSettingsSection() {
   }, []);
 
   useEffect(() => {
-    void formatConfiguredDownloadDirPreview(schoolNumber ?? undefined).then(setPreview);
-  }, [configuredDir, schoolSubdir, schoolNumber]);
+    void formatConfiguredDownloadDirPreview(siteId ?? undefined).then(setPreview);
+  }, [configuredDir, siteSubdir, siteId]);
 
   // Image library follows the main Downloads folder unless explicitly overridden,
   // so re-resolve the preview and re-push to the sidecar when either changes.
@@ -143,22 +143,22 @@ export function DownloadSettingsSection() {
           <input
             type="checkbox"
             className="mt-0.5"
-            checked={schoolSubdir}
+            checked={siteSubdir}
             onChange={(e) => {
               const checked = e.target.checked;
-              setSetting(SETTING_DOWNLOAD_SCHOOL_SUBDIR, checked);
+              setSetting(SETTING_DOWNLOAD_SITE_SUBDIR, checked);
               if (checked) {
-                void getConfiguredDownloadBaseDir(schoolNumber ?? undefined).then((dir) =>
+                void getConfiguredDownloadBaseDir(siteId ?? undefined).then((dir) =>
                   ensureDownloadDir(dir),
                 );
               }
             }}
           />
           <span style={{ color: "var(--text2)" }}>
-            <span style={{ color: "var(--text)" }}>School subfolder</span>
+            <span style={{ color: "var(--text)" }}>Site subfolder</span>
             {" — "}
-            append the active school number (e.g.{" "}
-            <span className="mono">5573</span>) so files land in a per-school folder
+            append the active site id (e.g.{" "}
+            <span className="mono">5573</span>) so files land in a per-site folder
             when you change context. The subfolder is created automatically if missing.
             {subdirSource === "override" && (
               <span className="mono ml-1 text-[9px] uppercase" style={{ color: "var(--accent)" }}>
@@ -170,10 +170,10 @@ export function DownloadSettingsSection() {
 
         <div className="text-[10.5px]" style={{ color: "var(--text3)" }}>
           Effective path: <span className="mono text-[11px]" style={{ color: "var(--text2)" }}>{preview}</span>
-          {schoolSubdir && !schoolNumber && (
+          {siteSubdir && !siteId && (
             <span style={{ color: "var(--amber)" }}>
               {" "}
-              (no school context — subfolder skipped until you connect)
+              (no site context — subfolder skipped until you connect)
             </span>
           )}
         </div>

@@ -30,13 +30,13 @@ export const SETTING_IMAGE_LIBRARY_DIR = defineSetting({
   hidden: true,
 });
 
-/** When enabled, append the active school number (e.g. 5573) under the base folder. */
-export const SETTING_DOWNLOAD_SCHOOL_SUBDIR = defineSetting({
-  id: "download.schoolSubdir",
+/** When enabled, append the active site id (e.g. 5573) under the base folder. */
+export const SETTING_DOWNLOAD_SITE_SUBDIR = defineSetting({
+  id: "download.siteSubdir",
   group: "Downloads",
-  label: "School subfolder",
+  label: "Site subfolder",
   description:
-    "Save into a school-number subfolder under the default folder (e.g. ~/Downloads/5573). Follows your current school context.",
+    "Save into a site-id subfolder under the default folder (e.g. ~/Downloads/5573). Follows your current site context.",
   type: "boolean",
   defaultValue: false,
   hidden: true,

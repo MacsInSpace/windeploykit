@@ -41,7 +41,7 @@ After changing `run.ps1`, `run-smb-test.ps1`, or overlay: **Stop → Start field
 
 The password is **masked in logs** (`***`); the cred is served over HTTP and `curl`-able on the VLAN — acceptable only because it is a low-value throwaway account. No `fieldiso-smb-test.cred` present → v5 falls back to guest only (prior behaviour).
 
-**Not on the main PXE menu** — only in **School Manager boot ISO catalog** → **Lab** → **FieldIso SMB test (macOS share)**. Optional regression harness; reversal steps in `docs/plugins/site-build/AGENT_DISCUSSIONS_SITE_BUILD_NETBOOT.md`.
+**Not on the main PXE menu** — only in **WinDeployKit boot ISO catalog** → **Lab** → **FieldIso SMB test (macOS share)**. Optional regression harness; reversal steps in `docs/plugins/site-build/AGENT_DISCUSSIONS_SITE_BUILD_NETBOOT.md`.
 
 **Stop → Start field PXE** after sidecar changes (regens `ISOs/menu.ipxe` + overlay v12).
 

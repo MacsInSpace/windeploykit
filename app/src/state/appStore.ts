@@ -1,7 +1,7 @@
 /**
  * Minimal app state for WinDeployKit.
  *
- * The USM original was an 815-line store built around school context, LDAP
+ * The USM original was an 815-line store built around site context, LDAP
  * sessions and no sign-in. None of that applies here: WinDeployKit has no
  * directory session and no sign-in gate. What survives is the Site Profile —
  * the small set of site-wide values task sequences and the deploy share need.
@@ -63,6 +63,6 @@ export function useSiteProfile(): SiteProfile {
  * Site id used to key per-site caches.
  * @deprecated Kept for ported call sites — prefer `useSiteProfile()`.
  */
-export function useSchoolNumberForQueries(): string | null {
+export function useSiteIdForQueries(): string | null {
   return useAppState().siteProfile.siteId;
 }

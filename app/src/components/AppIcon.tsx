@@ -26,7 +26,7 @@ function iconKind(name: string): IconKind {
   if (token.includes("wireless") || token.includes("wifi")) return "wireless";
   if (token.includes("search")) return "search";
   if (token.includes("mail") || token.includes("notify")) return "mail";
-  if (token.includes("school")) return "school";
+  if (token.includes("site")) return "site";
   if (token.includes("cloud")) return "cloud";
   if (token.includes("bookmark")) return "bookmark";
   if (token.includes("document") || token.includes("log")) return "policy";
@@ -58,7 +58,7 @@ const PATHS = {
   mobile: <><rect x="7" y="2" width="10" height="20" rx="2" /><path d="M11 18h2" /></>,
   switch: <><rect x="3" y="6" width="18" height="12" rx="2" /><path d="M7 10h.01M10 10h.01M13 10h.01M16 10h.01M7 14h4M17 14h-3M16 12l2 2-2 2M8 12l-2 2 2 2" /></>,
   branch: <><circle cx="6" cy="5" r="2" /><circle cx="18" cy="5" r="2" /><circle cx="12" cy="19" r="2" /><path d="M6 7v3c0 2 1 3 3 3h3M18 7v3c0 2-1 3-3 3h-3v4" /></>,
-  school: <><path d="m3 10 9-6 9 6-9 6-9-6Z" /><path d="M7 13.5V19h10v-5.5M21 10v6" /></>,
+  site: <><path d="m3 10 9-6 9 6-9 6-9-6Z" /><path d="M7 13.5V19h10v-5.5M21 10v6" /></>,
   book: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5v-16ZM20 5.5A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5v-16Z" /></>,
   building: <><path d="M4 21V6l8-3 8 3v15M8 9h.01M12 9h.01M16 9h.01M8 13h.01M12 13h.01M16 13h.01M10 21v-4h4v4" /></>,
   cloud: <path d="M17.5 19H6.7A4.7 4.7 0 0 1 6 9.65 6 6 0 0 1 17.4 8a4.5 4.5 0 0 1 .1 9Z" />,

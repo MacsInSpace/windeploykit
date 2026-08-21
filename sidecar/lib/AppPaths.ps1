@@ -47,10 +47,10 @@ function Get-AppPluginDir {
     New-AppDir (Join-Path (Get-AppDataRoot) (Join-Path 'plugins' $Plugin))
 }
 
-function Get-AppSchoolDir {
-    param([string]$SchoolId = 'default')
-    $key = if ([string]::IsNullOrWhiteSpace($SchoolId)) { 'default' } else { $SchoolId.Trim() }
-    New-AppDir (Join-Path (Get-AppDataRoot) (Join-Path 'school' $key))
+function Get-AppSiteDir {
+    param([string]$SiteId = 'default')
+    $key = if ([string]::IsNullOrWhiteSpace($SiteId)) { 'default' } else { $SiteId.Trim() }
+    New-AppDir (Join-Path (Get-AppDataRoot) (Join-Path 'site' $key))
 }
 
 function Get-AppCacheDir {

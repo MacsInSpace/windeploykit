@@ -11,7 +11,7 @@
  *  - exposes `refetch()` for the panel's manual Refresh button.
  *
  * `enabled` defers fetching until pre-conditions are met (e.g.,
- * schoolNumber known). When disabled, the hook reads any cached
+ * siteId known). When disabled, the hook reads any cached
  * value but never triggers a fetch.
  */
 

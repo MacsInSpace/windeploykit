@@ -122,8 +122,39 @@ An extraction of the **Netboot** and **Downloads** plug-ins from a
 school-IT-specific internal tool, made generic, to replace the retired Microsoft
 Deployment Toolkit. See `README.md` for the product-facing story.
 
-The extraction is done. The generic-isation is done. What remains is finishing
-the UI and rewriting the WinPE client.
+The extraction is done. What remains is finishing the UI and rewriting the WinPE
+client.
+
+**Generic-isation of the school-directory data model completed 2026-08-21.** The
+netboot and downloads plug-ins were generic from the start, but the infrastructure
+credential layer that came across with them still carried the upstream school model:
+381 `school` references, 124 of them `schoolNumber`. All removed —
+
+- `schoolNumber` → **`siteId`** everywhere. The store already returned
+  `siteProfile.siteId`, so this was naming, not behaviour. The `{{SN}}` task-sequence
+  token is now **`{{SITE}}`**, matching what section 5 says Site Profile will supply.
+- **Deleted** `app/src/lib/infrastructureSsh.ts` and `infrastructureProbeTypes.ts` —
+  school network-gear management (core/edge switches, WLC, admin printers, an
+  internal catalogue subnet). Every export was dead outside its own module, and none
+  of it is Windows deployment.
+- The credential vault seeded two org-issued accounts by naming convention. It now
+  seeds **one generic site default** (`default-<site>-admin`), with no name or
+  password implied. Both TS and sidecar sides moved together — they share the id
+  shape, so they must not drift.
+- Removed dead upstream subsystems that carried the vocabulary: the school-init
+  bootstrap ladder in `Ipc.ps1` (nothing emitted any phase), the group-membership
+  param parser in `SidecarParams.ps1` (no callers), and GPO command timeouts in
+  `sidecar.rs` (no such handler exists here).
+- Product-name and identity leaks fixed: `Unofficial-School-Manager` User-Agent,
+  `SCHOOL_MANAGER_PXE_*` env vars, and "Reinstall School Manager" error strings.
+
+The only remaining `school` in the tree is **"Jamf School"** — a real product name in
+a cache description, correctly left alone.
+
+> Two persisted keys changed shape, and the project's convention is a clean cut-over,
+> no migration: the `download.schoolSubdir` setting id, and default credential ids
+> (`default-0000-school-admin` → `default-<site>-admin`). Existing local values are
+> ignored rather than migrated.
 
 ---
 
@@ -222,6 +253,54 @@ the UI and rewriting the WinPE client.
 - The WinPE client rewrite (§2.1)
 - Site Profile (§5) — several TODOs block on it
 - Boot-image creation UI over the existing wimlib overlay engine
+
+---
+
+## 3b. Where data lives — the storage split (enforced)
+
+**Craig, 2026-08-21:** boot images and the TFTP root may live in central app data;
+**large ISOs and drivers go wherever the user sets the Deploy$ base.**
+
+| Category | Location | Why |
+| --- | --- | --- |
+| TFTP root, boot WIMs, `wimboot`, `snponly.efi`, configs, logs | **App data** — `~/Library/Application Support/WinDeployKit` / `%LOCALAPPDATA%\WinDeployKit` | Small, fixed, machine-local. Must be where the services expect it |
+| ISOs, imageable/SOE WIMs, driver packs, download staging | **Image library = the Deploy$ base** — user-chosen, default `~/Public/WinDeployKit` (macOS) / `~/Downloads/WinDeployKit` (Windows) | Multi-GB. Must never fill the system drive |
+
+### The rule
+
+> **Nothing multi-GB may resolve into the app-data store — including on a fallback
+> path.** The store is on the system drive. If the image library is unavailable,
+> fall back to `Get-AppImageLibraryDefaultRoot` (which is deliberately off the
+> app-data tree), never to the plug-in store, and **log it**.
+
+This is not theoretical. USM filled an SSD by writing a **~60 GB WIM to
+`%LOCALAPPDATA%`** with no choice of location
+(`docs/core/app-data/AGENT_NOTES_APP_DATA_LAYOUT.md` in that repo). Two fallbacks
+here had the same shape and were fixed on 2026-08-21:
+
+- `Get-AppAria2EffectiveDownloadDir` defaulted to `<store>/plugins/aria2/downloads`
+- `Get-AppPxeBootLayoutPaths` routed `isoDir`/`imageWimsDir` into `<store>/http/…`
+  when the image library failed to resolve — behind a **bare `catch { }`**, so it
+  was silent
+
+Both now resolve to the image library. Verified by resolving all nine paths and
+asserting which side of the boundary each lands on; re-run that check after touching
+either resolver.
+
+### The spaces trap (carried from USM, keep it working)
+
+`~/Library/Application Support/…` contains a space, and **`Start-Process
+-ArgumentList` joins an argument array with spaces WITHOUT quoting**, so every
+app-data path splits into multiple arguments. USM shipped this bug to the field in
+aria2, dnsmasq, RDP/SSH launch and folder reveals.
+
+- Always: `Start-Process … -ArgumentList (Format-AppProcessArgumentList -Arguments @(…))`
+  (`sidecar/lib/AppPlatform.ps1`). **Never pass a raw array.**
+- Need exact argv: `Start-AppNativeProcess` (`ProcessStartInfo.ArgumentList`).
+- `& tool $path` is safe — the bug is specific to `Start-Process`'s array join.
+
+Both live call sites (aria2 daemon, dnsmasq) use the helper and were verified
+against a spaced path.
 
 ---
 

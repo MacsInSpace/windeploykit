@@ -118,20 +118,23 @@ function Get-AppInfraSshPlainPassword {
 function Test-AppInfraSshDefaultCredentialId {
     param([Parameter(Mandatory)][string]$Id)
     $safe = Normalize-AppInfraSshCredentialId -Id $Id
-    return $safe -match '^default-\d{4}-(?:school-admin|wlc-monitor)$'
+    return $safe -match '^default-.+-admin$'
 }
 
 function Get-AppInfraSshDefaultCredentialSpecs {
-    param([Parameter(Mandatory)][string]$SchoolNumber)
-    $sn = $SchoolNumber.Trim().PadLeft(4, '0')
+    <#
+        One generic per-site default, used for devices with no explicit credential
+        assignment. The upstream original seeded two org-issued accounts derived
+        from a site-id naming convention; WinDeployKit has no such convention, so the
+        technician names the account and supplies the password. Never seed a password
+        here - see AGENT_NOTES.md section 5.
+    #>
+    param([Parameter(Mandatory)][string]$SiteId)
+    $site = $SiteId.Trim()
     @(
         [PSCustomObject]@{
-            id    = "default-$sn-school-admin"
-            label = "${sn}SchoolAdmin"
-        }
-        [PSCustomObject]@{
-            id    = "default-$sn-wlc-monitor"
-            label = "${sn}WLCMonitor"
+            id    = "default-$site-admin"
+            label = "$site admin"
         }
     )
 }
@@ -161,9 +164,6 @@ function Get-AppInfraSshCredentialLoginName {
     if (-not [string]::IsNullOrWhiteSpace($labelText)) {
         return $labelText.Trim()
     }
-    if ($SafeId -match '^default-\d{4}-(?:school-admin|wlc-monitor)$') {
-        return $null
-    }
     return $null
 }
 
@@ -179,25 +179,25 @@ function Get-AppInfraSshCredentialLoginNameById {
     Get-AppInfraSshCredentialLoginName -Item $item -SafeId $safeId -Label ([string]$item.label)
 }
 
-function Get-AppInfraSshCredentialSchoolNumber {
+function Get-AppInfraSshCredentialSiteId {
     param(
         $Item,
         [Parameter(Mandatory)][string]$SafeId
     )
-    $rawSn = Get-AppInfraSshIndexProp -Item $Item -Name 'schoolNumber'
-    if (-not [string]::IsNullOrWhiteSpace([string]$rawSn)) {
-        return ([string]$rawSn).Trim().PadLeft(4, '0')
+    $raw = Get-AppInfraSshIndexProp -Item $Item -Name 'siteId'
+    if (-not [string]::IsNullOrWhiteSpace([string]$raw)) {
+        return ([string]$raw).Trim()
     }
-    if ($SafeId -match '^default-(\d{4})-') {
+    if ($SafeId -match '^default-(.+)-admin$') {
         return $Matches[1]
     }
     return $null
 }
 
 function Ensure-AppInfraSshDefaultCredentials {
-    param([Parameter(Mandatory)][string]$SchoolNumber)
-    $sn = $SchoolNumber.Trim().PadLeft(4, '0')
-    $specs = Get-AppInfraSshDefaultCredentialSpecs -SchoolNumber $sn
+    param([Parameter(Mandatory)][string]$SiteId)
+    $sn = $SiteId.Trim()
+    $specs = Get-AppInfraSshDefaultCredentialSpecs -SiteId $sn
     $index = @(Read-AppInfraSshIndex)
     $now = (Get-Date).ToUniversalTime().ToString('o')
     $changed = $false
@@ -210,10 +210,10 @@ function Ensure-AppInfraSshDefaultCredentials {
                 loginName    = [string]$spec.label
                 updatedAt    = $now
                 isDefault    = $true
-                schoolNumber = $sn
+                siteId = $sn
             }
             $changed = $true
-        } elseif ([string]::IsNullOrWhiteSpace([string](Get-AppInfraSshIndexProp -Item $match -Name 'schoolNumber'))) {
+        } elseif ([string]::IsNullOrWhiteSpace([string](Get-AppInfraSshIndexProp -Item $match -Name 'siteId'))) {
             $index = foreach ($item in $index) {
                 if ([string]$item.id -eq $spec.id) {
                     $itemUpdatedAt = Get-AppInfraSshIndexProp -Item $item -Name 'updatedAt'
@@ -225,7 +225,7 @@ function Ensure-AppInfraSshDefaultCredentials {
                         loginName    = [string]$itemLogin
                         updatedAt    = if ($itemUpdatedAt) { [string]$itemUpdatedAt } else { $now }
                         isDefault    = $true
-                        schoolNumber = $sn
+                        siteId = $sn
                     }
                 } else {
                     $item
@@ -236,7 +236,7 @@ function Ensure-AppInfraSshDefaultCredentials {
     }
     if ($changed) {
         Write-AppInfraSshIndex -Items $index
-        Write-SidecarLog "Infra SSH default credential index ensured for school $sn"
+        Write-SidecarLog "Infra SSH default credential index ensured for site $sn"
     }
 }
 
@@ -251,11 +251,11 @@ function Clear-AppInfraSshCredentialPassword {
 }
 
 function Get-AppInfraSshCredentials {
-    param([string]$SchoolNumber)
+    param([string]$SiteId)
 
     $filterSn = $null
-    if (-not [string]::IsNullOrWhiteSpace($SchoolNumber)) {
-        $filterSn = $SchoolNumber.Trim().PadLeft(4, '0')
+    if (-not [string]::IsNullOrWhiteSpace($SiteId)) {
+        $filterSn = $SiteId.Trim().PadLeft(4, '0')
     }
 
     $index = Read-AppInfraSshIndex
@@ -269,7 +269,7 @@ function Get-AppInfraSshCredentials {
             continue
         }
 
-        $credSn = Get-AppInfraSshCredentialSchoolNumber -Item $item -SafeId $safeId
+        $credSn = Get-AppInfraSshCredentialSiteId -Item $item -SafeId $safeId
         if ($filterSn -and $credSn -ne $filterSn) { continue }
 
         $path = Get-AppInfraSshCredentialPath -Id $safeId
@@ -284,7 +284,7 @@ function Get-AppInfraSshCredentials {
             updatedAt    = [string](Get-AppInfraSshIndexProp -Item $item -Name 'updatedAt')
             configured   = (Test-Path -LiteralPath $path)
             isDefault    = $isDefault
-            schoolNumber = $credSn
+            siteId = $credSn
         })
     }
     $out.ToArray()
@@ -293,7 +293,7 @@ function Get-AppInfraSshCredentials {
 function Save-AppInfraSshCredential {
     param(
         [string]$Id,
-        [string]$SchoolNumber,
+        [string]$SiteId,
         [Parameter(Mandatory)][string]$Label,
         [string]$PlainPassword,
         [string]$LoginName
@@ -311,17 +311,17 @@ function Save-AppInfraSshCredential {
 
     $credSn = $null
     if (Test-AppInfraSshDefaultCredentialId -Id $safeId) {
-        $credSn = Get-AppInfraSshCredentialSchoolNumber -Item $null -SafeId $safeId
-    } elseif (-not [string]::IsNullOrWhiteSpace($SchoolNumber)) {
-        $credSn = $SchoolNumber.Trim().PadLeft(4, '0')
+        $credSn = Get-AppInfraSshCredentialSiteId -Item $null -SafeId $safeId
+    } elseif (-not [string]::IsNullOrWhiteSpace($SiteId)) {
+        $credSn = $SiteId.Trim().PadLeft(4, '0')
     } else {
         $existing = $index | Where-Object { [string]$_.id -eq $safeId } | Select-Object -First 1
         if ($existing) {
-            $credSn = Get-AppInfraSshCredentialSchoolNumber -Item $existing -SafeId $safeId
+            $credSn = Get-AppInfraSshCredentialSiteId -Item $existing -SafeId $safeId
         }
     }
     if (-not $credSn -and -not (Test-AppInfraSshDefaultCredentialId -Id $safeId)) {
-        throw 'SetInfraSshCredential: schoolNumber is required for site-specific credentials.'
+        throw 'SetInfraSshCredential: siteId is required for site-specific credentials.'
     }
 
     $existing = $index | Where-Object { [string]$_.id -eq $safeId } | Select-Object -First 1
@@ -358,7 +358,7 @@ function Save-AppInfraSshCredential {
                 loginName    = $loginTrim
                 updatedAt    = $now
                 isDefault    = [bool]$isDefault
-                schoolNumber = $credSn
+                siteId = $credSn
             }
         } else {
             $item
@@ -371,19 +371,19 @@ function Save-AppInfraSshCredential {
             loginName    = $loginTrim
             updatedAt    = $now
             isDefault    = $false
-            schoolNumber = $credSn
+            siteId = $credSn
         }
     }
     Write-AppInfraSshIndex -Items $next
-    Write-SidecarLog "Infra credential saved: $labelTrim ($safeId) school=$credSn login=$loginTrim"
-    [PSCustomObject]@{ id = $safeId; label = $labelTrim; loginName = $loginTrim; updatedAt = $now; schoolNumber = $credSn }
+    Write-SidecarLog "Infra credential saved: $labelTrim ($safeId) site=$credSn login=$loginTrim"
+    [PSCustomObject]@{ id = $safeId; label = $labelTrim; loginName = $loginTrim; updatedAt = $now; siteId = $credSn }
 }
 
 function Remove-AppInfraSshCredential {
     param([Parameter(Mandatory)][string]$Id)
     $safeId = Normalize-AppInfraSshCredentialId -Id $Id
     if (Test-AppInfraSshDefaultCredentialId -Id $safeId) {
-        throw 'Default school credentials cannot be deleted — clear the password instead.'
+        throw 'Default site credentials cannot be deleted — clear the password instead.'
     }
     $path = Get-AppInfraSshCredentialPath -Id $safeId
     if (Test-Path -LiteralPath $path) {

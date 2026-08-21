@@ -266,7 +266,7 @@ function Get-AppPxeBootTaskSequencePublishContext {
         TODO(Site Profile): back these with the Site Profile store. Until it
         exists every value is $null, which makes the token expansion fail loudly
         rather than publishing a wrong-but-plausible value.
-        The USM original sourced these from Get School Variables and fell back to
+        The USM original sourced these from the Site Profile and fell back to
         two hardcoded department bench passwords — both removed for WinDeployKit.
     #>
     $ctx = @{

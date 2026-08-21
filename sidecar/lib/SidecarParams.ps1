@@ -49,35 +49,3 @@ function Get-AppSidecarParamFirst {
     return $null
 }
 
-function Read-AppSchoolGroupMembershipSidecarParams {
-    <#
-    .SYNOPSIS
-        Parse AddUserToSchoolGroups / RemoveUserFromSchoolGroups sidecar params.
-    #>
-    param($Params)
-
-    $loginRaw = Get-AppSidecarParam -Params $Params -Name 'login'
-    $login = if ($null -ne $loginRaw) { [string]$loginRaw } else { $null }
-    $memberDnRaw = Get-AppSidecarParamFirst -Params $Params -Names @('memberDn', 'memberDN', 'userDn', 'userDN')
-    $memberDn = if ($null -ne $memberDnRaw) { [string]$memberDnRaw } else { $null }
-    $presetRaw = Get-AppSidecarParam -Params $Params -Name 'preset'
-    $preset = if ($null -ne $presetRaw) { [string]$presetRaw } else { $null }
-    $suffixesRaw = Get-AppSidecarParam -Params $Params -Name 'suffixes'
-    # [string[]](...) — not @(...) — so a single suffix/name does not collapse or unwrap wrong.
-    $suffixes = if ($null -ne $suffixesRaw) { [string[]]($suffixesRaw) } else { $null }
-    $groupNamesRaw = Get-AppSidecarParam -Params $Params -Name 'groupNames'
-    $groupNames = if ($null -ne $groupNamesRaw) { [string[]]($groupNamesRaw) } else { $null }
-    $groupDnRaw = Get-AppSidecarParamFirst -Params $Params -Names @('groupDn', 'groupDN')
-    $groupDn = if ($null -ne $groupDnRaw) { [string]$groupDnRaw } else { $null }
-
-    @{
-        Login                 = $login
-        MemberDn              = $memberDn
-        Preset                = $preset
-        Suffixes              = $suffixes
-        GroupNames            = $groupNames
-        GroupDn               = $groupDn
-        DryRun                = [bool](Get-AppSidecarParam -Params $Params -Name 'dryRun')
-        SkipMembershipCheck   = [bool](Get-AppSidecarParam -Params $Params -Name 'skipMembershipCheck')
-    }
-}

@@ -13,11 +13,11 @@ Shipped in the app installer via `prepare-bundle-deps.ps1`.
 
 This plugin runs on both platforms, but the TFTP host flow is intentionally different:
 
-| Area | Windows (School Manager on Windows) | macOS (School Manager on Mac) |
+| Area | Windows (WinDeployKit on Windows) | macOS (WinDeployKit on Mac) |
 |------|--------------------------------------|--------------------------------|
-| TFTP backend | Uses **Tftpd64** (downloaded by `EnsurePxeBootTftpd64`, staged under store `binaries/tftpd64/`). School Manager starts `tftpd64.exe` hidden and writes `Tftpd32.ini` from current plugin settings. | Uses bundled **dnsmasq** (`vendor/binaries/pxe-macos/dnsmasq-universal`) and generated `dnsmasq-tftp.conf` in TFTP-only mode. |
+| TFTP backend | Uses **Tftpd64** (downloaded by `EnsurePxeBootTftpd64`, staged under store `binaries/tftpd64/`). WinDeployKit starts `tftpd64.exe` hidden and writes `Tftpd32.ini` from current plugin settings. | Uses bundled **dnsmasq** (`vendor/binaries/pxe-macos/dnsmasq-universal`) and generated `dnsmasq-tftp.conf` in TFTP-only mode. |
 | Privilege model | Some operations require elevation (for example local account creation and firewall changes). | Starting TFTP on UDP 69 requires macOS admin elevation when services are started. TFTP files live in `~/Library/Application Support/WinDeployKit/plugins/pxe-boot/tftp`; elevation grants traverse on the `~/Library` → `pxe-boot` path so root dnsmasq can read them (see `AGENT_NOTES_PXE_BOOT.md`). |
-| Firewall/network prep | School Manager attempts to create Windows Firewall allow rules for UDP 69, the configured HTTP port, and `tftpd64.exe`. | No Windows-style firewall automation path; ensure host firewall allows local TFTP/HTTP traffic used by Netboot. |
+| Firewall/network prep | WinDeployKit attempts to create Windows Firewall allow rules for UDP 69, the configured HTTP port, and `tftpd64.exe`. | No Windows-style firewall automation path; ensure host firewall allows local TFTP/HTTP traffic used by Netboot. |
 | ImageDeployer overlay credentials | Throwaway SMB credential uses local SAM format **`<COMPUTERNAME>\<user>`**. If the throwaway user cannot be created (for example not elevated), overlay auth file publishing is skipped and logged. | Throwaway SMB credential uses **`WORKGROUP\<user>`**. macOS SMB serving is also sensitive to TCC-protected folders (Downloads/Desktop/Documents). |
 | Secure Boot Option 67 | Use `x86_64-sb/shimx64.efi`. | Same as Windows: `x86_64-sb/shimx64.efi`. |
 
@@ -33,7 +33,7 @@ cp src/bin-x86_64-efi/snponly.efi /path/to/windeploykit/sidecar/pxe/snponly.efi
 
 Legacy builds used HTTP-only chain — clients skip the local menu when HTTP is off or unreachable.
 
-On menu regen, School Manager also copies **`http/boot.ipxe` → `tftp/boot.ipxe`** so TFTP-first snponly can load the local menu without HTTP.
+On menu regen, WinDeployKit also copies **`http/boot.ipxe` → `tftp/boot.ipxe`** so TFTP-first snponly can load the local menu without HTTP.
 
 ## wimboot
 
@@ -42,7 +42,7 @@ pwsh -File ./scripts/fetch-wimboot.ps1
 git add vendor/binaries/pxe-wimboot/ sidecar/pxe/wimboot
 ```
 
-On **Start Imaging Services** (and when Netboot is enabled), School Manager syncs bundled files into the user store when the bundle hash changes, and writes `http/boot.ipxe` + **`http/ISOs/menu.ipxe`** (when ISOs + FieldIso present) from config.
+On **Start Imaging Services** (and when Netboot is enabled), WinDeployKit syncs bundled files into the user store when the bundle hash changes, and writes `http/boot.ipxe` + **`http/ISOs/menu.ipxe`** (when ISOs + FieldIso present) from config.
 
 ## x86_64-sb (Secure Boot)
 

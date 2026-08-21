@@ -1,8 +1,8 @@
 # Plug-in enablement gates -- generic enabledPlugins map from ApplyRuntimeConfig.
 #
-# The UI resolves per-school overrides and pushes one map of pluginId -> bool on every
-# settings/school change (see docs/core/plugins/AGENT_NOTES_PLUGIN_ARCHITECTURE.md).
-# The sidecar never sees per-school logic; it stores the resolved booleans here.
+# The UI resolves per-site overrides and pushes one map of pluginId -> bool on every
+# settings/site change (see docs/core/plugins/AGENT_NOTES_PLUGIN_ARCHITECTURE.md).
+# The sidecar never sees per-site logic; it stores the resolved booleans here.
 #
 # Proactive plug-ins with their own transition side effects (Netboot store init, aria2
 # store init) keep their Set-App*RuntimeEnabled helpers; Handle-ApplyRuntimeConfig calls

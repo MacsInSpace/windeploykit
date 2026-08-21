@@ -5,11 +5,11 @@ import { CredentialSelect } from "./CredentialSelect";
 import { sidecar, SidecarError } from "../lib/ipc";
 import {
   isDefaultInfraCredentialId,
-  filterCredentialsForSchool,
-  schoolDefaultCredentials,
-  sortCredentialsForSchool,
-  getSiteSwitchDefaultCredentialId,
-  setSiteSwitchDefaultCredentialId,
+  filterCredentialsForSite,
+  siteDefaultCredentials,
+  sortCredentialsForSite,
+  getSiteDefaultCredentialId,
+  setSiteDefaultCredentialId,
 } from "../lib/infrastructureDefaultCredentials";
 import { clearCredentialAssignmentsForId } from "../lib/infrastructureCredentialAssignments";
 import { resolveInfraCredentialLoginName } from "../lib/infrastructureCredentials";
@@ -26,7 +26,7 @@ const LOCAL_ADMIN_USERNAME_PLACEHOLDER = "Local admin username (e.g. st00447)";
 interface InfrastructureCredentialsOverlayProps {
   open: boolean;
   onClose: () => void;
-  schoolNumber?: string;
+  siteId?: string;
   onVaultChange?: () => void;
 }
 
@@ -133,7 +133,7 @@ function CredentialPasswordRow({
 export function InfrastructureCredentialsOverlay({
   open,
   onClose,
-  schoolNumber,
+  siteId,
   onVaultChange,
 }: InfrastructureCredentialsOverlayProps) {
   const [credentials, setCredentials] = useState<InfraSshCredentialSummary[]>([]);
@@ -154,13 +154,13 @@ export function InfrastructureCredentialsOverlay({
     try {
       const [infraResult, localResult] = await Promise.all([
         sidecar.invoke<ListInfraSshCredentialsResult>("ListInfraSshCredentials", {
-          schoolNumber,
+          siteId,
         }),
         sidecar.invoke<LocalMachineCredentialStatus>("GetLocalMachineCredential", {}),
       ]);
-      const sorted = sortCredentialsForSchool(
-        filterCredentialsForSchool(infraResult.credentials ?? [], schoolNumber),
-        schoolNumber,
+      const sorted = sortCredentialsForSite(
+        filterCredentialsForSite(infraResult.credentials ?? [], siteId),
+        siteId,
       );
       setCredentials(sorted);
       setStorePath(infraResult.storePath ?? "");
@@ -175,15 +175,15 @@ export function InfrastructureCredentialsOverlay({
     } finally {
       setLoading(false);
     }
-  }, [schoolNumber]);
+  }, [siteId]);
 
   useEffect(() => {
     if (open) void reload();
   }, [open, reload]);
 
-  const schoolDefaults = useMemo(
-    () => schoolDefaultCredentials(credentials, schoolNumber),
-    [credentials, schoolNumber],
+  const siteDefaults = useMemo(
+    () => siteDefaultCredentials(credentials, siteId),
+    [credentials, siteId],
   );
   const customCredentials = useMemo(
     // builtIn = app-provided virtual entries (signed-in DE account) — offered in
@@ -191,8 +191,8 @@ export function InfrastructureCredentialsOverlay({
     () => credentials.filter((c) => !isDefaultInfraCredentialId(c.id) && !c.builtIn),
     [credentials],
   );
-  const siteSwitchDefaultId = schoolNumber
-    ? getSiteSwitchDefaultCredentialId(schoolNumber)
+  const siteSwitchDefaultId = siteId
+    ? getSiteDefaultCredentialId(siteId)
     : undefined;
 
   const savePassword = async (cred: InfraSshCredentialSummary) => {
@@ -224,7 +224,7 @@ export function InfrastructureCredentialsOverlay({
         label: cred.label,
         password: password || undefined,
         loginName,
-        schoolNumber,
+        siteId,
       });
       setPasswordDrafts((s) => {
         const next = { ...s };
@@ -263,8 +263,8 @@ export function InfrastructureCredentialsOverlay({
   };
 
   const addCredential = async () => {
-    if (!schoolNumber) {
-      toast.warn("Infrastructure credentials", "Connect a school before adding site credentials.");
+    if (!siteId) {
+      toast.warn("Infrastructure credentials", "Connect a site before adding site credentials.");
       return;
     }
     if (!newLabel.trim() || !newLoginName.trim() || !newPassword) {
@@ -277,7 +277,7 @@ export function InfrastructureCredentialsOverlay({
         label: newLabel.trim(),
         loginName: newLoginName.trim(),
         password: newPassword,
-        schoolNumber,
+        siteId,
       });
       setNewLabel("");
       setNewLoginName("");
@@ -420,7 +420,7 @@ export function InfrastructureCredentialsOverlay({
               {storePath || "…/WinDeployKit/plugins/infrastructure-ssh/"}
             </span>
             <div className="mt-1" style={{ color: "var(--text3)" }}>
-              School-scoped passwords for switch SSH, WLC web, off-domain server RDP/SSH, and similar.
+              Site-scoped passwords for off-domain servers, network gear, and similar.
               Local administrator credentials are stored separately (see below).
             </div>
           </div>
@@ -434,8 +434,8 @@ export function InfrastructureCredentialsOverlay({
             This computer — local administrator
           </div>
           <p className="mb-3 text-[10.5px] leading-snug" style={{ color: "var(--text3)" }}>
-            Optional password for this workstation — not tied to a school. Same account you use to
-            administer this machine. School Manager uses it for host-side elevation (PXE TFTP on port
+            Optional password for this workstation — not tied to a site. Same account you use to
+            administer this machine. WinDeployKit uses it for host-side elevation (PXE TFTP on port
             69, SMB share create/remove via <span className="mono">sharing</span>, routes, and
             similar) without prompting every time. When Site Build or other workflows export an SMB
             share, Windows and Linux clients connect with this username and the password saved here
@@ -540,18 +540,17 @@ export function InfrastructureCredentialsOverlay({
             style={{ color: "var(--text3)", letterSpacing: "0.15em" }}
           >
             Default credentials
-            {schoolNumber ? ` · school ${schoolNumber.padStart(4, "0")}` : ""}
+            {siteId ? ` · site ${siteId}` : ""}
           </div>
           <p className="mb-3 text-[10.5px] leading-snug" style={{ color: "var(--text3)" }}>
-            {`{sn}`}SchoolAdmin and {`{sn}`}WLCMonitor passwords are site-specific and randomly
-            generated — they are issued to schools and most techs already have them. If yours
+            The site default password is site-specific. If yours
             is missing, request it from the service desk. Save them here when you have them;
             you&apos;ll need these for switch config backups and Wi-Fi insights. Edit the
             username when a site uses a non-standard spelling (e.g. {`{sn}`}WLCCmonitor).
           </p>
-          {!schoolNumber ? (
+          {!siteId ? (
             <div className="text-[11px]" style={{ color: "var(--text3)" }}>
-              Connect a school to manage {`{sn}`}SchoolAdmin and {`{sn}`}WLCMonitor defaults.
+              Connect a site to manage its default credential.
             </div>
           ) : loading ? (
             <div className="text-[11px]" style={{ color: "var(--text3)" }}>
@@ -559,7 +558,7 @@ export function InfrastructureCredentialsOverlay({
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {schoolDefaults.map((cred) => (
+              {siteDefaults.map((cred) => (
                 <CredentialPasswordRow
                   key={cred.id}
                   cred={cred}
@@ -594,14 +593,14 @@ export function InfrastructureCredentialsOverlay({
                   disabled={busy}
                   className="input-box w-full text-[11px]"
                   onChange={(credentialId) => {
-                    if (!schoolNumber) return;
-                    setSiteSwitchDefaultCredentialId(schoolNumber, credentialId);
+                    if (!siteId) return;
+                    setSiteDefaultCredentialId(siteId, credentialId);
                     onVaultChange?.();
                     toast.success(
                       "Site switch default updated",
                       credentialId
                         ? "Newly discovered switches will inherit this credential."
-                        : `${schoolNumber.padStart(4, "0")}SchoolAdmin will be used as the fallback.`,
+                        : `The ${siteId} site default will be used as the fallback.`,
                     );
                   }}
                 />

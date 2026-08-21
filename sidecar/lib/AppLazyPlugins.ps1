@@ -25,7 +25,7 @@
 #       compass -- Ensure-AppCompassOu called from LocalAdUserProvisioning.ps1 (user
 #                  creation flow); a missed command mapping would crash mid-create.
 #       ventraip - Add-AppVentraIpEmailAccount etc. called from LocalAdUserProvisioning.
-#     local-school-domain stays eager (site-directory dataset refresh closures call it).
+#     local-site-domain stays eager (site-directory dataset refresh closures call it).
 
 $script:AppLazyPluginSpecs = [ordered]@{
     'mist'       = @{ Libs = @('MistPlugin.ps1');       Handlers = @('Plugin.Mist.ps1') }

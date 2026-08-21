@@ -68,7 +68,7 @@ const SETTINGS = {
     id: "ttl.groupsMin",
     group: GROUP,
     label: "Group list",
-    description: "{SN}-gs-* group catalog at this school. New groups appear rarely.",
+    description: "{SITE}-gs-* group catalog at this site. New groups appear rarely.",
     type: "number",
     defaultValue: 30,
     unit: "min",

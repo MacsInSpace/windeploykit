@@ -6,7 +6,7 @@
 export type SidecarEventName =
   | "starting"
   | "needs-credentials"
-  | "needs-school-selection"
+  | "needs-site-selection"
   | "credentials-saved"
   | "operator-identity"
   | "initializing"
@@ -390,7 +390,7 @@ export interface PxeBootPluginStatus {
   dnsmasqConfPath?: string | null;
   /** macOS: in-memory admin password cached for sudo (cleared on logout) */
   macOsAdminCredentialCached?: boolean;
-  /** Saved local-machine administrator vault (this device, not school-scoped) */
+  /** Saved local-machine administrator vault (this device, not site-scoped) */
   localMachineCredentialConfigured?: boolean;
   /** Configured DHCP Option 67 boot file (relative to tftp/). */
   tftpBootFile?: string | null;
@@ -526,7 +526,7 @@ export interface PxeBootTaskSequence {
   name: string;
   kind: "client" | "server" | string;
   enabled: boolean;
-  /** Publish-time template fields; deploy-time tokens ({{SN}}, {{SERIAL}}, creds) stay literal. */
+  /** Publish-time template fields; deploy-time tokens ({{SITE}}, {{SERIAL}}, creds) stay literal. */
   fields: Record<string, string>;
   /** Domain groups added as local Administrators (domain joins only). */
   adminGroups?: string[];
@@ -543,9 +543,9 @@ export interface PxeBootTaskSequencesPayload {
   defaultSequenceId?: string;
   /** Credential-store entries offered for the join-credential selector. */
   credentialOptions?: { id: string; label: string; loginName?: string }[];
-  /** Central domains + the school's local domain from Get School Variables. */
+  /** Central domains + the site's local domain from the Site Profile. */
   joinDomainOptions?: string[];
-  /** School machine OUs from Get School Variables, labelled by first RDN. */
+  /** Site machine OUs from the Site Profile, labelled by first RDN. */
   machineOuOptions?: { dn: string; label: string }[];
   /** Reversed curric-wan DN suggestion (CN=Computers,DC=…) for local-domain joins. */
   curricOuSuggestion?: string | null;
@@ -553,7 +553,7 @@ export interface PxeBootTaskSequencesPayload {
   kmsKeyOptions?: { label: string; key: string }[];
   /** Role-default product keys (server-resolved — the frontend keeps no GVLK copy). */
   roleDefaults?: { client?: string; server?: string };
-  /** Admin-group choices ({{SN}} token form + corp groups). */
+  /** Admin-group choices ({{SITE}} token form + corp groups). */
   adminGroupOptions?: string[];
 }
 
@@ -711,7 +711,7 @@ export interface Aria2TrackerCatalog {
   drivers: Aria2TrackerDriverRow[];
   announceUrl?: string | null;
   statsUrl?: string | null;
-  schoolStatsUrl?: string | null;
+  siteStatsUrl?: string | null;
   trackerUrl?: string | null;
   generatedAt?: string;
   acerCatalogAt?: string | null;
@@ -780,14 +780,14 @@ export interface Aria2TrackerCatalog {
 export interface InfraSshCredentialSummary {
   id: string;
   label: string;
-  /** SSH / RDP / web login (e.g. 5573SchoolAdmin, WORKGROUP\\localadmin). */
+  /** SSH / RDP / web login (e.g. SITE01-admin, WORKGROUP\\localadmin). */
   loginName?: string;
   updatedAt?: string;
   configured: boolean;
   isDefault?: boolean;
-  schoolNumber?: string;
+  siteId?: string;
   /** App-provided virtual entry (e.g. app-de-signin, the signed-in DE account) —
-   * school-agnostic, always offered, not editable/deletable in the manager. */
+   * site-agnostic, always offered, not editable/deletable in the manager. */
   builtIn?: boolean;
 }
 
@@ -814,8 +814,7 @@ export interface ApplyRuntimeConfigParams {
   locationSource?: string;
   sitesCatalogPath?: string;
   sitesCatalogTtlDays?: number;
-  /** Get School Variables / boot warmup cache max age (days). */
-  schoolVariablesCacheTtlDays?: number;
+  /** the Site Profile / boot warmup cache max age (days). */
   /** Comma-separated hosts/IPs, e.g. "10.10.22.11,10.10.22.12" */
   corpLdapHostsCsv?: string;
   /** Comma-separated servers, e.g. "10.10.22.11,10.10.22.12" */
@@ -832,13 +831,11 @@ export interface ApplyRuntimeConfigParams {
   verbosePowershell?: boolean;
   /** Skip TLS cert validation for outbound HTTP (default true on macOS). */
   skipHttpCertificateCheck?: boolean;
-  /** 4-digit connection school for VPN/Citrix when IP location is unknown. */
-  lastConnectionSchool?: string;
   /**
-   * Generic plug-in gates: pluginId → enabled, with per-school overrides already
-   * resolved for the active school (lib/pluginSchoolOverrides.ts). Sent in full on
+   * Generic plug-in gates: pluginId → enabled, with per-site overrides already
+   * resolved for the active site (lib/pluginSiteOverrides.ts). Sent in full on
    * every push. Includes the `local-domain-gpo-viewer` pseudo-entry (follows the
-   * Local School Domain toggle). The sidecar acts on proactive plug-ins only
+   * Local Site Domain toggle). The sidecar acts on proactive plug-ins only
    * (cisco-prime, edu/local GPO viewers, pxe-boot, aria2, notebook-nssp); see
    * docs/core/plugins/AGENT_NOTES_PLUGIN_ARCHITECTURE.md.
    */

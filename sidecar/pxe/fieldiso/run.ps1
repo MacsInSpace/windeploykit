@@ -543,7 +543,7 @@ function Invoke-FieldIsoApplyInstallWim {
     }
 
     if (-not (Test-FieldIsoInstallWimHttpReady -Url $InstallWimUrl -CurlPath $CurlPath)) {
-        Stop-FieldIsoBootstrap "install.wim HTTP 404 or unreachable at $InstallWimUrl - on School Manager Mac Stop then Start field PXE (downloads p7zip + extracts install.wim). Check sidecar logs if still 404."
+        Stop-FieldIsoBootstrap "install.wim HTTP 404 or unreachable at $InstallWimUrl - on WinDeployKit Mac Stop then Start field PXE (downloads p7zip + extracts install.wim). Check sidecar logs if still 404."
     }
 
     $contentLength = Get-FieldIsoHttpContentLength -Url $InstallWimUrl -CurlPath $CurlPath
@@ -1008,7 +1008,7 @@ $installWimUrlFile = Read-FieldIsoOneLineFile -Path (Join-Path $env:SystemRoot '
 $httpBase = Read-FieldIsoOneLineFile -Path (Join-Path $env:SystemRoot 'System32\fieldiso.url')
 
 if (-not $isoUrl -and -not $installWimUrlFile) {
-    Stop-FieldIsoBootstrap 'No iso.url or install.wim.url - pick an ISO from the School Manager boot ISO catalog.'
+    Stop-FieldIsoBootstrap 'No iso.url or install.wim.url - pick an ISO from the WinDeployKit boot ISO catalog.'
 }
 if (-not $httpBase) {
     Stop-FieldIsoBootstrap 'No fieldiso.url (http_base) - regenerate PXE menus (Start field PXE).'

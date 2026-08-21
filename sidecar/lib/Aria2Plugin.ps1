@@ -158,7 +158,6 @@ function Get-AppAria2EffectiveDownloadDir {
             return (Resolve-Path -LiteralPath $dir).Path
         }
     }
-    $paths = Get-AppAria2LayoutPaths
     $cfg = Read-AppAria2Config
     $legacy = [string](Get-AppAria2JsonProp -Item $cfg -Name 'downloadDir')
     if (-not [string]::IsNullOrWhiteSpace($legacy)) {
@@ -167,10 +166,27 @@ function Get-AppAria2EffectiveDownloadDir {
         }
         return (Resolve-Path -LiteralPath $legacy).Path
     }
-    if (-not (Test-Path -LiteralPath $paths.downloadDir)) {
-        $null = New-Item -Path $paths.downloadDir -ItemType Directory -Force
+    # STORAGE POLICY (see AGENT_NOTES.md section 'Where data lives'): downloads are
+    # multi-GB ISOs and driver packs, so they default to the user-chosen image library
+    # root (the Deploy$ base), NEVER the app-data store. The plugin store lives under
+    # %LOCALAPPDATA% / ~/Library/Application Support - i.e. the SYSTEM DRIVE - and USM
+    # filled an SSD exactly this way by writing a ~60 GB WIM to %LOCALAPPDATA% with no
+    # choice of location. Do not reintroduce a fallback to $paths.downloadDir.
+    $libDownloads = $null
+    try {
+        $libDownloads = (Get-AppImageLibraryPaths).incomingDir
+    } catch {
+        Write-SidecarLog "Aria2: image library unavailable for download dir - $($_.Exception.Message)"
     }
-    (Resolve-Path -LiteralPath $paths.downloadDir).Path
+    if (-not $libDownloads) {
+        # Still not the app-data store: the image library DEFAULT root is off the
+        # app-data tree by design (~/Public on macOS, ~/Downloads on Windows).
+        $libDownloads = Join-Path (Get-AppImageLibraryDefaultRoot) '.incoming'
+    }
+    if (-not (Test-Path -LiteralPath $libDownloads)) {
+        $null = New-Item -Path $libDownloads -ItemType Directory -Force
+    }
+    (Resolve-Path -LiteralPath $libDownloads).Path
 }
 
 function Test-AppAria2PluginEnabled {
@@ -736,7 +752,7 @@ function Start-AppAria2Daemon {
     }
     $downloadDir = Get-AppAria2EffectiveDownloadDir
 
-    $args = @(
+    $aria2Args = @(
         '--enable-rpc=true'
         '--rpc-listen-all=false'
         "--rpc-listen-port=$rpcPort"
@@ -753,10 +769,10 @@ function Start-AppAria2Daemon {
     )
     $btTracker = Get-AppAria2BtTrackerArg
     if ($btTracker) {
-        $args += "--bt-tracker=$btTracker"
+        $aria2Args += "--bt-tracker=$btTracker"
     }
 
-    $argLine = Format-AppProcessArgumentList -Arguments $args
+    $argLine = Format-AppProcessArgumentList -Arguments $aria2Args
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
         $proc = Start-Process -FilePath $bin -ArgumentList $argLine -PassThru -WindowStyle Hidden
     } else {

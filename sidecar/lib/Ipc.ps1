@@ -335,33 +335,6 @@ function Get-SidecarBootstrapPhasePresentation {
         '^NPS mount early' {
             return @{ message = 'Preparing log file access…'; step = 5 }
         }
-        '^Initialize-AppSidecarSchool$' {
-            return @{ message = 'Finding your school…'; step = 6 }
-        }
-        '^school init: begin$' {
-            return @{ message = 'Preparing school connection…'; step = 7 }
-        }
-        '^school init: load credentials$' {
-            return @{ message = 'Loading your credentials…'; step = 8 }
-        }
-        '^school init: sites-catalog' {
-            return @{ message = 'Syncing school site directory…'; step = 9 }
-        }
-        '^school init: reference data' {
-            return @{ message = 'Loading school reference data…'; step = 10 }
-        }
-        '^school init: (location|Resolve-AppBoot)' {
-            return @{ message = 'Detecting your location…'; step = 11 }
-        }
-        '^school init: on-site context' {
-            return @{ message = 'School found — opening connections…'; step = 12 }
-        }
-        '^school init: Complete-AppSidecarSchoolInit$' {
-            return @{ message = 'Connecting…'; step = 13 }
-        }
-        '^school init: Complete-AppSidecarSchoolInit done$' {
-            return @{ message = 'Almost ready…'; step = 14 }
-        }
         '^dispatch loop starting' {
             return @{ message = 'Waiting for sign-in…'; step = 1 }
         }
@@ -540,15 +513,6 @@ function Try-Write-AppSystemStartReadyLog {
 
     $script:AppSystemStartReadyLogged = $true
 
-    $sn = if ($script:AppState.ActiveSchoolSN) {
-        [string]$script:AppState.ActiveSchoolSN
-    } elseif ($script:AppState.LdapSchoolSN) {
-        [string]$script:AppState.LdapSchoolSN
-    } else {
-        $null
-    }
-    if ($sn) { $sn = $sn.Trim().PadLeft(4, '0') }
-
     $suffix = switch ($script:AppState.NpsMountStatus) {
         'ready'   { ', NPS LogFiles$ ready' }
         'failed'  { '; NPS mount failed' }
@@ -556,6 +520,5 @@ function Try-Write-AppSystemStartReadyLog {
         default   { '' }
     }
 
-    $schoolPart = if ($sn) { "school $sn" } else { 'sessions open' }
-    Write-SidecarLog "System start ready ($schoolPart$suffix)." -Flush
+    Write-SidecarLog "System start ready (sessions open$suffix)." -Flush
 }
