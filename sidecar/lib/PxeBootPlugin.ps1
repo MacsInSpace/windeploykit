@@ -561,51 +561,133 @@ function Sync-AppPxeBootBundledWimboot {
     return $true
 }
 
-function Sync-AppPxeBootBundledSecureBootTftp {
-    $srcRoot = Get-AppPxeBootBundledSecureBootTftpRoot
-    if (-not $srcRoot) { return $false }
+function Get-AppPxeBootBundledArchNames {
+    # Every arch tree we stage. 'sb' is an ALIAS of x86_64-sb: upstream ships it as a
+    # symlink and some firmware asks for sb/shimx64.efi. Staged as a real copy so the
+    # served tree is symlink-free for Windows checkouts and TFTP daemons.
+    @('x86_64', 'x86_64-sb', 'sb', 'i386', 'arm32', 'arm64', 'arm64-sb', 'riscv32', 'riscv64', 'loong64')
+}
 
-    $paths = Get-AppPxeBootLayoutPaths
-    $destRoot = Join-Path $paths.tftpRoot 'x86_64-sb'
-    $srcShim = Join-Path $srcRoot 'shimx64.efi'
-    $destShim = Join-Path $destRoot 'shimx64.efi'
+function Get-AppPxeBootArchSourceDirName {
+    param([Parameter(Mandatory)][string]$ArchName)
+    if ($ArchName -eq 'sb') { return 'x86_64-sb' }
+    return $ArchName
+}
 
-    $needsSync = -not (Test-Path -LiteralPath $destShim -PathType Leaf)
-    if (-not $needsSync) {
-        $bundledHash = (Get-FileHash -LiteralPath $srcShim -Algorithm SHA256).Hash
-        $storeHash = (Get-FileHash -LiteralPath $destShim -Algorithm SHA256).Hash
-        $needsSync = ($bundledHash -ne $storeHash)
-    }
-    if (-not $needsSync) { return $false }
-
-    if (-not (Test-Path -LiteralPath $destRoot)) {
-        $null = New-Item -Path $destRoot -ItemType Directory -Force
-    }
-    foreach ($file in @(Get-ChildItem -LiteralPath $srcRoot -Recurse -File -ErrorAction SilentlyContinue)) {
-        $rel = $file.FullName.Substring($srcRoot.Length).TrimStart([IO.Path]::DirectorySeparatorChar, '/')
-        $dest = Join-Path $destRoot ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
-        $parent = Split-Path -Parent $dest
-        if ($parent -and -not (Test-Path -LiteralPath $parent)) {
-            $null = New-Item -Path $parent -ItemType Directory -Force
+function Get-AppPxeBootBundledArchRoot {
+    <#
+        Root holding the per-architecture iPXE trees. Unlike USM (single location) we
+        carry two candidates, so require at least one recognised arch dir before
+        accepting a root - sidecar/pxe/ also holds fieldiso/, wimboot and snponly.efi.
+    #>
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if ($SidecarRoot) { [void]$candidates.Add((Join-Path $SidecarRoot 'pxe')) }
+    $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
+    if ($root) {
+        foreach ($rel in @('sidecar/pxe', 'vendor/binaries/pxe-secure-boot-x64')) {
+            [void]$candidates.Add((Join-Path $root ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)))
         }
-        Copy-Item -LiteralPath $file.FullName -Destination $dest -Force
     }
-    Write-SidecarLog 'PXE boot: synced bundled Secure Boot TFTP tree (tftp/x86_64-sb/)'
-    return $true
+    foreach ($dir in $candidates) {
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+        foreach ($arch in Get-AppPxeBootBundledArchNames) {
+            $probe = Join-Path $dir (Get-AppPxeBootArchSourceDirName -ArchName $arch)
+            if (Test-Path -LiteralPath $probe -PathType Container) {
+                return (Resolve-Path -LiteralPath $dir).Path
+            }
+        }
+    }
+    return $null
+}
+
+function Sync-AppPxeBootBundledArchTftpTrees {
+    <#
+    .SYNOPSIS
+        Stage EVERY bundled per-architecture iPXE tree into tftp/<arch>/ so any client's
+        DHCP-offered path resolves. Previously only x86_64-sb was staged, and only when
+        its shim hash changed, so a Secure Boot client asking for x86_64-sb/shimx64.efi
+        404'd outright (USM 640f5bb; handover 2026-08-21).
+
+        NEVER touches the TFTP ROOT files. tftp/snponly.efi is the BYTE-PATCHED build
+        (embedded unofficial.wan fallback removed) and upstream ships root-level symlinks
+        pointing at the UNPATCHED x86_64/snponly.efi - staging the root would silently
+        re-arm the exact behaviour the patch removes. Root assets stay owned by
+        Sync-AppPxeBootBundledSnponly.
+    #>
+    $srcRoot = Get-AppPxeBootBundledArchRoot
+    if (-not $srcRoot) { return $false }
+    $tftpRoot = (Get-AppPxeBootLayoutPaths).tftpRoot
+    $changed = $false
+    $staged = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($arch in Get-AppPxeBootBundledArchNames) {
+        $srcDir = Join-Path $srcRoot (Get-AppPxeBootArchSourceDirName -ArchName $arch)
+        if (-not (Test-Path -LiteralPath $srcDir -PathType Container)) { continue }
+        $destDir = Join-Path $tftpRoot $arch
+        $archChanged = $false
+
+        foreach ($file in @(Get-ChildItem -LiteralPath $srcDir -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+            if ($file.Name -eq '.DS_Store') { continue }
+            $rel = $file.FullName.Substring($srcDir.Length).TrimStart([IO.Path]::DirectorySeparatorChar, '/')
+            $dest = Join-Path $destDir ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
+            # Upstream ships in-tree symlinks (x86_64-sb/ipxe-shim.efi -> shimx64.efi).
+            # Stage the RESOLVED target: a copied file never matches the link's own
+            # metadata, so an unresolved compare re-copies that tree on every poll.
+            $srcInfo = $file
+            if ($file.LinkTarget) {
+                try {
+                    $target = $file.ResolveLinkTarget($true)
+                    if ($target) {
+                        $resolved = Get-Item -LiteralPath $target.FullName -Force -ErrorAction SilentlyContinue
+                        if ($resolved) { $srcInfo = $resolved }
+                    }
+                } catch {
+                    Write-SidecarLogVerbose "PXE boot: could not resolve symlink $($file.FullName) - $($_.Exception.Message)"
+                }
+            }
+            # Size+mtime check (Copy-Item preserves LastWriteTime): an unchanged tree
+            # costs a stat per file instead of hashing ~21 MB on every poll.
+            $destItem = Get-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
+            if ($destItem -and $destItem.Length -eq $srcInfo.Length -and $destItem.LastWriteTimeUtc -eq $srcInfo.LastWriteTimeUtc) {
+                continue
+            }
+            $parent = Split-Path -Parent $dest
+            if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+                $null = New-Item -Path $parent -ItemType Directory -Force
+            }
+            Copy-Item -LiteralPath $srcInfo.FullName -Destination $dest -Force
+            $archChanged = $true
+        }
+        if ($archChanged) {
+            $changed = $true
+            [void]$staged.Add($arch)
+        }
+    }
+
+    if ($changed) {
+        Write-SidecarLog "PXE boot: staged bundled iPXE arch trees into tftp/ ($($staged -join ', '))"
+    }
+    return $changed
+}
+
+function Sync-AppPxeBootBundledSecureBootTftp {
+    # Back-compat shim: Secure Boot staging is now part of the all-arch sync.
+    return (Sync-AppPxeBootBundledArchTftpTrees)
 }
 
 function Sync-AppPxeBootBundledBootAssets {
     <#
-        Copy snponly.efi, wimboot, and x86_64-sb/ from the app bundle into the user store.
+        Copy snponly.efi (patched, TFTP root), wimboot, and EVERY bundled per-arch iPXE
+        tree from the app bundle into the user store.
         Called when Netboot is enabled, on full store layout, and at Start Imaging Services.
     #>
     $snponly = Sync-AppPxeBootBundledSnponly
     $wimboot = Sync-AppPxeBootBundledWimboot
-    $secureBoot = Sync-AppPxeBootBundledSecureBootTftp
-    if ($secureBoot) {
+    $archTrees = Sync-AppPxeBootBundledArchTftpTrees
+    if ($archTrees) {
         Write-AppPxeBootTftpAutoexecScript | Out-Null
     }
-    return ($snponly -or $wimboot -or $secureBoot)
+    return ($snponly -or $wimboot -or $archTrees)
 }
 
 function Test-AppPxeBootWimIsFieldIso {
@@ -4636,7 +4718,12 @@ function Get-AppPxeBootNetworkAdapters {
             }
             if ($defaultIfId) { break }
         }
-    } catch { }
+    } catch {
+        # Was a bare catch {}. A fault in here leaves every adapter un-flagged and
+        # surfaces as "No LAN IP" with no log line anywhere - the exact diagnosis
+        # this cost during the port, and again in USM (b2fa883).
+        Write-SidecarLogVerbose "PXE boot: default-gateway detection failed - $($_.Exception.Message)"
+    }
 
     $rows = [System.Collections.Generic.List[object]]::new()
     try {

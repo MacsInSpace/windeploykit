@@ -127,7 +127,12 @@ function Get-AppLenovoSccmPrimaryTypeCode {
 function Get-AppLenovoSccmBestSccmEntryForModel {
     param([Parameter(Mandatory)]$Model)
     $bestEntry = $null
-    $bestScore = -1
+    # Lenovo is the only SIGNED scorer of the five vendors (win10 scores -100,
+    # _HSA_ -40), so a -1 seed silently discarded every Win10-only model - 80 of
+    # 372 (22%) resolved to nothing and vanished from the catalog. Do NOT copy
+    # this to Acer (-1 is its deliberate no-match sentinel, real scores clamp >= 1)
+    # or Dell (additive-only, never negative). USM 3ebc463 / handover 2026-08-21.
+    $bestScore = [int]::MinValue
     foreach ($entry in @(Get-AppAria2JsonProp -Item $Model -Name 'sccm')) {
         if (-not $entry) { continue }
         $score = Get-AppLenovoSccmEntryScore `
@@ -222,7 +227,8 @@ function Get-AppLenovoSccmBestUrlFromList {
     param([Parameter(Mandatory)][string[]]$Urls)
     if (-not $Urls -or $Urls.Count -eq 0) { return $null }
     $best = $null
-    $bestScore = -1
+    # Signed scorer - must not seed at -1. See Get-AppLenovoSccmBestSccmEntryForModel.
+    $bestScore = [int]::MinValue
     foreach ($url in $Urls) {
         $name = [System.IO.Path]::GetFileName($url).ToLowerInvariant()
         $score = 0
@@ -306,7 +312,8 @@ function Resolve-AppLenovoSccmDriverUrlForWmiPatterns {
     if (-not $Patterns -or $Patterns.Count -eq 0 -or -not $Catalog) { return $null }
 
     $bestUrl = $null
-    $bestScore = -1
+    # Signed scorer - must not seed at -1. See Get-AppLenovoSccmBestSccmEntryForModel.
+    $bestScore = [int]::MinValue
     $bestSource = $null
     $bestModel = $null
 

@@ -3,6 +3,20 @@
 
 **Product name:** **WinDeployKit** (user-facing).
 
+**Shared system:** identical tokens and rules to **PSOpenAD-FE**
+(`/Volumes/Data/projects/PSOpenAD-FE`, `docs/PSOPENAD_FE_StyleGuide.md`) — the two
+apps are siblings and must not drift. Changes belong in both.
+
+The contract is **§2 tokens plus the §1 non-negotiables** — not stylesheets. This app
+is Tailwind-based, PSOpenAD-FE is plain CSS, and app-specific tokens
+(`--sidebar-width`, `--shadow*` here; `--tree-w`, `--icon-*` there) are *meant* to
+differ. The test for whether a difference is drift:
+
+> The design system serves **instant familiarity with a specific prior tool** —
+> Deployment Workbench here, Active Directory Users and Computers there. Where the
+> two apps differ because MDT and ADUC differ, that is correct. Where they differ
+> because someone restyled a button, that is drift.
+
 ---
 
 ## 1. Aesthetic Direction

@@ -1,0 +1,11 @@
+# Boot binaries must never be line-ending normalised. A normalised shimx64.efi or
+# snponly.efi fails Secure Boot with no useful error at all — a miserable diagnosis.
+# (USM handover, 2026-08-21.)
+*.efi   binary
+*.pxe   binary
+*.kpxe  binary
+*.wim   binary
+*.sdi   binary
+*.torrent binary
+*.zip   binary
+*.tar.gz binary

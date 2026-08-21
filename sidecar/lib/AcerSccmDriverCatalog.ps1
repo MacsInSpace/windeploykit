@@ -242,6 +242,9 @@ function Resolve-AppAcerSccmDriverUrlForWmiPatterns {
     }
     $variantList = @($variants)
     $bestUrl = $null
+    # CORRECT AS WRITTEN - do not 'fix' to [int]::MinValue like Lenovo. Acer's -1 is a
+    # deliberate no-match sentinel (scorer returns -1 when bestVariantScore -eq 0) and
+    # every real match clamps to >= 1, so seeding lower would let no-match entries win.
     $bestScore = -1
     foreach ($url in $Urls) {
         $score = Get-AppAcerSccmDriverUrlScore -Url $url -Variants $variantList

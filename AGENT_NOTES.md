@@ -13,7 +13,7 @@ is, where it came from, what is decided, what works, and what is booby-trapped.
 | --- | --- |
 | Project root | `/Volumes/Data/projects/windeploykit` |
 | GitHub | `MacsInSpace/windeploykit` (**private**, empty — nothing pushed yet) |
-| Git | initialised on `main`; **no commits yet** — the whole tree is still staged/untracked |
+| Git | on `main`; initial commit `75d3f25` landed 2026-08-21 |
 | App data (macOS) | `~/Library/Application Support/WinDeployKit` |
 | Bundle id | `com.macsinspace.windeploykit` |
 | Dev server | Vite on **42410** (HMR 42411) |
@@ -36,7 +36,7 @@ cut made during the extraction. This file is the summary; that file is the
 detail. `usm-reference/IMPORT_MANIFEST.md` records exactly what was copied and
 what was deliberately left behind.
 
-### The upstream project is READ-ONLY
+### USM is READ-ONLY — and is now DOWNSTREAM of us
 
 `/Volumes/Data/projects/stmc-manager` ("USM") is the app this was extracted
 from. It is **under active development by the user**.
@@ -44,6 +44,75 @@ from. It is **under active development by the user**.
 > **Never modify, never `git checkout`, never `git stash` in that repo.**
 > Copy out of it only. If you find a bug there, write it up in
 > `usm-reference/HANDOVER_TO_USM_AGENT.md` — do not fix it in place.
+
+**Direction changed 2026-08-21 (Craig):** WinDeployKit and PSOpenAD-FE are both
+off on their own corporate dev paths, and **USM now takes from this project**,
+not the other way round. WinDeployKit owns the netboot/downloads domain; USM
+becomes the integrator that vendors it (the way it already vendors MDMKit).
+
+Read-only still applies — "downstream" is about *ownership of the code*, not
+permission to edit their tree.
+
+### The three-repo relationship
+
+| Repo | Relationship | Channel to us |
+| --- | --- | --- |
+| `stmc-manager` (USM) | **Downstream** for netboot/downloads; **upstream** for sidecar runtime core | `docs/handover/HANDOVER_TO_WINDEPLOYKIT_AGENT.md` (tracked, pushed) |
+| `PSOpenAD-FE` | **Sibling** — shares the design system only, no code | `docs/handover/HANDOVER_TO_WINDEPLOYKIT_AGENT.md` (tracked) |
+| `ipxeboot` | Build dependency for the Secure Boot iPXE chain | none — undeclared, see §6 |
+
+Outbound from us: **`docs/handover/HANDOVER_TO_USM_AGENT.md`** — tracked and
+pushable, mirroring theirs. Append under a dated heading; never rewrite earlier
+entries, so both sides can see what has already been carried.
+
+> Moved there 2026-08-21 from `usm-reference/`, which is gitignored and so could
+> never be pushed. `usm-reference/` keeps its actual job — reference material and
+> internal detail that must never enter the tracked tree. **One historical entry
+> stays behind** (2026-08-20, parameter-binding bugs): it quotes USM function and
+> parameter names carrying internal domain detail. Already delivered and actioned,
+> so nothing outstanding. Anything written for USM from now on goes in the tracked
+> file — and must be scrubbed of internal identifiers before it does.
+
+### The ownership boundary (settled 2026-08-21)
+
+| Bucket | Owner | Contents |
+| --- | --- | --- |
+| **Domain** (~13) | **Us.** USM vendors from here | `PxeBoot*` ×3, `Aria2*` ×3, the five vendor catalogs, `VendorSccmCatalogRefresh`, `EvalIsoCatalog` |
+| **Runtime core** (~9) | **USM.** We consume | `Ipc`, `AppPaths`, `AppPlatform`, `AppHttp`, `SidecarParams`, `AppPluginGates`, `AppLazyPlugins`, `LocalMachineCredentials`, `InfrastructureSshCredentials` |
+
+**`AppNativeProcess.ps1` and `AppElevation.ps1` are runtime core — USM's**, even
+though the refactor was done here and currently lives only here. Settled by call
+graph: both straddle the boundary (`Start-AppNativeProcess` is called by our
+`VendorSccmCatalogRefresh.ps1:168`; `AppElevation` is dot-sourced by our sidecar
+entry and backs the elevated dnsmasq/TFTP shells), and the alternative would have
+USM vendoring its own credential-prompt machinery back from a downstream project.
+
+> **Do not edit either file here without sending the change to USM first.** USM is
+> creating its own copies using our filenames and split so they stay
+> byte-comparable. `AppHttp.ps1` is a deliberate 56-line stub of USM's 546 — that
+> asymmetry is intentional, not drift.
+
+### Identity injection — contract proposed, not yet agreed
+
+The domain libs hardcode product identity, which is why a cross-repo diff is ~90%
+noise and hid three real bugs for a day. The fix is one `$script:AppProductIdentity`
+object set by the host sidecar before any lib is dot-sourced (same constraint as
+`$script:AppSidecarProjectRoot`), with fields `DisplayName` / `Slug` / `BinaryName`
+/ `UserAgentToken`, and the rule that **a domain lib contains no product literal at
+all**.
+
+Our functional surface is **20 sites** (`AppPaths` ×5, `Aria2Plugin` ×3, one
+User-Agent per vendor catalog, `Ipc` ×1, `PxeBootTaskSequences` ×1,
+`Aria2PxeIntegration` ×1); ~53 further mentions are prose and are being left alone.
+
+**Field names are with USM for agreement — do not start coding this until they
+confirm.** Both sides implementing different shapes is the failure this prevents.
+Full proposal and rationale in `docs/handover/HANDOVER_TO_USM_AGENT.md`.
+
+**Explicitly NOT shared: the frontend.** WinDeployKit is corporate — no themes,
+no arcade, no personality. USM keeps all of that. Panels, theme system and
+`index.css` diverge by design; the sharing boundary is the sidecar domain libs
+only. Do not try to reconcile the UI.
 
 ---
 
@@ -115,6 +184,21 @@ the UI and rewriting the WinPE client.
 - Vendor driver catalogs load — **1,456 driver rows** from the bundled JSON.
 - Console tree navigates; each node renders only its own sections; zero console
   errors in a headless browser check.
+
+### Carried in from USM, 2026-08-21 (see `usm-reference/HANDOVER_TO_USM_AGENT.md`)
+
+- **Lenovo catalog fix.** `$bestScore = -1` → `[int]::MinValue` at three sites.
+  Lenovo is the only *signed* scorer of the five (win10 = -100), so the old seed
+  discarded every Win10-only model. Measured on the bundled 372-model catalog:
+  **80 unmatched → 0**. Acer and Dell use `-1` **correctly** and now carry a
+  comment at the seed saying so — do not pattern-match them.
+- **All-arch TFTP staging.** `Sync-AppPxeBootBundledArchTftpTrees` replaces the
+  single-tree, hash-short-circuited Secure Boot sync. Never writes the TFTP root
+  (our `snponly.efi` is the byte-patched build). Assets still missing — see §6.
+- **`.gitattributes` created** — we had none. A line-ending-normalised `.efi`
+  fails Secure Boot with no useful error.
+- **Gateway `catch { }`** in `Get-AppPxeBootNetworkAdapters` (line ~4639) now
+  logs instead of discarding — the bug that cost the original "No LAN IP" hunt.
 
 ### Panels
 
@@ -243,6 +327,13 @@ this; if you write a new entry point, do it there too.
 - `wim-inject/` (615 MB) is gitignored: ADK-derived WinPE system files, EULA-scoped.
 - `vendor/binaries/pxe-mdt-boot/` and `sidecar/pxe/mdt-boot-x64/` are Microsoft
   boot binaries — gitignored, never redistribute.
+- **Secure Boot cannot work yet — the arch trees are not in this repo.**
+  `vendor/binaries/pxe-secure-boot-x64/` is README-only and `sidecar/pxe/x86_64-sb/`
+  does not exist, so `Sync-AppPxeBootBundledArchTftpTrees` has nothing to stage
+  while the default Option 67 (`x86_64-sb/shimx64.efi`) points at that path.
+  The staging code is correct and ported; the **binaries** must be fetched from
+  the `ipxeboot` sibling via `scripts/fetch-pxe-secure-boot.ps1`. Don't read
+  "arch staging ported" as "Secure Boot works".
 - The Secure Boot iPXE chain builds from a **sibling repo**,
   `/Volumes/Data/projects/ipxeboot`. Undeclared build dependency; formalise it.
 - The bundled `snponly.efi` carries a **byte-patched embed** (an upstream WAN
@@ -282,4 +373,4 @@ this; if you write a new entry point, do it there too.
       MDT did after the first reboot
    3. **WinPE client rewrite** (§2.1) — grow `fieldiso/run.ps1` into the agent
    4. Boot Images UI over the existing overlay engine
-5. Commit early — the repo still has **no commits**.
+5. Commit early and often — the tree is committed now, so keep it that way.

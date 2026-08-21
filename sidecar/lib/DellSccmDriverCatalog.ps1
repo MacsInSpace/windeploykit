@@ -366,6 +366,8 @@ function Get-AppDellSccmBestPackForModel {
     $packs = @(Get-AppAria2JsonProp -Item $Model -Name 'packs')
     if ($packs.Count -eq 0) { return $null }
     $best = $null
+    # CORRECT AS WRITTEN - do not 'fix' to [int]::MinValue like Lenovo. Dell's scores are
+    # purely additive (0 plus positive terms), so they never go negative and -1 is safe.
     $bestScore = -1
     foreach ($pack in $packs) {
         $scoreProp = Get-AppAria2JsonProp -Item $pack -Name 'score'
