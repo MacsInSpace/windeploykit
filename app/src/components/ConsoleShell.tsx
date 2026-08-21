@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 
 import { AppIcon } from "./AppIcon";
+import appIcon from "../../src-tauri/icons/32x32.png";
 import { ConsoleTree } from "./ConsoleTree";
 import { ContextMenu, SEP, menuLabel, useContextMenu, type MenuItem } from "./ContextMenu";
 import { MenuBar, type Menu } from "./MenuBar";
@@ -297,7 +298,7 @@ export function ConsoleShell({
   return (
     <div className="shell is-console">
       <header className="titlebar">
-        <span className="brand-mark" aria-hidden />
+        <img className="brand-mark" src={appIcon} alt="" width={16} height={16} aria-hidden />
         <span className="brand">WinDeployKit</span>
         <div className="titlebar-right">
           {sidecarBadge &&

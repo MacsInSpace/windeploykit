@@ -14,3 +14,6 @@
 # hashes are pinned in vendor/psmodules.lock.json. Without this a fresh clone
 # normalises CRLF and -VerifyOnly fails on the first checkout.
 vendor/psmodules/** -text
+*.png   binary
+*.icns  binary
+*.ico   binary

@@ -52,8 +52,8 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "shortDescription": "Windows deployment toolkit \u2014 PXE, images, drivers, task sequences",
-    "longDescription": "Cross-platform Windows deployment toolkit \u2014 PXE boot, image library, drivers and task sequences.",
+    "shortDescription": "Windows deployment toolkit - PXE, images, drivers, task sequences",
+    "longDescription": "Cross-platform Windows deployment toolkit - PXE boot, image library, drivers and task sequences.",
     "macOS": {
       "minimumSystemVersion": "11.0",
       "hardenedRuntime": true
