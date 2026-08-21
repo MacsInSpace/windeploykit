@@ -431,10 +431,38 @@ The short version - violating any of these is a defect:
 ### Structure
 
 ```
-app/src/components/navConfig.ts   the console tree (a plain array - no registry)
-app/src/panels/<Node>Panel.tsx    one thin file per node; routing + title
-app/src/workspaces/               shared state containers; panels render sections
+app/src/components/ConsoleShell.tsx   the MMC console: title bar, menu bar, toolbar,
+                                      tree | splitter | result pane, status bar
+app/src/components/ConsoleTree.tsx    the console tree (26px rows, whole-row selection)
+app/src/components/MenuBar.tsx        File / Action / View / Help   (from PSOpenAD-FE)
+app/src/components/ContextMenu.tsx    MenuItem, SEP, MenuSurface     (from PSOpenAD-FE)
+app/src/components/navConfig.ts       the console tree data (a plain array - no registry)
+app/src/state/consoleActions.ts       the ONE home for a node's verbs
+app/src/components/PanelShell.tsx     result-pane frame: 32px header, optional tabs, body
+app/src/panels/<Node>Panel.tsx        one thin file per node
+app/src/workspaces/                   shared state containers; panels render sections
 ```
+
+**Verbs live in the shell, never in a panel (2026-08-21, Craig).** Every panel
+used to draw its own header buttons, so the same kind of action sat in a
+different place on every node. Now a panel publishes its verbs with
+`useConsoleActions({ items, refresh, properties, status })` and the shell
+renders them in the Action menu, the right-click menu and the two toolbar
+glyphs (Refresh F5, Properties Alt+Enter). `PanelShell` has no `toolbar` prop
+any more; adding one back is the defect this rule exists to stop.
+
+Two traps in that registry, both hit while building it:
+
+- **Memoise the def.** `useConsoleActions` publishes on identity change. A
+  workspace that keys its memo on a prop array the panel passes as a literal
+  (`sections={["host"]}`) republishes every render, the shell re-renders, the
+  panel re-renders, and it loops. Key on booleans derived from the array, not
+  the array.
+- **Read the store at fire time after a node switch.** Right-click on a
+  non-active node selects it first; the new panel publishes on mount, so the
+  menu opens on a short timer - and must call `getConsoleActions()` then, not
+  use the `actions` the handler closed over, which still belong to the node
+  being left. The first build showed Netboot's verbs on Transfers.
 
 Nav order is **deployment order, not MDT's**: Netboot (owns the services) -> Boot
 Images (what they serve) -> Operating Systems -> Out-of-Box Drivers -> Applications

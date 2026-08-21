@@ -67,3 +67,15 @@ export function flattenNav(nodes: NavNode[] = NAV_TREE): NavNode[] {
 export function findNavNode(id: string): NavNode | undefined {
   return flattenNav().find((n) => n.id === id);
 }
+
+/** Parent node id, or undefined for a top-level node. Drives the toolbar's Up. */
+export function findParentId(id: string, nodes: NavNode[] = NAV_TREE, parent?: string): string | undefined {
+  for (const n of nodes) {
+    if (n.id === id) return parent;
+    if (n.children) {
+      const hit = findParentId(id, n.children, n.id);
+      if (hit !== undefined) return hit;
+    }
+  }
+  return undefined;
+}

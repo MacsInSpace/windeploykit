@@ -8,5 +8,5 @@
 import { ContentWorkspace } from "../workspaces/ContentWorkspace";
 
 export function TransfersPanel() {
-  return <ContentWorkspace tabs={["add", "settings"]} title="Transfers" icon="transfers" />;
+  return <ContentWorkspace tabs={["add", "settings"]} title="Transfers" />;
 }

@@ -132,24 +132,49 @@ Fonts are local platform stacks. The application must not depend on Google Fonts
 ## 4. Layout
 
 ### App grid
+
+The MMC console, identical in structure to PSOpenAD-FE:
+
 ```
-+-----------------------------------------------------+
-|  Title bar (68px)                                    |
-+--------------+--------------------------------------+
-|              |  Panel toolbar (44px)                 |
-|  Sidebar     +--------------------------------------+
-|  (284px)     |  [Optional tab bar] (36px)            |
-|              +--------------------------------------+
-|              |  Panel content          | Detail pane |
-|              |  (flex: 1, scroll)      | (280px,     |
-|              |                         |  optional)  |
-+--------------+-------------------------+------------+
++-----------------------------------------------------------------+
+|  Title bar (32px)   brand                    [status badges]    |
++-----------------------------------------------------------------+
+|  Menu bar (22px)    File  Action  View  Help                    |
++-----------------------------------------------------------------+
+|  Toolbar (32px)     < > ^ | refresh | properties                |
++-----------------+-+---------------------------------------------+
+|                 | |  Result-pane header (32px): title, one fact |
+|  Console tree   |s+---------------------------------------------+
+|  (268px,        |p|  [Optional flat tab row] (26px)             |
+|   user-resizable|l+---------------------------------------------+
+|   160-560px,    |i|                                             |
+|   persisted)    |t|  Panel body                                 |
+|                 | |                                             |
+|                 | +---------------------------------------------+
+|                 | |  Status bar (24px)  one fact | node         |
++-----------------+-+---------------------------------------------+
 ```
 
-### Sidebar structure (top to bottom):
-1. **Site Profile card** - fixed, never scrolls (~110px)
-2. **Nav section** - scrollable, `flex: 1`
-3. **User footer** - fixed (~48px)
+The splitter is a 5px column the technician drags; double-click restores 268px.
+The width persists per machine in `localStorage` (`windeploykit.console.treeW`).
+
+### Where verbs live (non-negotiable)
+
+**Panels draw no action buttons.** A node's verbs are published once
+(`state/consoleActions.ts`, `useConsoleActions`) and the shell renders them in
+exactly three uniform places, as the Workbench does:
+
+1. the **Action** menu,
+2. the **right-click** menu on the tree node or on blank result-pane space,
+3. the two **toolbar glyphs** every node shares - Refresh (F5) and
+   Properties... (Alt+Enter).
+
+Both menus are built from the same `MenuItem[]`, so a verb cannot exist in one
+and not the other. A button in a panel header or beside a table is a defect:
+it puts the same kind of action in a different place on every node, which is
+the thing this rule exists to stop. Controls that *edit data in place* (a
+filter box, a select inside a form, a per-row remove) are content, not verbs,
+and stay in the body.
 
 ### Panel content area:
 - `padding: 16px 20px` default
@@ -479,6 +504,7 @@ module.exports = {
 | Use `border-radius: 0-5px`; shell corners are square | Use pill shapes or rounded cards anywhere except a status badge |
 | Label everything with Mono uppercase tracking | Use sentence-case for section labels |
 | Keep chrome to one 32px line | Add hero blocks, stacked subtitles, or oversized panel icons |
+| Publish verbs through `useConsoleActions` | Render an action button in a panel header or toolbar |
 | Grey out LDAP panels when session is lost | Hide them or show an error page |
 | Use the Site Profile card as the persistent identity anchor | Put site info only in the title bar |
 

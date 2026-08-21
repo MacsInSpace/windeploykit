@@ -5,5 +5,5 @@
 import { ContentWorkspace } from "../workspaces/ContentWorkspace";
 
 export function OutOfBoxDriversPanel() {
-  return <ContentWorkspace tabs={["drivers"]} title="Out-of-Box Drivers" icon="out-of-box-drivers" />;
+  return <ContentWorkspace tabs={["drivers"]} title="Out-of-Box Drivers" />;
 }

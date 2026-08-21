@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 
 import { DataTable, type DataTableColumn } from "../components/DataTable";
 import { PanelShell } from "../components/PanelShell";
+import { SEP, type MenuItem } from "../components/ContextMenu";
+import { useConsoleActions, type ConsoleNodeActions } from "../state/consoleActions";
 import { getConfiguredDownloadBaseDir } from "../lib/downloadPath";
 import {
   formatImageLibraryRootPreview,
@@ -181,11 +183,9 @@ function isDirectDriverHttpDownload(params: {
 export function ContentWorkspace({
   tabs,
   title,
-  icon,
 }: {
   tabs?: readonly TabId[];
   title?: string;
-  icon?: string;
 } = {}) {
   const visibleTabs: readonly TabId[] = tabs ?? (["images", "drivers", "add", "settings"] as const);
   const [tab, setTab] = useState<TabId>(visibleTabs[0] ?? "images");
@@ -1306,50 +1306,58 @@ export function ContentWorkspace({
     setExtensionRoutes((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   };
 
+  // Verbs go to the console shell, not to a panel header. Daemon lifecycle and
+  // the download folder belong to Transfers - the catalog panels only queue
+  // work; the vendor catalog refresh belongs to Out-of-Box Drivers.
+  const showsDrivers = visibleTabs.includes("drivers");
+  const daemonRunning = Boolean(config?.daemonRunning);
+  const binaryReady = Boolean(config?.binary?.ready);
+  const binaryInstalling = Boolean(config?.binary?.installing);
+  const consoleActions = useMemo<ConsoleNodeActions>(() => {
+    const items: MenuItem[] = [];
+    if (!showsCatalogs) {
+      if (daemonRunning) {
+        items.push({ label: "Stop Daemon", disabled: daemonBusy, onSelect: () => void stopDaemon() });
+      } else if (binaryReady) {
+        items.push({ label: "Start Daemon", disabled: daemonBusy, onSelect: () => void startDaemon() });
+      } else {
+        items.push({
+          label: installBusy || binaryInstalling ? "Installing aria2..." : "Install aria2",
+          disabled: installBusy || binaryInstalling,
+          onSelect: () => void ensureBinary(),
+        });
+      }
+      items.push(SEP, { label: "Open Download Folder", onSelect: () => void openDownloadFolder() });
+    }
+    if (showsDrivers) {
+      items.push({
+        label: catalogRefreshBusy ? "Refreshing Catalogs..." : "Refresh Catalogs",
+        disabled: catalogRefreshBusy,
+        onSelect: () => void refreshVendorCatalogs(),
+      });
+    }
+    return { items, refresh: () => void loadConfig() };
+  }, [
+    showsCatalogs,
+    showsDrivers,
+    daemonRunning,
+    binaryReady,
+    binaryInstalling,
+    daemonBusy,
+    installBusy,
+    catalogRefreshBusy,
+    stopDaemon,
+    startDaemon,
+    ensureBinary,
+    openDownloadFolder,
+    refreshVendorCatalogs,
+    loadConfig,
+  ]);
+  useConsoleActions(consoleActions);
+
   return (
     <PanelShell
-      icon={icon}
       title={title ?? "Transfers"}
-      toolbar={
-        <>
-          <button type="button" className="btn" disabled={loadingConfig} onClick={() => void loadConfig()}>
-            Refresh
-          </button>
-          {/* Daemon lifecycle and the download folder belong to Transfers - the
-              catalog panels only queue work, they don't manage the client. */}
-          {!showsCatalogs && (
-            <>
-              {config?.daemonRunning ? (
-                <button type="button" className="btn" disabled={daemonBusy} onClick={() => void stopDaemon()}>
-                  Stop daemon
-                </button>
-              ) : config?.binary?.ready ? (
-                <button type="button" className="btn" disabled={daemonBusy} onClick={() => void startDaemon()}>
-                  Start daemon
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="btn"
-                  title="Download the aria2 binary - needed once before any transfer can start"
-                  disabled={installBusy || config?.binary?.installing}
-                  onClick={() => void ensureBinary()}
-                >
-                  {installBusy || config?.binary?.installing ? "Installing aria2..." : "Install aria2"}
-                </button>
-              )}
-              <button
-                type="button"
-                className="btn"
-                title="Opens the ISO & driver root - where images and driver packs land (set under Settings -> Downloads)"
-                onClick={() => void openDownloadFolder()}
-              >
-                Open download folder
-              </button>
-            </>
-          )}
-        </>
-      }
     >
       <div className="flex flex-col gap-0 text-[12px] min-h-0 flex-1" style={{ color: "var(--text)" }}>
         {visibleTabs.length > 1 && (
@@ -1561,17 +1569,6 @@ export function ContentWorkspace({
                 >
                   Microsoft ({microsoftDriverCount})
                 </button>
-                <span className="ml-auto self-center">
-                  <button
-                    type="button"
-                    className="btn py-0.5 text-[10px]"
-                    disabled={catalogRefreshBusy}
-                    title={`Refresh all vendor SCCM catalogs on this workstation. Acer opens a short-lived browser window when its coverage needs topping up.${tracker?.acerCatalogAt ? ` Last refresh ${tracker.acerCatalogAt.slice(0, 10)}.` : ""}${tracker?.acerCatalogStale || tracker?.dellCatalogStale || tracker?.hpCatalogStale || tracker?.lenovoCatalogStale || tracker?.microsoftCatalogStale ? " A catalog is serving from stale cache." : ""}`}
-                    onClick={() => void refreshVendorCatalogs()}
-                  >
-                    {catalogRefreshBusy ? "Refreshing catalogs..." : "Refresh catalogs"}
-                  </button>
-                </span>
               </div>
               <div className="input-box max-w-[20rem]">
                 <input

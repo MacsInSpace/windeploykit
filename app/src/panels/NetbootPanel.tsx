@@ -2,5 +2,5 @@
 import { PxeWorkspace } from "../workspaces/PxeWorkspace";
 
 export function NetbootPanel() {
-  return <PxeWorkspace sections={["host"]} title="Netboot" icon="netboot" />;
+  return <PxeWorkspace sections={["host"]} title="Netboot" />;
 }

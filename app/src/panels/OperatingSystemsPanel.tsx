@@ -5,5 +5,5 @@
 import { ContentWorkspace } from "../workspaces/ContentWorkspace";
 
 export function OperatingSystemsPanel() {
-  return <ContentWorkspace tabs={["images"]} title="Operating Systems" icon="operating-systems" />;
+  return <ContentWorkspace tabs={["images"]} title="Operating Systems" />;
 }

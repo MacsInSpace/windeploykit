@@ -2,5 +2,5 @@
 import { PxeWorkspace } from "../workspaces/PxeWorkspace";
 
 export function TaskSequencesPanel() {
-  return <PxeWorkspace sections={["taskSequences"]} title="Task Sequences" icon="task-sequences" />;
+  return <PxeWorkspace sections={["taskSequences"]} title="Task Sequences" />;
 }

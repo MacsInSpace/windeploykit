@@ -6,9 +6,10 @@
  * driver packs are stored and served from. Boot images, the TFTP root and configs
  * deliberately stay in app data (AGENT_NOTES.md section 3b).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PanelShell } from "../components/PanelShell";
+import { useConsoleActions, type ConsoleNodeActions } from "../state/consoleActions";
 import { SetupWizard } from "../components/SetupWizard";
 import {
   formatBytes,
@@ -41,6 +42,21 @@ export function DeploymentSharePanel() {
 
   useEffect(refresh, [refresh, editing]);
 
+  // Properties... is the Workbench verb for the share root; it opens the same
+  // wizard first run used. Registered with the shell, not drawn here.
+  const openProperties = useCallback(() => setEditing(true), []);
+  const consoleActions = useMemo<ConsoleNodeActions>(
+    () => ({
+      // The shell renders Properties... itself (bold, Alt+Enter) from `properties`,
+      // so it is not repeated in `items` - that showed the verb twice.
+      items: [],
+      properties: openProperties,
+      refresh,
+    }),
+    [openProperties, refresh],
+  );
+  useConsoleActions(consoleActions);
+
   const override = String(getSetting(SETTING_IMAGE_LIBRARY_DIR)).trim();
   const low = space?.ok && space.freeBytes != null && space.freeBytes < 20 * 1024 ** 3;
 
@@ -62,16 +78,6 @@ export function DeploymentSharePanel() {
             : false,
           { label: "Boot files", value: "app data (not here)" },
         ]}
-        toolbar={
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setEditing(true)}
-            title="Change where ISOs, OS images and driver packs are stored"
-          >
-            Change...
-          </button>
-        }
       >
         <div className="flex flex-col gap-4 px-5 py-4">
           <section>

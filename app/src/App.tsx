@@ -1,14 +1,14 @@
 /**
- * App shell - MDT console tree on the left, one panel per node on the right.
+ * App - the MMC console shell with one panel per tree node.
  *
- * No sign-in gate and no boot overlay: WinDeployKit has no directory session, so
- * the workspace is live from first paint. The one thing that does gate the first
+ * No sign-in gate and no boot overlay: WinDeployKit has no directory session,
+ * so the console is live from first paint. The one thing that gates the first
  * launch is setup: the Deploy$ base has to be chosen before anything can be
- * downloaded or served (see components/SetupWizard.tsx).
+ * downloaded or served (components/SetupWizard.tsx).
  */
 import { useEffect, useState } from "react";
 
-import { Sidebar } from "./components/Sidebar";
+import { ConsoleShell } from "./components/ConsoleShell";
 import { SetupWizard } from "./components/SetupWizard";
 import { findNavNode } from "./components/navConfig";
 import { NetbootPanel } from "./panels/NetbootPanel";
@@ -24,31 +24,24 @@ import { getSetting } from "./lib/settings";
 import { pushImageLibraryRoot } from "./lib/imageLibrary";
 
 export default function App() {
-  const [activeId, setActiveId] = useState("netboot");
   const [setupOpen, setSetupOpen] = useState(() => !getSetting(SETTING_SETUP_COMPLETED));
-  const node = findNavNode(activeId);
 
   // The sidecar keys promote, import, Caddy routes and the SMB share off the
-  // image library root, and only learns it when the frontend pushes it. Nothing
-  // called this before, so the sidecar always fell back to the default root no
-  // matter what the setting said.
+  // image library root, and only learns it when the frontend pushes it.
   useEffect(() => {
     if (setupOpen) return;
     void pushImageLibraryRoot();
   }, [setupOpen]);
 
   return (
-    <div className="app-shell flex h-full min-h-0">
-      <Sidebar activeId={activeId} onSelect={setActiveId} />
-      <main className="app-main flex min-h-0 min-w-0 flex-1 flex-col">
-        {renderPanel(activeId, node?.label ?? "")}
-      </main>
+    <>
+      <ConsoleShell initialId="deployment-share" renderPanel={renderPanel} />
       <SetupWizard open={setupOpen} onDone={() => setSetupOpen(false)} />
-    </div>
+    </>
   );
 }
 
-function renderPanel(id: string, label: string) {
+function renderPanel(id: string) {
   switch (id) {
     case "deployment-share":
       return <DeploymentSharePanel />;
@@ -67,17 +60,18 @@ function renderPanel(id: string, label: string) {
     case "transfers":
       return <TransfersPanel />;
     default:
-      return <NotBuiltYet label={label} id={id} />;
+      return <NotBuiltYet id={id} />;
   }
 }
 
 /** Placeholder for nodes with no panel yet (Applications, Site Profile, Sidecar Log). */
-function NotBuiltYet({ label, id }: { label: string; id: string }) {
+function NotBuiltYet({ id }: { id: string }) {
+  const label = findNavNode(id)?.label ?? id;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="panel-header">
-        <h1 className="panel-title">{label}</h1>
-      </header>
+      <div className="results-head">
+        <span className="results-title">{label}</span>
+      </div>
       <div className="flex flex-1 items-center justify-center">
         <p className="empty-state mono">{id} - panel not built yet</p>
       </div>

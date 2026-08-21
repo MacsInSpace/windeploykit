@@ -23,7 +23,7 @@ separate Downloads panel.
 
 | MDT Deployment Workbench | Here |
 | --- | --- |
-| Console tree (left) | Sidebar nav |
+| Console tree (left) | `ConsoleTree` - 26px rows, connector lines, draggable splitter |
 | Deployment Share root | Overview - image library root + service status badges |
 | Operating Systems | WIMs + mounted ISO catalog **+ OS acquisition** (Evaluation Center ISOs, torrents, OEM ISOs) |
 | Out-of-Box Drivers | `Drivers/<Make>/<Model>` store **+ vendor catalog download** (Dell/HP/Lenovo/Acer/Surface) |
@@ -34,7 +34,8 @@ separate Downloads panel.
 | Monitoring | Imaging-log live view (per-device) |
 | Advanced Configuration | Site Profile, artifact host, transfers |
 | List view (centre) | DataTable, mono data columns |
-| Actions pane / Properties dialog | Detail pane with actions; properties as detail-pane tabs, not modals |
+| Action menu / right-click / toolbar | `state/consoleActions` - one `MenuItem[]` rendered in all three; panels draw no buttons |
+| Properties dialog | `properties` in the same registry (Alt+Enter, bold in the menu) |
 
 Nav order: **Deployment Share** (Overview | Operating Systems | Out-of-Box Drivers |
 Applications | Task Sequences | Boot Images | Netboot) | **Monitoring** (Deployments) |

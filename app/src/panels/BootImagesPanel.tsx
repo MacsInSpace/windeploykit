@@ -2,5 +2,5 @@
 import { PxeWorkspace } from "../workspaces/PxeWorkspace";
 
 export function BootImagesPanel() {
-  return <PxeWorkspace sections={["bootImages"]} title="Boot Images" icon="boot-images" />;
+  return <PxeWorkspace sections={["bootImages"]} title="Boot Images" />;
 }

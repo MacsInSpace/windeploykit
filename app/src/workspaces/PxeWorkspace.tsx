@@ -7,6 +7,8 @@ import { DataTable, type DataTableColumn } from "../components/DataTable";
 import type { MaybeInfoTipRow } from "../components/InfoTip";
 import { InfrastructureCredentialsOverlay } from "../components/InfrastructureCredentialsOverlay";
 import { PanelShell } from "../components/PanelShell";
+import { SEP } from "../components/ContextMenu";
+import { useConsoleActions, type ConsoleNodeActions } from "../state/consoleActions";
 import { SessionDot } from "../components/SessionDot";
 import { sidecar } from "../lib/ipc";
 import {
@@ -257,11 +259,9 @@ const ALL_SECTIONS: PxeSection[] = ["host", "pxeLog", "imagingClients", "bootIma
 export function PxeWorkspace({
   sections = ALL_SECTIONS,
   title,
-  icon,
 }: {
   sections?: readonly PxeSection[];
   title?: string;
-  icon?: string;
 } = {}) {
   const show = (key: PxeSection) => sections.includes(key);
   // A section that owns its whole panel doesn't need a heading (the panel title
@@ -1337,10 +1337,36 @@ export function PxeWorkspace({
     { label: "PXE", value: status?.running ? "active" : "stopped" },
   ];
 
+  // Verbs go to the console shell (Action menu, right-click, toolbar), not to a
+  // panel header. Service lifecycle belongs to Netboot, which owns the services;
+  // other nodes only consume what those services produce.
+  const showHost = show("host");
+  const lanIpText = status?.lanIp ? `LAN ${status.lanIp}` : "No LAN IP";
+  const running = Boolean(status?.running);
+  const consoleActions = useMemo<ConsoleNodeActions>(
+    () => ({
+      items: showHost
+        ? [
+            { label: "Credentials...", disabled: busy || loading, onSelect: () => setCredentialsOpen(true) },
+            SEP,
+            {
+              label: busy ? "Working..." : "Start Services",
+              disabled: busy || loading || !hasLanIp,
+              onSelect: () => void startServices(),
+            },
+            { label: "Stop Services", disabled: busy || loading || !running, onSelect: () => void stopServices() },
+          ]
+        : [],
+      refresh: reloadConfig,
+      status: lanIpText,
+    }),
+    [showHost, busy, loading, hasLanIp, running, startServices, stopServices, reloadConfig, lanIpText],
+  );
+  useConsoleActions(consoleActions);
+
   return (
     <>
       <PanelShell
-        icon={icon}
         title={title ?? PLUGIN_TITLE}
         subtitle={
           status?.lanIp ? (
@@ -1350,40 +1376,6 @@ export function PxeWorkspace({
           )
         }
         details={headerDetails}
-        toolbar={
-          // Service lifecycle belongs to Netboot, which owns the services.
-          // Other nodes only consume what those services produce.
-          show("host") ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className="btn"
-                disabled={busy || loading}
-                title="Local administrator for macOS TFTP elevation and build-share SMB"
-                onClick={() => setCredentialsOpen(true)}
-              >
-                Credentials
-              </button>
-              <button
-                className="btn"
-                type="button"
-                disabled={busy || loading || !hasLanIp}
-                title={hasLanIp ? undefined : "Connect Ethernet and select an adapter first"}
-                onClick={() => void startServices()}
-              >
-                {busy ? "Working..." : "Start services"}
-              </button>
-              <button
-                className="btn"
-                type="button"
-                disabled={busy || loading || !status?.running}
-                onClick={() => void stopServices()}
-              >
-                Stop services
-              </button>
-            </div>
-          ) : undefined
-        }
       >
         <div className="flex min-h-0 flex-1 flex-col gap-4 p-4">
           {loading && (

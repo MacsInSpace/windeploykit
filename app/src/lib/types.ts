@@ -66,6 +66,7 @@ export type SidecarCommand =
   | "GetPxeBootOptionalAssets"
   | "GetPxeBootPluginConfig"
   | "GetPxeBootPluginStatus"
+  | "GetSecretVaultStatus"
   | "GetPxeBootTaskSequences"
   | "GetPxeBootWimLibrary"
   | "GetSidecarStatus"
