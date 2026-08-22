@@ -94,7 +94,10 @@ function Get-AppPxeBootTaskSequenceDefaults {
             enabled = $false
             fields  = [ordered]@{
                 computerName = 'SVR01'
-                network      = 'static'
+                # DHCP by default: a seeded sequence must be valid the moment it is enabled.
+                # With 'static' and no address it enabled straight into "Fix fields to save",
+                # which named no field (Craig, 2026-08-22). Static is still two dropdowns away.
+                network      = 'dhcp'
                 ipCidr       = ''
                 gateway      = ''
                 dns1         = ''

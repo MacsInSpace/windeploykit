@@ -606,21 +606,34 @@ export function PxeWorkspace({
 
   /** First blocking problem across ENABLED sequences (disabled drafts may stay
    * incomplete). Static networking requires IP (CIDR) + gateway + first DNS. */
-  const tsValidationError = useMemo(() => {
+  const tsValidation = useMemo<{ id: string; field: string; message: string } | null>(() => {
     for (const s of tsEdit ?? []) {
       if (!s.enabled || s.fields.network !== "static") continue;
       const ip = (s.fields.ipCidr ?? "").trim();
       const gw = (s.fields.gateway ?? "").trim();
-      if (!IPV4_CIDR_RE.test(ip)) return `${s.name}: IP address must be IPv4/CIDR (e.g. 10.150.198.20/23).`;
-      if (!IPV4_RE.test(gw)) return `${s.name}: Gateway must be an IPv4 address.`;
+      const bad = (field: string, message: string) => ({ id: s.id, field, message: `${s.name}: ${message}` });
+      if (!IPV4_CIDR_RE.test(ip)) return bad("ipCidr", "IP address must be IPv4/CIDR (e.g. 10.150.198.20/23).");
+      if (!IPV4_RE.test(gw)) return bad("gateway", "Gateway must be an IPv4 address.");
       const dns = [s.fields.dns1, s.fields.dns2, s.fields.dns3].map((v) => (v ?? "").trim());
-      if (!dns[0]) return `${s.name}: at least one DNS server is required for Static IP.`;
+      if (!dns[0]) return bad("dns1", "at least one DNS server is required for Static IP.");
       for (const d of dns) {
-        if (d && !IPV4_RE.test(d)) return `${s.name}: DNS entries must be IPv4 addresses.`;
+        if (d && !IPV4_RE.test(d)) return bad("dns1", "DNS entries must be IPv4 addresses.");
       }
     }
     return null;
   }, [tsEdit]);
+  // Kept as a string for the existing call sites.
+  const tsValidationError = tsValidation?.message ?? null;
+
+  /** Outline for the one field currently blocking a save. */
+  const tsFieldOutline = useCallback(
+    (seqId: string, key: string): CSSProperties | undefined =>
+      tsValidation && tsValidation.id === seqId && tsValidation.field === key
+        ? { borderColor: "var(--amber)" }
+        : undefined,
+    [tsValidation],
+  );
+
 
   const saveTaskSequences = useCallback(async () => {
     if (!tsEdit) return;
@@ -2195,8 +2208,19 @@ export function PxeWorkspace({
                         title={tsValidationError ?? undefined}
                         onClick={() => void saveTaskSequences()}
                       >
-                        {tsSaving ? "Saving..." : tsValidationError ? "Fix fields to save" : "Save & publish"}
+                        {tsSaving ? "Saving..." : "Save & publish"}
                       </button>
+                      {tsValidation ? (
+                        <button
+                          type="button"
+                          className="text-[10px] underline"
+                          style={{ color: "var(--amber)" }}
+                          title="Open the sequence that needs fixing"
+                          onClick={() => setTsSelectedId(tsValidation.id)}
+                        >
+                          {tsValidation.message}
+                        </button>
+                      ) : null}
                     </div>
                     {(tsEdit ?? []).map((seq) => {
                       const published = tsPayload?.publishedFiles.includes(`${seq.id}.xml`) ?? false;
@@ -2566,6 +2590,7 @@ export function PxeWorkspace({
                                     ) : (
                                       <input
                                         className="input-box mono h-[26px] text-[11px]"
+                                        style={tsFieldOutline(seq.id, key)}
                                         value={seq.fields[key]}
                                         spellCheck={false}
                                         onChange={(e) => setField(e.target.value)}
@@ -2640,6 +2665,31 @@ export function PxeWorkspace({
                                   ))}
                                 </div>
                               )}
+                            </div>
+                          ) : null}
+                          {selected ? (
+                            <div
+                              className="flex flex-wrap items-center gap-2 border-t px-3 py-2"
+                              style={{ borderColor: "var(--border)" }}
+                            >
+                              <span className="text-[10px]" style={{ color: tsDirty ? "var(--amber)" : "var(--text3)" }}>
+                                {tsValidationError
+                                  ? tsValidationError
+                                  : tsDirty
+                                    ? "Unsaved changes"
+                                    : published
+                                      ? "Published"
+                                      : "Saved"}
+                              </span>
+                              <button
+                                type="button"
+                                className="btn btn-primary ml-auto px-2 py-0.5 text-[11px]"
+                                disabled={!tsDirty || tsSaving || Boolean(tsValidationError)}
+                                title={tsValidationError ?? "Write the sequence and publish it to the deploy share"}
+                                onClick={() => void saveTaskSequences()}
+                              >
+                                {tsSaving ? "Saving..." : "Save & publish"}
+                              </button>
                             </div>
                           ) : null}
                           {selected ? (
