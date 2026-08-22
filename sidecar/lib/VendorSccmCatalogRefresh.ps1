@@ -210,6 +210,9 @@ function Sync-AppVendorSccmCatalogRefreshJob {
         Write-SidecarEvent -EventName 'vendor-catalog-refresh' -Data @{ error = 'refresh process ended without a result (killed or crashed)'; automatic = [bool]$job.automatic }
         return
     }
+    if (Get-Command Clear-AppAria2TrackerCatalogPayloadCache -ErrorAction SilentlyContinue) {
+        Clear-AppAria2TrackerCatalogPayloadCache
+    }
     Write-SidecarLog "vendor catalogs: background refresh finished$(if ($job.automatic) { ' (automatic)' })"
     $payload | Add-Member -NotePropertyName automatic -NotePropertyValue ([bool]$job.automatic) -Force
     Write-SidecarEvent -EventName 'vendor-catalog-refresh' -Data $payload

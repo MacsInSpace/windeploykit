@@ -845,6 +845,9 @@ function Sync-AppAria2DirectDownloadJobs {
                 }
                 $null = Invoke-AppAria2PromoteJobFiles -JobRecord $jobRecord
                 Set-AppAria2DirectDownloadOutcome -Key ([string]$key) -Status 'promoted' -FileName ([string]$job.fileName)
+                # The Drivers/OS lists show what is on disk, so the memoised payload is
+                # stale the instant a pack or ISO lands.
+                Clear-AppAria2TrackerCatalogPayloadCache
                 if ($canEmit) {
                     Write-SidecarEvent -EventName 'aria2-promote' -Data @{
                         ok        = $true
@@ -1984,7 +1987,25 @@ function Get-AppAria2HpCatalogDriverRows {
     @($rows)
 }
 
+# Building the tracker payload walks the driver seed and all five vendor catalogs:
+# ~1500 rows and about a second of work, EVERY call, on the single-threaded dispatch
+# loop. The Drivers panel asks for it on mount and after events, which is what made it
+# take 10-15 seconds to appear (field, 2026-08-22). Memoised briefly instead, and
+# invalidated the moment anything that feeds it changes.
+$script:AppAria2TrackerPayloadCache = $null
+$script:AppAria2TrackerPayloadTtlSeconds = 120
+
+function Clear-AppAria2TrackerCatalogPayloadCache {
+    $script:AppAria2TrackerPayloadCache = $null
+}
+
 function Get-AppAria2TrackerCatalogPayload {
+    param([switch]$Force)
+    $nowUtc = (Get-Date).ToUniversalTime()
+    if (-not $Force -and $script:AppAria2TrackerPayloadCache -and
+        ($nowUtc - $script:AppAria2TrackerPayloadCache.at).TotalSeconds -lt $script:AppAria2TrackerPayloadTtlSeconds) {
+        return $script:AppAria2TrackerPayloadCache.payload
+    }
     $tracker = Read-AppAria2TrackerManifest
     $torrentRows = @(Get-AppAria2TorrentCatalogRows -Tracker $tracker)
     $oemIsoRows = @(Get-AppAria2OemIsoCatalogRows -Tracker $tracker)
@@ -2274,7 +2295,7 @@ function Get-AppAria2TrackerCatalogPayload {
         $microsoftCatalogSummary = Get-AppMicrosoftSccmCatalogFamilySummary -Catalog $microsoftCatalog
     }
 
-    @{
+    $built = @{
         torrents         = $torrentRows
         oemIsos          = $oemIsoRows
         drivers          = @($rows)
@@ -2301,6 +2322,8 @@ function Get-AppAria2TrackerCatalogPayload {
         microsoftCatalogVersion = if ($microsoftCatalog) { [string](Get-AppAria2JsonProp -Item $microsoftCatalog -Name 'catalogVersion') } else { $null }
         microsoftCatalogSummary = $microsoftCatalogSummary
     }
+    $script:AppAria2TrackerPayloadCache = @{ at = $nowUtc; payload = $built }
+    $built
 }
 
 function Merge-AppAria2JobIntoDownloadRow {

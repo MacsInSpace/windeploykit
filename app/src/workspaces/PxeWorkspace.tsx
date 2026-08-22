@@ -280,7 +280,9 @@ export function PxeWorkspace({
     { ttlMs: 0, pollMs: STATUS_POLL_MS, invalidateOnRefetch: false },
   );
   const loading = configLoading && !data;
-  const refreshing = configLoading && !!data;
+  // No "Refreshing..." line: this view polls every 8s, so the flag is true most of the
+  // time and reads as permanently stuck (field, 2026-08-22) - especially on a screen with
+  // nothing in it yet. The cached data stays on screen and updates silently instead.
 
   const [busy, setBusy] = useState(false);
   const [menuRebuildMessage, setMenuRebuildMessage] = useState<string | null>(null);
@@ -1393,12 +1395,6 @@ export function PxeWorkspace({
           {loading && (
             <p className="text-[12px]" style={{ color: "var(--text2)" }}>
               Loading Netboot status...
-            </p>
-          )}
-
-          {refreshing && (
-            <p className="text-[12px]" style={{ color: "var(--text3)" }}>
-              Refreshing...
             </p>
           )}
 
