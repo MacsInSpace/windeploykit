@@ -39,7 +39,7 @@ what was deliberately left behind.
 
 ### USM is READ-ONLY - and is now DOWNSTREAM of us
 
-`/Volumes/Data/projects/stmc-manager` ("USM") is the app this was extracted
+`/Volumes/Data/projects/usm` ("USM"; the checkout was `stmc-manager` until 2026-08-22) is the app this was extracted
 from. It is **under active development by the user**.
 
 > **Never modify, never `git checkout`, never `git stash` in that repo.**
