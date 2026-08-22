@@ -461,6 +461,39 @@ function Get-AppPxeBootTaskSequencePublishContext {
     $ctx
 }
 
+function Get-AppPxeBootTsGvlkOptions {
+    <#
+    .SYNOPSIS
+        Microsoft GVLK suggestions for the product-key field: the server editions from
+        the eval-conversion table (build-labelled) plus common client keys.
+    .NOTES
+        Suggestions only - the field is free text (a corporate MAK or retail key is
+        what a licensed install actually wants; WDK does not KMS-activate). Leaving it
+        blank is correct for an evaluation image: the conversion step licenses it, and
+        a GVLK in specialize would make Setup reject the answer file.
+    #>
+    $out = @()
+    if ($script:AppServerEvalGvlk) {
+        foreach ($build in @('26100', '20348', '17763', '14393')) {
+            if (-not $script:AppServerEvalGvlk.Contains($build)) { continue }
+            $table = $script:AppServerEvalGvlk[$build]
+            $name = if ($table.Contains('name')) { [string]$table['name'] } else { "Build $build" }
+            foreach ($ed in @('ServerStandard', 'ServerDatacenter')) {
+                if ($table.Contains($ed)) {
+                    $edLabel = $ed -replace '^Server(Standard|Datacenter|Solution)$', '$1'
+                    $out += @{ label = "$name $edLabel"; key = [string]$table[$ed] }
+                }
+            }
+        }
+    }
+    # Published client GVLKs (learn.microsoft.com KMS client setup keys).
+    $out += @{ label = 'Windows 11/10 Pro';                 key = 'W269N-WFGWX-YVC9B-4J6C9-T83GX' }
+    $out += @{ label = 'Windows 11/10 Enterprise';          key = 'NPPR9-FWDCX-D2C8J-H872K-2YT43' }
+    $out += @{ label = 'Windows 11 Enterprise LTSC 2024';   key = 'M7XTQ-FN8P6-TTKYV-9D4CC-J462D' }
+    $out += @{ label = 'Windows 11 IoT Enterprise LTSC 2024'; key = 'KBN8V-HFGQ4-MGXVD-347P6-PDQGT' }
+    $out
+}
+
 function Get-AppPxeBootTsProductKeyDefault {
     # Role default from the configured KMS catalog; falls back to Microsoft's
     # published KMS client setup keys (GVLKs) below.
@@ -1242,6 +1275,7 @@ function Get-AppPxeBootTaskSequencesPayload {
             }
         }
     } catch { }
+    if ($kmsKeyOptions.Count -eq 0) { $kmsKeyOptions = @(Get-AppPxeBootTsGvlkOptions) }
     # Role-default product keys resolved server-side so the frontend needs no GVLK
     # copy of its own (it only uses these to clear a pinned key on a role switch).
     $roleDefaults = @{

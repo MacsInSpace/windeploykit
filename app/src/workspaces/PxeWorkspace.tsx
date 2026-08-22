@@ -2487,23 +2487,31 @@ export function PxeWorkspace({
                                         onChange={(e) => setField(e.target.value)}
                                       />
                                     ) : key === "productKey" ? (
-                                      <select
-                                        className="input-box mono h-[26px] text-[11px]"
-                                        value={seq.fields[key]}
-                                        title="From the GSV KMS catalog - blank uses the role default"
-                                        onChange={(e) => setField(e.target.value)}
-                                      >
-                                        <option value="">(role default)</option>
-                                        {(tsPayload?.kmsKeyOptions ?? []).map((o) => (
-                                          <option key={o.key} value={o.key}>
-                                            {o.label}
-                                          </option>
-                                        ))}
-                                        {seq.fields[key] &&
-                                        !(tsPayload?.kmsKeyOptions ?? []).some((o) => o.key === seq.fields[key]) ? (
-                                          <option value={seq.fields[key]}>{seq.fields[key]}</option>
-                                        ) : null}
-                                      </select>
+                                      <>
+                                        <input
+                                          className="input-box mono h-[26px] text-[11px]"
+                                          value={seq.fields[key]}
+                                          spellCheck={false}
+                                          list={`pk-${seq.id}`}
+                                          placeholder="blank = unlicensed / eval self-converts"
+                                          title={
+                                            "Leave blank for an evaluation image - the conversion step licenses it, and a key here would make Setup reject the answer file. " +
+                                            "Otherwise type your MAK or retail key, or pick a GVLK suggestion. WDK does not KMS-activate."
+                                          }
+                                          onChange={(e) => setField(e.target.value.trim())}
+                                        />
+                                        <datalist id={`pk-${seq.id}`}>
+                                          {(tsPayload?.kmsKeyOptions ?? [])
+                                            .filter((o) =>
+                                              seq.kind === "server" ? /server/i.test(o.label) : !/server/i.test(o.label),
+                                            )
+                                            .map((o) => (
+                                              <option key={o.key} value={o.key}>
+                                                {o.label}
+                                              </option>
+                                            ))}
+                                        </datalist>
+                                      </>
                                     ) : key === "network" ? (
                                       <select
                                         className="input-box mono h-[26px] text-[11px]"
