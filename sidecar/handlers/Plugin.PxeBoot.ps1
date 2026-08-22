@@ -433,3 +433,20 @@ function Handle-ClearPxeBootLogTail {
     $data = Clear-AppPxeBootLogTail
     Write-SidecarResponse -Id $Id -Data $data
 }
+
+function Handle-GetTaskSequenceStepLibrary {
+    param([int]$Id, $Params)
+    # Static catalog, split client/server - the menu caches it against the version.
+    $data = Get-AppTaskSequenceStepLibraryLists
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-GetTaskSequenceStepFromLibrary {
+    param([int]$Id, $Params)
+    $entryId = Get-AppSidecarParam -Params $Params -Name 'entryId'
+    if ([string]::IsNullOrWhiteSpace([string]$entryId)) { throw 'GetTaskSequenceStepFromLibrary: entryId required.' }
+    $value = Get-AppSidecarParam -Params $Params -Name 'value'
+    # Substitution and validation stay server-side so the UI cannot smuggle a command in.
+    $data = Get-AppTaskSequenceStepFromLibrary -Id ([string]$entryId) -Value ([string]$value)
+    Write-SidecarResponse -Id $Id -Data $data
+}
