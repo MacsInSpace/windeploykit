@@ -606,32 +606,41 @@ export function PxeWorkspace({
 
   /** First blocking problem across ENABLED sequences (disabled drafts may stay
    * incomplete). Static networking requires IP (CIDR) + gateway + first DNS. */
-  const tsValidation = useMemo<{ id: string; field: string; message: string } | null>(() => {
+  /** Every field currently blocking a save, keyed "<sequenceId>:<field>" - the UI marks
+   * them all in amber rather than explaining in prose (Craig, 2026-08-22: "orange around
+   * the invalid field/s is all it needs"). dns1..dns3 all report as dns1: they share one
+   * editor row. */
+  const tsInvalid = useMemo(() => {
+    const bad = new Set<string>();
+    let first: string | null = null;
     for (const s of tsEdit ?? []) {
       if (!s.enabled || s.fields.network !== "static") continue;
-      const ip = (s.fields.ipCidr ?? "").trim();
-      const gw = (s.fields.gateway ?? "").trim();
-      const bad = (field: string, message: string) => ({ id: s.id, field, message: `${s.name}: ${message}` });
-      if (!IPV4_CIDR_RE.test(ip)) return bad("ipCidr", "IP address must be IPv4/CIDR (e.g. 10.150.198.20/23).");
-      if (!IPV4_RE.test(gw)) return bad("gateway", "Gateway must be an IPv4 address.");
+      const note = (field: string, message: string) => {
+        bad.add(`${s.id}:${field}`);
+        first ??= `${s.name}: ${message}`;
+      };
+      if (!IPV4_CIDR_RE.test((s.fields.ipCidr ?? "").trim())) {
+        note("ipCidr", "IP address must be IPv4/CIDR (e.g. 10.150.198.20/23).");
+      }
+      if (!IPV4_RE.test((s.fields.gateway ?? "").trim())) {
+        note("gateway", "Gateway must be an IPv4 address.");
+      }
       const dns = [s.fields.dns1, s.fields.dns2, s.fields.dns3].map((v) => (v ?? "").trim());
-      if (!dns[0]) return bad("dns1", "at least one DNS server is required for Static IP.");
-      for (const d of dns) {
-        if (d && !IPV4_RE.test(d)) return bad("dns1", "DNS entries must be IPv4 addresses.");
+      if (!dns[0]) note("dns1", "at least one DNS server is required for Static IP.");
+      for (let i = 0; i < dns.length; i++) {
+        if (dns[i] && !IPV4_RE.test(dns[i])) note(`dns${i + 1}`, "DNS entries must be IPv4 addresses.");
       }
     }
-    return null;
+    return { fields: bad, first };
   }, [tsEdit]);
-  // Kept as a string for the existing call sites.
-  const tsValidationError = tsValidation?.message ?? null;
+  // Kept as a string for the disabled button's tooltip.
+  const tsValidationError = tsInvalid.first;
 
   /** Outline for the one field currently blocking a save. */
   const tsFieldOutline = useCallback(
     (seqId: string, key: string): CSSProperties | undefined =>
-      tsValidation && tsValidation.id === seqId && tsValidation.field === key
-        ? { borderColor: "var(--amber)" }
-        : undefined,
-    [tsValidation],
+      tsInvalid.fields.has(`${seqId}:${key}`) ? { borderColor: "var(--amber)" } : undefined,
+    [tsInvalid],
   );
 
 
@@ -2210,17 +2219,7 @@ export function PxeWorkspace({
                       >
                         {tsSaving ? "Saving..." : "Save & publish"}
                       </button>
-                      {tsValidation ? (
-                        <button
-                          type="button"
-                          className="text-[10px] underline"
-                          style={{ color: "var(--amber)" }}
-                          title="Open the sequence that needs fixing"
-                          onClick={() => setTsSelectedId(tsValidation.id)}
-                        >
-                          {tsValidation.message}
-                        </button>
-                      ) : null}
+
                     </div>
                     {(tsEdit ?? []).map((seq) => {
                       const published = tsPayload?.publishedFiles.includes(`${seq.id}.xml`) ?? false;
@@ -2544,6 +2543,7 @@ export function PxeWorkspace({
                                               <div key={i} className="flex items-center gap-1">
                                                 <input
                                                   className="input-box mono h-[26px] flex-1 text-[11px]"
+                                                  style={tsFieldOutline(seq.id, `dns${i + 1}`)}
                                                   value={values[i]}
                                                   spellCheck={false}
                                                   placeholder={i === 0 ? "10.x.x.x (required)" : "10.x.x.x"}
@@ -2673,13 +2673,7 @@ export function PxeWorkspace({
                               style={{ borderColor: "var(--border)" }}
                             >
                               <span className="text-[10px]" style={{ color: tsDirty ? "var(--amber)" : "var(--text3)" }}>
-                                {tsValidationError
-                                  ? tsValidationError
-                                  : tsDirty
-                                    ? "Unsaved changes"
-                                    : published
-                                      ? "Published"
-                                      : "Saved"}
+                                {tsDirty ? "Unsaved changes" : published ? "Published" : "Saved"}
                               </span>
                               <button
                                 type="button"
