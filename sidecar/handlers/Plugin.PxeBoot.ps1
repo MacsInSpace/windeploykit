@@ -450,3 +450,15 @@ function Handle-GetTaskSequenceStepFromLibrary {
     $data = Get-AppTaskSequenceStepFromLibrary -Id ([string]$entryId) -Value ([string]$value)
     Write-SidecarResponse -Id $Id -Data $data
 }
+
+function Handle-ListPxeBootIsos {
+    <#
+    .SYNOPSIS
+        Just the ISOs in the store. GetPxeBootPluginStatus also answers this, but it
+        costs ~2.6 s (process probes, mounts, adapter enumeration) where the inventory
+        alone is ~3 ms - and a content panel only wants the list.
+    #>
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    Write-SidecarResponse -Id $Id -Data @{ isos = @(Get-AppPxeBootIsoInventory) }
+}

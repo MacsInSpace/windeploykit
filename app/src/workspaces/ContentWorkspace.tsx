@@ -25,7 +25,6 @@ import type {
   Aria2TrackerDriverRow,
   Aria2TrackerOemIsoRow,
   PxeBootIsoEntry,
-  PxeBootPluginStatus,
   EvalIsoCatalogResponse,
   EvalIsoDownloadAllResponse,
   EvalIsoEntry,
@@ -287,8 +286,10 @@ export function ContentWorkspace({
 
   const loadStoreIsos = useCallback(async () => {
     try {
-      const status = await sidecar.invoke<PxeBootPluginStatus>("GetPxeBootPluginStatus");
-      setStoreIsos(status?.isos ?? []);
+      // ListPxeBootIsos, not GetPxeBootPluginStatus: the full status costs ~2.6 s
+      // (process probes, mounts, adapters) where the inventory alone is ~3 ms.
+      const data = await sidecar.invoke<{ isos?: PxeBootIsoEntry[] }>("ListPxeBootIsos", await aria2SidecarParams());
+      setStoreIsos(data?.isos ?? []);
     } catch {
       /* Netboot plug-in may be off - the section just stays empty */
     }

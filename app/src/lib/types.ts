@@ -78,6 +78,7 @@ export type SidecarCommand =
   | "ImportPxeBootWim"
   | "ImportPxeBootWimBootAssets"
   | "ImportPxeBootWimFromIso"
+  | "ListPxeBootIsos"
   | "ListVaultSecrets"
   | "RemoveVaultSecret"
   | "SetVaultSecret"
