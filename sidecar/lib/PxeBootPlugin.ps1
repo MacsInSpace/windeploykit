@@ -4709,7 +4709,44 @@ function Test-AppIsExcludedLocationIPv4 {
     return $false
 }
 
-function Get-AppPxeBootNetworkAdapters {
+# --- Short-lived memos for the status build ---------------------------------
+# Get-AppPxeBootStatus is polled every 8s by the Netboot panel and cost ~700ms per
+# call, nearly all of it shelling out: the adapter list, the LAN IP, `sharing -l`,
+# and a WIM-library file walk (measured 2026-08-22 - 190/151/113/64 ms). None of
+# those change between two polls, so each gets a memo shorter than the poll. What is
+# deliberately NOT memoised for long is process liveness: a stale "running" badge is
+# worse than a slow one, so that memo is ~1.5s, just long enough to stop one status
+# build probing the same port twice.
+$script:AppPxeBootMemo = @{}
+
+function Get-AppPxeBootMemo {
+    <#
+    .SYNOPSIS
+        Run $Producer at most once per $Seconds for a given key. Failures are not
+        cached - a transient shell-out error must not stick around.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][scriptblock]$Producer,
+        [double]$Seconds = 10
+    )
+    $now = [DateTime]::UtcNow
+    $hit = $script:AppPxeBootMemo[$Key]
+    if ($hit -and ($now - $hit.at).TotalSeconds -lt $Seconds) { return $hit.value }
+    $value = & $Producer
+    $script:AppPxeBootMemo[$Key] = @{ at = $now; value = $value }
+    return $value
+}
+
+function Clear-AppPxeBootMemo {
+    # Anything that changes what these read - starting or stopping a service, importing
+    # a WIM or ISO, publishing the share - must call this so the panel does not show a
+    # stale answer for the next few seconds.
+    param([string]$Key)
+    if ($Key) { $script:AppPxeBootMemo.Remove($Key) } else { $script:AppPxeBootMemo.Clear() }
+}
+
+function Get-AppPxeBootNetworkAdaptersUncached {
     $cfg = Read-AppPxeBootConfig
     $defaultIfId = $null
     try {
@@ -4780,13 +4817,25 @@ function Resolve-AppPxeBootSelectedAdapter {
     $adapters | Where-Object { $_.isDefault } | Select-Object -First 1
 }
 
-function Get-AppPxeBootLanIp {
+function Get-AppPxeBootNetworkAdapters {
+    # Interfaces do not change between two 8s polls; the enumeration walks every NIC.
+    Get-AppPxeBootMemo -Key 'adapters' -Seconds 12 -Producer { @(Get-AppPxeBootNetworkAdaptersUncached) }
+}
+
+function Get-AppPxeBootLanIpUncached {
     param([string]$InterfaceId)
     $adapter = Resolve-AppPxeBootSelectedAdapter -InterfaceId $InterfaceId
     if (-not $adapter) { return $null }
     $ip = @($adapter.ipv4 | Where-Object { $_ -and -not (Test-AppIsExcludedLocationIPv4 $_) } | Select-Object -First 1)
     if ($ip) { return [string]$ip }
     return $null
+}
+
+function Get-AppPxeBootLanIp {
+    # Still ~100ms with the adapter list cached (the exclusion checks per address), and
+    # the host's LAN address does not change between two polls.
+    param([string]$InterfaceId)
+    Get-AppPxeBootMemo -Key "lan-ip-$InterfaceId" -Seconds 12 -Producer { Get-AppPxeBootLanIpUncached -InterfaceId $InterfaceId }
 }
 
 function Get-AppPxeBootLanIpHint {
@@ -6756,7 +6805,7 @@ function Test-AppPxeBootHttpProcessIsOurs {
     return $false
 }
 
-function Get-AppPxeBootHttpServerProcessIds {
+function Get-AppPxeBootHttpServerProcessIdsUncached {
     param([int]$Port = 0)
 
     $caddyConfig = (Get-AppPxeBootLayoutPaths).caddyfile
@@ -6811,6 +6860,14 @@ function Stop-AppPxeBootHttpProcessById {
 
 function Clear-AppPxeBootHttpTracking {
     $script:AppPxeBootState.HttpProcess = $null
+}
+
+function Get-AppPxeBootHttpServerProcessIds {
+    # Liveness, so the memo is deliberately tiny - long enough to stop one status build
+    # probing the same port twice, short enough that a service that just started or died
+    # shows correctly on the next 8s poll. Start/stop clear it outright.
+    param([int]$Port = 0)
+    Get-AppPxeBootMemo -Key "http-pids-$Port" -Seconds 1.5 -Producer { @(Get-AppPxeBootHttpServerProcessIdsUncached -Port $Port) }
 }
 
 function Sync-AppPxeBootHttpProcessState {
@@ -7358,6 +7415,8 @@ function Stop-AppPxeBootServices {
         # untouched (see Start-AppPxeBootServices -Minimal).
         [switch]$Minimal
     )
+    # Whatever the badges say next must reflect what we are about to do.
+    Clear-AppPxeBootMemo
     $stopHttp = $HttpOnly -or (-not $HttpOnly -and -not $TftpOnly)
     $stopTftp = $TftpOnly -or (-not $HttpOnly -and -not $TftpOnly)
     $stopped = [System.Collections.Generic.List[string]]::new()
@@ -7592,6 +7651,12 @@ function Get-AppPxeBootRouterInstructions {
             'UEFI target -> TFTP boot file -> local boot.ipxe menu; WIM/ISO over HTTP from this workstation.'
         )
     }
+}
+
+function Get-AppPxeBootWimLibraryLayoutSnapshot {
+    # A file walk over the WIM/ISO library. Importing or removing media clears the memo,
+    # so the only staleness possible is a file dropped in by hand within 5 seconds.
+    Get-AppPxeBootMemo -Key 'wim-layout' -Seconds 5 -Producer { Get-AppPxeBootWimLibraryLayoutSnapshotUncached }
 }
 
 function Get-AppPxeBootStatus {
@@ -8049,7 +8114,7 @@ function Get-AppPxeBootImageLibraryPlatform {
     if ($IsWindows -or $env:OS -eq 'Windows_NT') { 'windows' } elseif ($IsMacOS) { 'macos' } else { 'linux' }
 }
 
-function Get-AppPxeBootImageLibraryShareStatus {
+function Get-AppPxeBootImageLibraryShareStatusUncached {
     $name = $script:AppPxeBootImageLibraryShareName
     $cfg = Read-AppPxeBootConfig
     $root = try { Get-AppImageLibraryRoot -NoCreate } catch { $null }
@@ -8112,7 +8177,13 @@ function Get-AppPxeBootImageLibraryShareStatus {
     $status
 }
 
+function Get-AppPxeBootImageLibraryShareStatus {
+    # Shells out to `sharing -l`. Publishing or tearing down the share clears the memo.
+    Get-AppPxeBootMemo -Key 'share-status' -Seconds 8 -Producer { Get-AppPxeBootImageLibraryShareStatusUncached }
+}
+
 function Ensure-AppPxeBootImageLibraryShare {
+    Clear-AppPxeBootMemo -Key 'share-status'
     $name = $script:AppPxeBootImageLibraryShareName
     $root = Get-AppImageLibraryRoot
     $cfg = Read-AppPxeBootConfig
@@ -8156,6 +8227,7 @@ function Ensure-AppPxeBootImageLibraryShare {
 }
 
 function Remove-AppPxeBootImageLibraryShare {
+    Clear-AppPxeBootMemo -Key 'share-status'
     <#
     .SYNOPSIS
         Tear down the Deploy$ SMB share so its state follows imaging services / the SMB
@@ -8212,6 +8284,8 @@ function Start-AppPxeBootServices {
         # enable SMB on a machine whose owner never turned Netboot on.
         [switch]$Minimal
     )
+    # Whatever the badges say next must reflect what we are about to do.
+    Clear-AppPxeBootMemo
     $cfg = Read-AppPxeBootConfig
     $startHttp = -not $TftpOnly
     $startTftp = -not $HttpOnly
@@ -8397,7 +8471,7 @@ function Reveal-AppPxeBootMacOsSmbd {
     @{ opened = $false; path = $smbd; error = 'macOS only' }
 }
 
-function Get-AppPxeBootWimLibraryLayoutSnapshot {
+function Get-AppPxeBootWimLibraryLayoutSnapshotUncached {
     $paths = Get-AppPxeBootLayoutPaths
     $cfg = Read-AppPxeBootConfig
     $wimFiles = @(Get-ChildItem -LiteralPath $paths.wimDir -Filter '*.wim' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
@@ -9051,6 +9125,7 @@ function Import-AppPxeBootWimFromIso {
 }
 
 function Import-AppPxeBootIso {
+    Clear-AppPxeBootMemo -Key 'wim-layout'
     param(
         [Parameter(Mandatory)][string]$SourcePath,
         [string]$TargetFileName,
@@ -9104,6 +9179,7 @@ function Import-AppPxeBootIso {
 }
 
 function Remove-AppPxeBootIso {
+    Clear-AppPxeBootMemo -Key 'wim-layout'
     param([Parameter(Mandatory)][string]$FileName)
     $name = Get-AppPxeBootSafeIsoFileName -FileName $FileName
     $dest = Join-Path (Get-AppPxeBootLayoutPaths).isoDir $name

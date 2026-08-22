@@ -1134,3 +1134,38 @@ without `[AllowEmptyString()]`. Once the accounts block could legitimately be em
 account, no profile password - the commonest corporate sequence), building the unattend threw.
 Fixed in both repos.
 
+### Netboot panel latency (measured, 2026-08-22)
+
+Craig: "the PXE panels [are] slow". Profiled rather than guessed, and there was real fat.
+
+`Get-AppPxeBootStatus` is polled every 8 s and cost ~700 ms EVERY call - almost all of it
+shelling out for things that cannot change between two polls:
+
+| per call | before | after |
+|---|---|---|
+| `Sync-AppPxeBootHttpProcessState` (lsof for the port) | 190 ms | 2 ms |
+| `Get-AppPxeBootWimLibraryLayoutSnapshot` (file walk) | 151 ms | 0 ms |
+| `Get-AppPxeBootLanIp` | 113 ms | 0 ms |
+| `Get-AppPxeBootNetworkAdapters` | 64 ms | 0 ms |
+| `Get-AppPxeBootImageLibraryShareStatus` (`sharing -l`) | 29 ms | 0 ms |
+| **whole call** | **~700 ms** | **~200 ms** |
+
+Whole Netboot panel command set, warm: 3074 ms -> 2251 ms.
+
+`Get-AppPxeBootMemo -Key -Seconds -Producer` is the mechanism: run at most once per N
+seconds, never cache a failure. TTLs are chosen against what the value means, not uniformly:
+12 s for adapters and the LAN IP, 8 s for the share, 5 s for the WIM layout, and **1.5 s for
+process liveness** - long enough to stop one status build probing the same port twice, short
+enough that the next poll tells the truth. Start/stop services, share ensure/remove and ISO
+import/remove all call `Clear-AppPxeBootMemo`, so a badge never lags an action the operator
+just took.
+
+Trap that bit me here: `Clear-AppPxeBootMemo` was first inserted immediately after
+`function X {`, i.e. BEFORE `param()`. That parses, and then fails at runtime with "The
+function or command was called as if it were a method" - PowerShell reads
+`Clear-AppPxeBootMemo` followed by `param(` as a method call. Statements go after the param
+block; `StopPxeBootServices` broke exactly this way and only an IPC round-trip caught it.
+
+What is left: `GetPxeBootWimLibrary` (642 ms warm) and `GetPxeBootPluginConfig` (418 ms) both
+still rebuild status-shaped data. Worth another look only if the panel still feels slow.
+
