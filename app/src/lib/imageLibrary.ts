@@ -18,7 +18,8 @@ import { getSystemDownloadsDir } from "./downloadPath";
 //
 // See docs/core/app-data/AGENT_NOTES_APP_DATA_LAYOUT.md and docs/plugins/netboot/AGENT_NOTES_FIELDISO_SMB_PAYLOAD.md.
 
-const APP_ROOT_NAME = "WinDeployKit";
+// Product slug - the same folder name the sidecar uses (Get-AppImageLibraryDefaultRoot).
+const APP_ROOT_NAME = "windeploykit";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -45,7 +46,7 @@ export interface ImageLibraryPaths {
 
 /**
  * Resolved ISO & driver root. Explicit override wins; otherwise it follows the
- * main Downloads location under an "WinDeployKit" subfolder. The
+ * main Downloads location under a "windeploykit" subfolder. The
  * imaging library is global (not per-site), so the site subfolder option is
  * intentionally ignored here.
  */

@@ -4,10 +4,11 @@
 # different legacy parent folder. See docs/core/app-data/AGENT_NOTES_APP_DATA_LAYOUT.md
 # for the canonical layout and rationale.
 #
-# Canonical root per OS (product-name, human-readable), resolved from the product
-# identity (AppProductIdentity.ps1 / docs/handover/PRODUCT_IDENTITY_CONTRACT.md):
-#   Windows : %LOCALAPPDATA%\<DisplayName>\
-#   macOS   : ~/Library/Application Support/<DisplayName>/
+# Canonical root per OS: the product SLUG on every platform - short, no spaces, the
+# same folder name everywhere (Craig, 2026-08-22). Resolved from the product identity
+# (AppProductIdentity.ps1 / docs/handover/PRODUCT_IDENTITY_CONTRACT.md):
+#   Windows : %LOCALAPPDATA%\<Slug>\
+#   macOS   : ~/Library/Application Support/<Slug>/
 #   Linux   : $XDG_DATA_HOME/<Slug>/ (or ~/.local/share/...)
 #
 # The Tauri identifier dir stays Tauri-internal (WebView2 / logs) and is NOT used
@@ -36,9 +37,9 @@ function New-AppDir {
 function Get-AppDataRoot {
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
         $base = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' }
-        return (Join-Path $base (Get-AppProductDisplayName))
+        return (Join-Path $base (Get-AppProductSlug))
     } elseif ($IsMacOS) {
-        return (Join-Path $HOME (Join-Path 'Library/Application Support' (Get-AppProductDisplayName)))
+        return (Join-Path $HOME (Join-Path 'Library/Application Support' (Get-AppProductSlug)))
     } else {
         $base = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME '.local/share' }
         return (Join-Path $base (Get-AppProductSlug))
@@ -69,7 +70,7 @@ function Get-AppCacheDir {
 # Image library (ISOs / drivers / imageable WIMs) - user-relocatable root.
 #
 # The ROOT itself is chosen by the technician in the frontend (Settings ->
-# Downloads -> ISO & driver root, default ~/Downloads/<DisplayName>)
+# Downloads -> ISO & driver root, default ~/Downloads/<Slug>)
 # and passed into IPC calls. The sidecar must never silently default large
 # downloads to the system drive, so these helpers REQUIRE an explicit root and
 # only resolve the recommended sub-structure beneath it.
@@ -99,9 +100,9 @@ function Test-AppImageLibraryRoot {
 # not TCC-protected). Mirrors getImageLibraryRoot() in app/src/lib/imageLibrary.ts.
 function Get-AppImageLibraryDefaultRoot {
     if ($IsMacOS) {
-        return (Join-Path (Join-Path $HOME 'Public') (Get-AppProductDisplayName))
+        return (Join-Path (Join-Path $HOME 'Public') (Get-AppProductSlug))
     }
-    Join-Path (Join-Path $HOME 'Downloads') (Get-AppProductDisplayName)
+    Join-Path (Join-Path $HOME 'Downloads') (Get-AppProductSlug)
 }
 
 # macOS TCC-protected folders smbd cannot read without a manual Full Disk Access

@@ -15,7 +15,7 @@ is, where it came from, what is decided, what works, and what is booby-trapped.
 | GitHub | `MacsInSpace/windeploykit` (**private**). `main` is pushed and tracks `origin/main`; commit and push as you go |
 | Git | on `main`; initial commit `75d3f25` landed 2026-08-21. Latest state: section 9 |
 | Vault module | `MacsInSpace/SecretManagement.LocalVault` (private) - its own repo since 2026-08-22, vendored at tag `v1.0.2` |
-| App data (macOS) | `~/Library/Application Support/WinDeployKit` |
+| App data (macOS) | `~/Library/Application Support/windeploykit` (the product slug on every platform since 2026-08-22; was `WinDeployKit`) |
 | Bundle id | `com.macsinspace.windeploykit` |
 | Dev server | Vite on **42410** (HMR 42411) |
 | Sidecar entry | `sidecar/windeploykit-sidecar.ps1` |
@@ -402,7 +402,7 @@ The 2026-08-21 list of 12 is closed: the seven credential commands and
 
 | Category | Location | Why |
 | --- | --- | --- |
-| TFTP root, boot WIMs, `wimboot`, `snponly.efi`, configs, logs | **App data** - `~/Library/Application Support/WinDeployKit` / `%LOCALAPPDATA%\WinDeployKit` | Small, fixed, machine-local. Must be where the services expect it |
+| TFTP root, boot WIMs, `wimboot`, `snponly.efi`, configs, logs | **App data** - `~/Library/Application Support/windeploykit` / `%LOCALAPPDATA%\windeploykit` (slug-named since 2026-08-22) | Small, fixed, machine-local. Must be where the services expect it |
 | ISOs, imageable/SOE WIMs, driver packs, download staging | **Image library = the Deploy$ base** - user-chosen, default `~/Public/WinDeployKit` (macOS) / `~/Downloads/WinDeployKit` (Windows) | Multi-GB. Must never fill the system drive |
 
 ### The rule

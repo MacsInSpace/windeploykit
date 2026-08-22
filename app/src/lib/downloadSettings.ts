@@ -17,7 +17,7 @@ export const SETTING_DOWNLOAD_DIR = defineSetting({
  * Large/optional imaging data is user-relocatable (external drive / NAS) and must
  * never silently fill the system drive - see docs/core/app-data/AGENT_NOTES_APP_DATA_LAYOUT.md
  * and docs/plugins/netboot/AGENT_NOTES_FIELDISO_SMB_PAYLOAD.md. Empty = follow the main Downloads
- * folder, under an "WinDeployKit" subfolder.
+ * folder, under a "windeploykit" subfolder.
  */
 export const SETTING_IMAGE_LIBRARY_DIR = defineSetting({
   id: "download.imageLibraryDir",
