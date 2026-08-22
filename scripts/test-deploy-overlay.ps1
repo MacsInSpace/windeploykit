@@ -145,6 +145,47 @@ try {
         }
     }
 
+    # The shape checks above use PSObject.Properties, which is exactly the SAFE way to
+    # read an optional key - so they passed while the product threw. These run the real
+    # loops instead: with Bakes gone from the only profile, `$profile.Bakes` under
+    # StrictMode threw "The property 'Bakes' cannot be found" and Start Imaging
+    # Services died on the spot (Craig, 2026-08-23).
+    Test-Case 'the bake sweep skips a profile that bakes nothing' {
+        $wim = Join-Path ([IO.Path]::GetTempPath()) ("gate-" + [guid]::NewGuid().ToString('N') + ".wim")
+        Set-Content -LiteralPath $wim -Value 'not a real wim' -Encoding ASCII
+        try {
+            $results = @(Sync-AppPxeBootWimOverlays -WimPath $wim)
+            Assert-Equal 0 $results.Count 'bake results'
+        } finally {
+            Remove-Item -LiteralPath $wim -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Test-Case 'initrd lines come out for an overlay-eligible WIM and not for FieldIso' {
+        $lines = @(Get-AppPxeBootWimOverlayInitrdLines -WimFileName 'LiteTouchPE_x64.wim')
+        if ($lines.Count -lt 1) { throw 'expected initrd lines for a custom WinPE' }
+        foreach ($n in @('deploy.unc', 'deploy.cred', 'deploy.loghost')) {
+            if (($lines -join ' ') -notmatch [regex]::Escape($n)) { throw "initrd line for '$n' missing" }
+        }
+        Assert-Equal 0 @(Get-AppPxeBootWimOverlayInitrdLines -WimFileName 'FieldIso.wim').Count 'FieldIso initrd lines'
+    }
+
+    Test-Case 'every optional profile key reads safely, present or not' {
+        $bare = @{ Id = 'bare-profile'; AppliesTo = { param($Name) $false } }
+        foreach ($key in @('Bakes', 'BakeAppliesTo', 'Runtime', 'PublishRuntime', 'IsEnabled', 'ServedSubdir')) {
+            if ($null -ne (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $bare -Name $key)) {
+                throw "'$key' should read as null on a profile that does not set it"
+            }
+        }
+        Assert-Equal 'bare-profile' (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $bare -Name 'Id') 'Id'
+        # A profile with no IsEnabled predicate counts as enabled.
+        if (-not (Get-AppPxeBootWimOverlayProfileEnabled -OverlayProfile $bare)) { throw 'bare profile should be enabled' }
+        # And the same read works on a PSCustomObject-shaped profile (JSON round-trip).
+        $obj = [pscustomobject]@{ Id = 'obj-profile'; ServedSubdir = 'deploy' }
+        Assert-Equal 'deploy' (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $obj -Name 'ServedSubdir') 'ServedSubdir on an object'
+        if ($null -ne (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $obj -Name 'Bakes')) { throw 'missing key on an object should be null' }
+    }
+
     Test-Case 'no profile carries the old name' {
         foreach ($p in @(Get-AppPxeBootWimOverlayProfiles)) {
             if ("$($p.Id)$($p.ServedSubdir)" -match '(?i)imagedeployer') { throw "profile '$($p.Id)' still carries the old name" }

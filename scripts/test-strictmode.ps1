@@ -70,7 +70,10 @@ Write-Host ''
 Write-Host 'No unsafe null-guards on JSON reads (the guard that does not guard):'
 $libs = Get-ChildItem -Path (Join-Path $projectRoot 'sidecar') -Recurse -Filter *.ps1 |
     Where-Object { $_.FullName -notmatch 'wim-inject' }
-$unsafe = [System.Collections.Generic.List[string]]::new()
+# Keyed by file + the code itself, NOT by line number: an allowlist anchored to line
+# numbers goes red every time anything above it moves, which it did twice on
+# 2026-08-23 alone and trains people to re-stamp the numbers without reading.
+$unsafe = [ordered]@{}
 foreach ($f in $libs) {
     $n = 0
     foreach ($line in [IO.File]::ReadAllLines($f.FullName)) {
@@ -78,7 +81,9 @@ foreach ($f in $libs) {
         # $x.PSObject... is the SAFE form; anything else reading a property inside a
         # null comparison is the trap.
         if ($line -match '\$null -(ne|eq) \$[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z]' -and $line -notmatch 'PSObject') {
-            [void]$unsafe.Add(("{0}:{1}" -f $f.Name, $n))
+            $key = "{0}|{1}" -f $f.Name, ($line.Trim() -replace '\s+', ' ')
+            if (-not $unsafe.Contains($key)) { $unsafe[$key] = @() }
+            $unsafe[$key] += ("{0}:{1}" -f $f.Name, $n)
         }
     }
 }
@@ -87,22 +92,31 @@ foreach ($f in $libs) {
 $allowed = @{
     # Read-AppPxeBootConfig merges the file over a full $defaults set, so every key
     # of the object it returns is always present.
-    'PxeBootPlugin.ps1:242' = 'config object always carries every default key'
-    'PxeBootPlugin.ps1:249' = 'config object always carries every default key'
-    'PxeBootPlugin.ps1:256' = 'config object always carries every default key'
-    'PxeBootPlugin.ps1:278' = 'config object always carries every default key'
+    'PxeBootPlugin.ps1|} elseif ($null -ne $existing.autoBootDefault) {' = 'config object always carries every default key'
+    'PxeBootPlugin.ps1|} elseif ($null -ne $existing.smbShareEnabled) {' = 'config object always carries every default key'
+    'PxeBootPlugin.ps1|} elseif ($null -ne $existing.smbOverlayEnabled) {' = 'config object always carries every default key'
+    'PxeBootPlugin.ps1|} elseif ($null -ne $existing.isoMountServe) {' = 'config object always carries every default key'
     # $prop came from .PSObject.Properties[...] on the line above and is short-circuit
     # guarded by -not $prop; PSPropertyInfo always exposes .Value.
-    'PxeBootPlugin.ps1:1730' = 'PSPropertyInfo.Value, guarded by -not $prop first'
-    'PxeBootPlugin.ps1:1740' = 'PSPropertyInfo.Value, guarded by -not $prop first'
+    'PxeBootPlugin.ps1|if (-not $prop -or $null -eq $prop.Value) { return $null }' = 'PSPropertyInfo.Value, guarded by -not $prop first'
+    'PxeBootPlugin.ps1|if (-not $prop -or $null -eq $prop.Value) { return @() }' = 'PSPropertyInfo.Value, guarded by -not $prop first'
     # Invoke-WebRequest response objects always expose .Content.
-    'Aria2TrackerScrape.ps1:180' = 'web response object always has .Content'
+    'Aria2TrackerScrape.ps1|if ($null -ne $Response.Content) {' = 'web response object always has .Content'
 }
-$new = @($unsafe | Where-Object { -not $allowed.ContainsKey($_) })
+$new = @($unsafe.Keys | Where-Object { -not $allowed.ContainsKey([string]$_) })
+$stale = @($allowed.Keys | Where-Object { -not $unsafe.Contains([string]$_) })
 if ($new.Count -eq 0) { Write-Host ('  [OK  ] none new ({0} reviewed and allowlisted)' -f $allowed.Count) }
 else {
-    foreach ($u in $new) { Write-Host ("  [FAIL] unsafe null-guard at {0}" -f $u) }
+    foreach ($u in $new) {
+        $where = ($unsafe[[string]$u]) -join ', '
+        Write-Host ("  [FAIL] unsafe null-guard at {0}" -f $where)
+        Write-Host ("         {0}" -f (($u -split '\|', 2)[1]))
+    }
     [void]$failures.Add('unsafe null-guards')
+}
+foreach ($s in $stale) {
+    # Not a failure: the guarded line was fixed or deleted. Say so, so the list gets tidied.
+    Write-Host ("  [note ] allowlist entry no longer matches anything: {0}" -f $s)
 }
 
 Write-Host ''

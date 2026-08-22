@@ -1103,16 +1103,44 @@ function Get-AppPxeBootWimOverlayProfiles {
     )
 }
 
+function Get-AppPxeBootWimOverlayProfileField {
+    <#
+    .SYNOPSIS
+        Read one optional key off an overlay profile.
+    .NOTES
+        StrictMode throws "The property 'X' cannot be found on this object" for a
+        missing hashtable key read with dot notation, and every key in this registry
+        except Id and AppliesTo is optional. Dropping Bakes from the deploy-share
+        profile therefore broke Start Imaging Services outright (2026-08-23) - the
+        `if (-not $profile.Bakes)` guard threw instead of skipping. Read optional keys
+        through here, never with a dot.
+    #>
+    param(
+        [Parameter(Mandatory)]$OverlayProfile,
+        [Parameter(Mandatory)][string]$Name
+    )
+    if ($null -eq $OverlayProfile) { return $null }
+    if ($OverlayProfile -is [System.Collections.IDictionary]) {
+        if ($OverlayProfile.Contains($Name)) { return $OverlayProfile[$Name] }
+        return $null
+    }
+    $prop = $OverlayProfile.PSObject.Properties[$Name]
+    if ($prop) { return $prop.Value }
+    return $null
+}
+
 function Get-AppPxeBootWimOverlayProfileEnabled {
     param([Parameter(Mandatory)][hashtable]$OverlayProfile)
-    if (-not $OverlayProfile.IsEnabled) { return $true }
-    return [bool](& $OverlayProfile.IsEnabled)
+    $isEnabled = Get-AppPxeBootWimOverlayProfileField -OverlayProfile $OverlayProfile -Name 'IsEnabled'
+    if (-not $isEnabled) { return $true }
+    return [bool](& $isEnabled)
 }
 
 function Get-AppPxeBootWimOverlayServedDir {
     param([Parameter(Mandatory)][hashtable]$OverlayProfile)
-    if ([string]::IsNullOrWhiteSpace($OverlayProfile.ServedSubdir)) { return $null }
-    Join-Path (Get-AppPxeBootLayoutPaths).httpRoot $OverlayProfile.ServedSubdir
+    $subdir = [string](Get-AppPxeBootWimOverlayProfileField -OverlayProfile $OverlayProfile -Name 'ServedSubdir')
+    if ([string]::IsNullOrWhiteSpace($subdir)) { return $null }
+    Join-Path (Get-AppPxeBootLayoutPaths).httpRoot $subdir
 }
 
 function Get-AppPxeBootWimOverlayInitrdLines {
@@ -1126,17 +1154,21 @@ function Get-AppPxeBootWimOverlayInitrdLines {
     param([Parameter(Mandatory)][string]$WimFileName)
     $lines = @()
     foreach ($overlayProfile in Get-AppPxeBootWimOverlayProfiles) {
-        if (-not $overlayProfile.Runtime) { continue }
-        if (-not (& $overlayProfile.AppliesTo $WimFileName)) { continue }
+        $runtime = Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'Runtime'
+        if (-not $runtime) { continue }
+        $appliesTo = Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'AppliesTo'
+        if (-not $appliesTo) { continue }
+        if (-not (& $appliesTo $WimFileName)) { continue }
         if (-not (Get-AppPxeBootWimOverlayProfileEnabled -OverlayProfile $overlayProfile)) { continue }
         $dir = Get-AppPxeBootWimOverlayServedDir -OverlayProfile $overlayProfile
         if (-not $dir) { continue }
         $profileLines = @()
         $ok = $true
-        foreach ($entry in $overlayProfile.Runtime) {
+        $servedSubdir = [string](Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'ServedSubdir')
+        foreach ($entry in $runtime) {
             $served = Join-Path $dir $entry.ServedName
             if (Test-Path -LiteralPath $served) {
-                $profileLines += ('initrd -n {0} ${{http_base}}/{1}/{2} {0}' -f $entry.WinPeName, $overlayProfile.ServedSubdir, $entry.ServedName)
+                $profileLines += ('initrd -n {0} ${{http_base}}/{1}/{2} {0}' -f $entry.WinPeName, $servedSubdir, $entry.ServedName)
             } elseif ($entry.Required) {
                 $ok = $false
                 break
@@ -1559,12 +1591,16 @@ function Sync-AppPxeBootWimOverlays {
     $wimName = Split-Path -Leaf $WimPath
     $results = [System.Collections.Generic.List[hashtable]]::new()
     foreach ($overlayProfile in Get-AppPxeBootWimOverlayProfiles) {
-        if (-not $overlayProfile.Bakes) { continue }
-        $bakePredicate = if ($overlayProfile.BakeAppliesTo) { $overlayProfile.BakeAppliesTo } else { $overlayProfile.AppliesTo }
+        $bakes = Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'Bakes'
+        if (-not $bakes) { continue }
+        $bakePredicate = Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'BakeAppliesTo'
+        if (-not $bakePredicate) { $bakePredicate = Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'AppliesTo' }
+        if (-not $bakePredicate) { continue }
         if (-not (& $bakePredicate $wimName)) { continue }
         if (-not (Get-AppPxeBootWimOverlayProfileEnabled -OverlayProfile $overlayProfile)) { continue }
-        foreach ($bake in $overlayProfile.Bakes) {
-            [void]$results.Add((Invoke-AppPxeBootWimOverlayBake -WimPath $WimPath -ProfileId $overlayProfile.Id -Bake $bake))
+        $profileId = [string](Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'Id')
+        foreach ($bake in $bakes) {
+            [void]$results.Add((Invoke-AppPxeBootWimOverlayBake -WimPath $WimPath -ProfileId $profileId -Bake $bake))
         }
     }
     return @($results)
@@ -3448,18 +3484,20 @@ function Write-AppPxeBootWimOverlayRuntimeAssets {
     #>
     param([string]$LanIp)
     foreach ($overlayProfile in Get-AppPxeBootWimOverlayProfiles) {
-        if (-not $overlayProfile.Runtime) { continue }
+        $runtime = Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'Runtime'
+        if (-not $runtime) { continue }
         $dir = Get-AppPxeBootWimOverlayServedDir -OverlayProfile $overlayProfile
         if (-not $dir) { continue }
         if (-not (Get-AppPxeBootWimOverlayProfileEnabled -OverlayProfile $overlayProfile)) {
-            foreach ($entry in $overlayProfile.Runtime) {
+            foreach ($entry in $runtime) {
                 $f = Join-Path $dir $entry.ServedName
                 if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
             }
             continue
         }
         if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
-        if ($overlayProfile.PublishRuntime) { & $overlayProfile.PublishRuntime $dir $LanIp }
+        $publish = Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'PublishRuntime'
+        if ($publish) { & $publish $dir $LanIp }
     }
 }
 
