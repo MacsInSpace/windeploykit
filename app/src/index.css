@@ -34,6 +34,15 @@
   --shadow-card: var(--shadow);
   --shadow-shell: none;
 
+  /* Native controls - checkbox, radio, the select popup, scrollbars - are drawn by
+     the OS and ignore our variables. WebKit renders them LIGHT unless the used
+     color-scheme says otherwise, and this file only declared it on a handful of
+     selectors, so bare tick boxes came out white on the dark theme (field,
+     2026-08-22: "the white BG on the dropdowns and tick boxes made it hard to see").
+     Declared once at the root, per theme, so every control follows. */
+  color-scheme: light;
+  accent-color: var(--accent);
+
   --font-sans: "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-display: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-mono: "SFMono-Regular", "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace;
@@ -63,6 +72,7 @@
 /* Dark - system preference, unless the viewer explicitly chose light. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
+    color-scheme: dark;
     --bg: #08111f;
     --surface: #0d1828;
     --surface2: #142236;
@@ -95,6 +105,7 @@
 
 /* Dark - explicit choice wins in both directions. */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #08111f;
   --surface: #0d1828;
   --surface2: #142236;
@@ -326,7 +337,7 @@ body {
     @apply w-full bg-transparent font-sans text-[12px] outline-none;
     color: var(--text);
     -webkit-text-fill-color: var(--text);
-    color-scheme: light dark;
+    color-scheme: inherit;
   }
   .input-box input::placeholder {
     color: var(--text3);
@@ -343,7 +354,7 @@ body {
     color: var(--text);
     -webkit-text-fill-color: var(--text);
     outline: none;
-    color-scheme: light dark;
+    color-scheme: inherit;
   }
   input.input-box::placeholder,
   textarea.input-box::placeholder {
@@ -362,7 +373,7 @@ body {
     border: none;
     -webkit-appearance: none;
     appearance: none;
-    color-scheme: light dark;
+    color-scheme: inherit;
     padding-right: 30px;
     background-image: var(--select-chevron);
     background-repeat: no-repeat;
@@ -796,7 +807,7 @@ select.input-box {
   background-position: right 11px center;
   background-size: 12px 12px;
   cursor: pointer;
-  color-scheme: light dark;
+  color-scheme: inherit;
 }
 
 label.flex-col > select,
@@ -807,6 +818,18 @@ select.input-box:hover:not(:disabled) { border-color: var(--border2); }
 
 select.input:disabled,
 select.input-box:disabled {
+  cursor: not-allowed;
+  opacity: .62;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
   cursor: not-allowed;
   opacity: .62;
 }

@@ -1242,7 +1242,7 @@ export function ContentWorkspace({
           if (r.downloaded) {
             return (
               <span className="text-[11px]" style={{ color: "var(--text3)" }} title={r.fileName}>
-                In Netboot
+                Downloaded
               </span>
             );
           }
