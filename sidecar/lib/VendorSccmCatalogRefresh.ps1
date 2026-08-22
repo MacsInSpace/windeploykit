@@ -159,8 +159,8 @@ function Start-AppVendorSccmCatalogRefreshJob {
         return @{ accepted = $true; background = $true; alreadyRunning = $true }
     }
     $stamp = [Guid]::NewGuid().ToString('N')
-    $runnerPath = Join-Path ([IO.Path]::GetTempPath()) "usm-catalog-refresh-$stamp.ps1"
-    $resultPath = Join-Path ([IO.Path]::GetTempPath()) "usm-catalog-refresh-$stamp.json"
+    $runnerPath = Join-Path ([IO.Path]::GetTempPath()) "$(Get-AppProductSlug)-catalog-refresh-$stamp.ps1"
+    $resultPath = Join-Path ([IO.Path]::GetTempPath()) "$(Get-AppProductSlug)-catalog-refresh-$stamp.json"
     Set-Content -LiteralPath $runnerPath -Value $script:AppVendorSccmCatalogRefreshRunner -Encoding UTF8
     $pwsh = if ([string]::IsNullOrWhiteSpace([string][Environment]::ProcessPath)) { 'pwsh' } else { [string][Environment]::ProcessPath }
     $procArgs = @('-NoProfile', '-NonInteractive', '-File', $runnerPath, '-SidecarRoot', [string]$script:SidecarRoot, '-ResultPath', $resultPath)

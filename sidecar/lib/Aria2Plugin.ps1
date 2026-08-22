@@ -330,7 +330,7 @@ function Get-AppAria2ManifestDefaultUrl {
     if ($env:APP_ARIA2_MANIFEST_URL) {
         return [string]$env:APP_ARIA2_MANIFEST_URL
     }
-    return 'https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2-tools.json'
+    return (Get-AppProductAssetFeedUrl -Name 'aria2-tools.json')
 }
 
 function Get-AppAria2BundledManifestPath {
@@ -402,8 +402,8 @@ function Test-AppAria2BinaryInstalled {
 }
 
 function Get-AppAria2BinaryPath {
-    if ($env:DEPLOYKIT_ARIA2 -and (Test-Path -LiteralPath $env:DEPLOYKIT_ARIA2 -PathType Leaf)) {
-        return (Resolve-Path -LiteralPath $env:DEPLOYKIT_ARIA2).Path
+    if ($env:APP_ARIA2 -and (Test-Path -LiteralPath $env:APP_ARIA2 -PathType Leaf)) {
+        return (Resolve-Path -LiteralPath $env:APP_ARIA2).Path
     }
     $paths = Get-AppAria2LayoutPaths
     $bin = Join-Path $paths.binaryDir (Get-AppAria2BinaryFileName)
@@ -510,7 +510,7 @@ function Invoke-AppAria2ArtifactDownload {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
     Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing `
-        -UserAgent 'WinDeployKit' -MaximumRedirection 5
+        -UserAgent (Get-AppUserAgent) -MaximumRedirection 5
 }
 
 function Test-AppAria2ArchiveFile {
@@ -598,7 +598,7 @@ function Ensure-AppAria2Binary {
         version = [string]$manifest.version
     }
 
-    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("windeploykit-aria2-" + [guid]::NewGuid().ToString())
+    $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("$(Get-AppProductSlug)-aria2-" + [guid]::NewGuid().ToString())
     $archivePath = Join-Path $tmpRoot $entry.archiveName
     New-Item -ItemType Directory -Path $tmpRoot -Force | Out-Null
 
@@ -837,7 +837,7 @@ function Invoke-AppAria2Rpc {
     foreach ($p in $Params) { [void]$rpcParams.Add($p) }
     $body = @{
         jsonrpc = '2.0'
-        id      = 'windeploykit'
+        id      = (Get-AppProductSlug)
         method  = $Method
         params  = @($rpcParams.ToArray())
     } | ConvertTo-Json -Depth 12 -Compress

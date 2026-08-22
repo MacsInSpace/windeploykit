@@ -8,6 +8,12 @@
 #    warning -- in non-interactive pwsh those warnings can leak onto stdout
 #    via the host's default rendering path and corrupt the NDJSON stream.
 
+# Product identity helpers (no-op when the host already dot-sourced AppProductIdentity.ps1;
+# needed when this lib is loaded standalone by scripts or child runspaces).
+if (-not (Get-Command Get-AppUserAgent -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'AppProductIdentity.ps1')
+}
+
 $script:IpcJsonDepth = 32
 $script:SidecarHostLogWritten = $false
 $script:SidecarStdoutUtf8 = [System.Text.UTF8Encoding]::new($false)
@@ -227,7 +233,7 @@ function Get-AppSidecarTauriBinaryPath {
     if ($IsMacOS) {
         $contents = Split-Path -Path $root -Parent
         if (-not $contents) { return $null }
-        $bin = Join-Path (Join-Path $contents 'MacOS') 'windeploykit'
+        $bin = Join-Path (Join-Path $contents 'MacOS') (Get-AppProductBinaryName)
         if (Test-Path -LiteralPath $bin) { return $bin }
     }
     return $null
@@ -277,8 +283,11 @@ function Test-AppSidecarVerboseLogging {
     if ($null -ne $env:APP_VERBOSE_LOGGING -and $env:APP_VERBOSE_LOGGING -ne '') {
         return $env:APP_VERBOSE_LOGGING -eq '1' -or ($env:APP_VERBOSE_LOGGING -ieq 'true')
     }
-    if ($script:AppState -and $script:AppState['RuntimeConfig']) {
-        $rc = $script:AppState['RuntimeConfig']
+    # Get-Variable guard: this runs before $script:AppState exists (vault registration,
+    # lazy-plugin index) and the sidecar is under StrictMode, where a bare read throws.
+    $state = Get-Variable -Name AppState -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($state -and $state['RuntimeConfig']) {
+        $rc = $state['RuntimeConfig']
         if ($rc -is [hashtable] -and $rc.ContainsKey('verboseLogging')) {
             return [bool]$rc['verboseLogging']
         }
@@ -295,8 +304,9 @@ function Test-AppSidecarVerbosePowershell {
     if ($null -ne $env:APP_VERBOSE_POWERSHELL -and $env:APP_VERBOSE_POWERSHELL -ne '') {
         return $env:APP_VERBOSE_POWERSHELL -eq '1' -or ($env:APP_VERBOSE_POWERSHELL -ieq 'true')
     }
-    if ($script:AppState -and $script:AppState['RuntimeConfig']) {
-        $rc = $script:AppState['RuntimeConfig']
+    $state = Get-Variable -Name AppState -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($state -and $state['RuntimeConfig']) {
+        $rc = $state['RuntimeConfig']
         if ($rc -is [hashtable] -and $rc.ContainsKey('verbosePowershell')) {
             return [bool]$rc['verbosePowershell']
         }

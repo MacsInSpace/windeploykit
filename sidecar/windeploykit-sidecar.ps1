@@ -20,6 +20,10 @@ $script:SidecarRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 # here (vendor/binaries, packaging/*.json). Must be set before any lib loads.
 $script:AppSidecarProjectRoot = Split-Path -Parent $script:SidecarRoot
 $ProjectRoot = $script:AppSidecarProjectRoot
+
+# Product identity - the one literal-bearing sidecar file. Must be set before ANY lib
+# is dot-sourced (USM docs/handover/PRODUCT_IDENTITY_CONTRACT.md).
+. (Join-Path $script:SidecarRoot 'product-identity.ps1')
 $env:PSModulePath = "$($script:SidecarRoot)/modules" + [IO.Path]::PathSeparator + $env:PSModulePath
 
 # --- Shared state -----------------------------------------------------------
@@ -33,6 +37,7 @@ $script:AppState = @{
 # --- Library load -----------------------------------------------------------
 # Ipc first (everything logs through it), then the rest alphabetically.
 $libRoot = Join-Path $script:SidecarRoot 'lib'
+. (Join-Path $libRoot 'AppProductIdentity.ps1')
 . (Join-Path $libRoot 'Ipc.ps1')
 . (Join-Path $libRoot 'SidecarParams.ps1')
 . (Join-Path $libRoot 'AppPlatform.ps1')

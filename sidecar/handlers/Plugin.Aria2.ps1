@@ -1,5 +1,5 @@
 # Sidecar IPC handlers -- Plugin.Aria2
-# Mechanically extracted from windeploykit-sidecar.ps1 (2026-08 handler split).
+# Mechanically extracted from the sidecar entry script (2026-08 handler split).
 # Functions only -- no top-level code. Dispatch resolves Handle-$Cmd by name at call time.
 
 function Handle-GetAria2PluginConfig {

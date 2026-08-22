@@ -1,19 +1,26 @@
 # AppPaths.ps1 - single source of truth for app-owned data locations.
 #
 # Replaces the ~20 copy-pasted "where do I put data" blocks that each hardcoded a
-# different parent folder across builds. See
-# docs/core/app-data/AGENT_NOTES_APP_DATA_LAYOUT.md for the canonical layout and rationale.
+# different legacy parent folder. See docs/core/app-data/AGENT_NOTES_APP_DATA_LAYOUT.md
+# for the canonical layout and rationale.
 #
-# Canonical root per OS (product-name, human-readable):
-#   Windows : %LOCALAPPDATA%\WinDeployKit\
-#   macOS   : ~/Library/Application Support/WinDeployKit/
-#   Linux   : $XDG_DATA_HOME/windeploykit/ (or ~/.local/share/...)
+# Canonical root per OS (product-name, human-readable), resolved from the product
+# identity (AppProductIdentity.ps1 / docs/handover/PRODUCT_IDENTITY_CONTRACT.md):
+#   Windows : %LOCALAPPDATA%\<DisplayName>\
+#   macOS   : ~/Library/Application Support/<DisplayName>/
+#   Linux   : $XDG_DATA_HOME/<Slug>/ (or ~/.local/share/...)
 #
-# The Tauri identifier dir (com.macsinspace.windeploykit) stays Tauri-internal
-# (WebView2 / logs) and is NOT used for app-owned data.
+# The Tauri identifier dir stays Tauri-internal (WebView2 / logs) and is NOT used
+# for app-owned data.
 #
 # This file only DEFINES functions; it is safe to dot-source early and has no
 # side effects until a resolver is called.
+
+# Product identity helpers (no-op when the host already dot-sourced AppProductIdentity.ps1;
+# needed when this lib is loaded standalone by scripts or child runspaces).
+if (-not (Get-Command Get-AppUserAgent -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'AppProductIdentity.ps1')
+}
 
 function New-AppDir {
     param([Parameter(Mandatory)][string]$Path)
@@ -29,12 +36,12 @@ function New-AppDir {
 function Get-AppDataRoot {
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
         $base = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' }
-        return (Join-Path $base 'WinDeployKit')
+        return (Join-Path $base (Get-AppProductDisplayName))
     } elseif ($IsMacOS) {
-        return (Join-Path $HOME 'Library/Application Support/WinDeployKit')
+        return (Join-Path $HOME (Join-Path 'Library/Application Support' (Get-AppProductDisplayName)))
     } else {
         $base = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME '.local/share' }
-        return (Join-Path $base 'windeploykit')
+        return (Join-Path $base (Get-AppProductSlug))
     }
 }
 
@@ -62,7 +69,7 @@ function Get-AppCacheDir {
 # Image library (ISOs / drivers / imageable WIMs) - user-relocatable root.
 #
 # The ROOT itself is chosen by the technician in the frontend (Settings ->
-# Downloads -> ISO & driver root, default ~/Downloads/WinDeployKit)
+# Downloads -> ISO & driver root, default ~/Downloads/<DisplayName>)
 # and passed into IPC calls. The sidecar must never silently default large
 # downloads to the system drive, so these helpers REQUIRE an explicit root and
 # only resolve the recommended sub-structure beneath it.
@@ -92,9 +99,9 @@ function Test-AppImageLibraryRoot {
 # not TCC-protected). Mirrors getImageLibraryRoot() in app/src/lib/imageLibrary.ts.
 function Get-AppImageLibraryDefaultRoot {
     if ($IsMacOS) {
-        return (Join-Path (Join-Path $HOME 'Public') 'WinDeployKit')
+        return (Join-Path (Join-Path $HOME 'Public') (Get-AppProductDisplayName))
     }
-    Join-Path (Join-Path $HOME 'Downloads') 'WinDeployKit'
+    Join-Path (Join-Path $HOME 'Downloads') (Get-AppProductDisplayName)
 }
 
 # macOS TCC-protected folders smbd cannot read without a manual Full Disk Access

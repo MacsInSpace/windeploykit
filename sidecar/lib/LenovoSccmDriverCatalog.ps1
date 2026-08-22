@@ -2,6 +2,13 @@
 # Primary: https://download.lenovo.com/cdrt/td/catalogv2.xml
 # Fallback support pages when a machine type is not listed in the XML (scrape when reachable).
 
+# Canonical data-root + product-identity resolvers (no-op when the sidecar already
+# dot-sourced AppPaths.ps1; needed when dev/test scripts or the catalog-refresh child
+# load this lib standalone). AppPaths.ps1 pulls AppProductIdentity.ps1 itself.
+if (-not (Get-Command Get-AppDataRoot -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'AppPaths.ps1')
+}
+
 $script:AppLenovoSccmCatalogUrl = 'https://download.lenovo.com/cdrt/td/catalogv2.xml'
 $script:AppLenovoSccmCatalogCacheHours = 168
 $script:AppLenovoSccmCatalogLastError = $null
@@ -27,8 +34,10 @@ function Get-AppLenovoSccmCatalogLastError {
 }
 
 function Get-AppLenovoSccmCatalogCachePath {
+    # Same folder whether or not Aria2Plugin.ps1 is loaded: <data root>/plugins/aria2/.
+    # (Until 2026-08-22 the standalone branch used a second, slug-named folder.)
     if (-not (Get-Command Get-AppAria2StoreRoot -ErrorAction SilentlyContinue)) {
-        return Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'windeploykit/lenovo-sccm-catalog.json'
+        return Join-Path (Get-AppPluginDir -Plugin 'aria2') 'lenovo-sccm-catalog.json'
     }
     Join-Path (Get-AppAria2StoreRoot) 'lenovo-sccm-catalog.json'
 }
@@ -73,7 +82,7 @@ function Invoke-AppLenovoSccmHttpGet {
     )
     $curl = Get-Command curl -ErrorAction SilentlyContinue
     if ($curl) {
-        $out = & curl -sS -L --http1.1 --max-time $MaxTimeSec -A 'Mozilla/5.0 (compatible; WinDeployKit/1.0)' $Uri 2>&1
+        $out = & curl -sS -L --http1.1 --max-time $MaxTimeSec -A (Get-AppUserAgent) $Uri 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "curl failed (exit $LASTEXITCODE): $out"
         }

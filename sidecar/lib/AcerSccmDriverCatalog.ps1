@@ -2,6 +2,13 @@
 # Entry: https://www.acer.com/sccm/ (redirects to Community KB; fallback URL if redirect fails).
 # Resolved landing page may change; we cache the effective URL from curl -L.
 
+# Canonical data-root + product-identity resolvers (no-op when the sidecar already
+# dot-sourced AppPaths.ps1; needed when dev/test scripts or the catalog-refresh child
+# load this lib standalone). AppPaths.ps1 pulls AppProductIdentity.ps1 itself.
+if (-not (Get-Command Get-AppDataRoot -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'AppPaths.ps1')
+}
+
 $script:AppAcerSccmEntryUrl = 'https://www.acer.com/sccm/'
 $script:AppAcerSccmFallbackUrls = @(
     'https://community.acer.com/en/kb/articles/15378-microsoft-system-center-configuration-manager-sccm?expandedToggles=toggle-travelmate'
@@ -21,8 +28,10 @@ function Get-AppAcerSccmCatalogLastError {
 }
 
 function Get-AppAcerSccmCatalogCachePath {
+    # Same folder whether or not Aria2Plugin.ps1 is loaded: <data root>/plugins/aria2/.
+    # (Until 2026-08-22 the standalone branch used a second, slug-named folder.)
     if (-not (Get-Command Get-AppAria2StoreRoot -ErrorAction SilentlyContinue)) {
-        return Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'windeploykit/acer-sccm-catalog.json'
+        return Join-Path (Get-AppPluginDir -Plugin 'aria2') 'acer-sccm-catalog.json'
     }
     Join-Path (Get-AppAria2StoreRoot) 'acer-sccm-catalog.json'
 }
@@ -72,7 +81,7 @@ function Invoke-AppAcerSccmHttpGet {
     $curl = Get-Command curl -ErrorAction SilentlyContinue
     if ($curl) {
         $marker = '__EFFECTIVE_URL__:'
-        $raw = & curl -sS -L --http1.1 --max-time 60 -A 'Mozilla/5.0 (compatible; WinDeployKit/1.0)' -w "`n$marker%{url_effective}" $Uri 2>&1
+        $raw = & curl -sS -L --http1.1 --max-time 60 -A (Get-AppUserAgent) -w "`n$marker%{url_effective}" $Uri 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "curl failed (exit $LASTEXITCODE): $raw"
         }
@@ -94,7 +103,7 @@ function Invoke-AppAcerSccmHttpGet {
     if ((Get-Command Invoke-WebRequest).Parameters.ContainsKey('SkipCertificateCheck')) {
         $params['SkipCertificateCheck'] = $true
     }
-    $params['Headers'] = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; WinDeployKit/1.0)' }
+    $params['Headers'] = @{ 'User-Agent' = (Get-AppUserAgent) }
     if (Get-Command Invoke-AppHttpWebRequest -ErrorAction SilentlyContinue) {
         $resp = Invoke-AppHttpWebRequest -RequestParams $params
     } else {
@@ -575,7 +584,7 @@ function Get-AppAcerSccmXmlCatalog {
     #>
     $curl = Get-Command curl -ErrorAction SilentlyContinue
     if (-not $curl) { throw 'curl is required to fetch AcerCatalog.xml.' }
-    $out = & curl -sS -L --http1.1 --max-time 90 -A 'Mozilla/5.0 (compatible; WinDeployKit/1.0)' $script:AppAcerSccmXmlCatalogUrl 2>&1
+    $out = & curl -sS -L --http1.1 --max-time 90 -A (Get-AppUserAgent) $script:AppAcerSccmXmlCatalogUrl 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "curl failed (exit $LASTEXITCODE): $out"
     }

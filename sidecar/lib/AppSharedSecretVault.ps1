@@ -1,8 +1,8 @@
-# Shared secret vault - WinDeployKit's registration of SecretManagement.LocalVault.
+# Shared secret vault - this product's registration of SecretManagement.LocalVault.
 #
 # docs/handover/SHARED_SECRET_VAULT_CONTRACT.md: one per-user store shared by every
-# product (USM, WinDeployKit, PSOpenAD-FE), the SecretManagement API in front of it,
-# and no OS credential UI behind it. This file is the WinDeployKit glue only: find
+# product (this one and its two sibling products), the SecretManagement API in front of it,
+# and no OS credential UI behind it. This file is the product-specific glue only: find
 # the two vendored modules, import them, register the vault under the contract's
 # single vault name. The vault module is product-neutral and lives in its own
 # repository (github.com/MacsInSpace/SecretManagement.LocalVault); every product
@@ -227,7 +227,7 @@ function Set-AppVaultSecret {
         [hashtable]$Metadata
     )
     if (-not (Test-AppSharedSecretVaultReady)) { return $false }
-    $meta = @{ createdBy = 'windeploykit'; updatedAt = [DateTime]::UtcNow.ToString('o') }
+    $meta = @{ createdBy = (Get-AppProductSlug); updatedAt = [DateTime]::UtcNow.ToString('o') }
     if ($Metadata) { foreach ($k in $Metadata.Keys) { $meta[[string]$k] = $Metadata[$k] } }
     Set-Secret -Name $Name -Secret $Secret -Metadata $meta -Vault $script:AppSharedSecretVaultName -ErrorAction Stop
     return $true

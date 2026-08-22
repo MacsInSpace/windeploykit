@@ -1,6 +1,6 @@
 # EvalIsoCatalog.ps1 - Microsoft Evaluation Center ISO discovery + fetch.
 #
-# Why this exists: WinDeployKit needs a legal, no-account, zero-setup source of
+# Why this exists: the product needs a legal, no-account, zero-setup source of
 # Windows media so a fresh install can be tested end to end. Evaluation Center
 # ISOs are freely downloadable from Microsoft and time-limited (180 days for
 # Server, 90 for client) - fine for lab, imaging tests and CI.
@@ -27,7 +27,7 @@ $script:AppEvalIsoCatalog = @(
 function Get-AppEvalIsoCatalog {
     <#
     .SYNOPSIS
-        The static list of Evaluation Center editions WinDeployKit can fetch.
+        The static list of Evaluation Center editions the app can fetch.
         No network access - the download URL is resolved on demand.
     #>
     $libRoot = $null

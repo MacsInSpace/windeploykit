@@ -1,8 +1,14 @@
 # aria2 <-> Netboot PXE store integration - staging, promote, driver alias resolver, tracker catalog.
-# Loaded after PxeBootPlugin.ps1 (see windeploykit-sidecar.ps1).
+# Loaded after PxeBootPlugin.ps1 (see the sidecar entry script).
+
+# Product identity helpers (no-op when the host already dot-sourced AppProductIdentity.ps1;
+# needed when this lib is loaded standalone by scripts or child runspaces).
+if (-not (Get-Command Get-AppUserAgent -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'AppProductIdentity.ps1')
+}
 
 $script:AppAria2TrackerManifestCacheHours = 168
-$script:AppAria2TrackerManifestDefaultUrl = 'https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/aria2-tracker.json'
+$script:AppAria2TrackerManifestDefaultUrl = Get-AppProductAssetFeedUrl -Name 'aria2-tracker.json'
 $script:AppAria2TrackerManifestFetchBackoffMinutes = 15
 $script:AppAria2TrackerManifestMemory = $null
 $script:AppAria2TrackerManifestFetchBackoffUntil = $null
@@ -641,7 +647,7 @@ $script:AppAria2DirectDownloadWorker = {
         }
         $client = [System.Net.Http.HttpClient]::new()
         $client.Timeout = [TimeSpan]::FromSeconds([Math]::Max(30, [int]$TimeoutSec))
-        [void]$client.DefaultRequestHeaders.UserAgent.TryParseAdd('Mozilla/5.0 (compatible; WinDeployKit/1.0)')
+        [void]$client.DefaultRequestHeaders.UserAgent.TryParseAdd((Get-AppUserAgent))
         $resp = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         if (-not $resp.IsSuccessStatusCode) {
             throw "HTTP $([int]$resp.StatusCode) ($($resp.ReasonPhrase)) for $Uri"

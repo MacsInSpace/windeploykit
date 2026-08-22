@@ -60,7 +60,7 @@ function Write-AppInfraSshIndex {
 $script:AppInfraSshDeSignInCredentialId = 'app-de-signin'
 
 function Get-AppInfraSshDeSignInCredential {
-    # TODO(Site Profile): no ambient signed-in credential in WinDeployKit - callers
+    # TODO(Site Profile): no ambient signed-in credential here - callers
     # supply credentials explicitly or use the stored credential vault.
     return $null
 }
@@ -143,7 +143,7 @@ function Get-AppInfraSshDefaultCredentialSpecs {
     <#
         One generic per-site default, used for devices with no explicit credential
         assignment. The upstream original seeded two org-issued accounts derived
-        from a site-id naming convention; WinDeployKit has no such convention, so the
+        from a site-id naming convention; this product has no such convention, so the
         technician names the account and supplies the password. Never seed a password
         here - see AGENT_NOTES.md section 5.
     #>

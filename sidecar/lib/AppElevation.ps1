@@ -1,5 +1,12 @@
 # AppElevation.ps1 - generic macOS sudo-elevation + credential-cache helpers.
-# Extracted from USM AppCurricRoutes.ps1 (lines 132-572) during the windeploykit port.
+# Runtime core shared by copy between products; product names resolve from the
+# identity object (docs/handover/PRODUCT_IDENTITY_CONTRACT.md) - no product literal here.
+
+# Product identity helpers (no-op when the host already dot-sourced AppProductIdentity.ps1;
+# needed when this lib is loaded standalone by scripts or child runspaces).
+if (-not (Get-Command Get-AppUserAgent -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'AppProductIdentity.ps1')
+}
 
 function ConvertTo-AppAppleScriptQuotedString {
     param([Parameter(Mandatory)][string]$Value)
@@ -105,7 +112,8 @@ function Request-AppMacOsAdminCredential {
 function Get-AppMacOsDialogHelperPath {
     <#
     .SYNOPSIS
-        Locate the bundled windeploykit-dialog native prompt helper (tools/windeploykit-dialog).
+        Locate the bundled native prompt helper (basename from the product identity's
+        DialogHelperName, default '<BinaryName>-dialog').
         Preferred over osascript: security tooling / MDM can deny osascript, and
         then `display dialog` prompts silently never appear. Returns $null when
         the helper isn't present (dev checkout without a build) - callers fall
@@ -118,11 +126,12 @@ function Get-AppMacOsDialogHelperPath {
     if (-not $root) { return $null }
     $isArm = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq [System.Runtime.InteropServices.Architecture]::Arm64
     $suffix = if ($isArm) { 'aarch64-apple-darwin' } else { 'x86_64-apple-darwin' }
+    $helper = Get-AppProductDialogHelperName
     foreach ($rel in @(
-        'binaries/windeploykit-dialog-universal'
-        "binaries/windeploykit-dialog-$suffix"
-        'vendor/binaries/dialog-macos/windeploykit-dialog-universal'
-        "vendor/binaries/dialog-macos/windeploykit-dialog-$suffix"
+        "binaries/$helper-universal"
+        "binaries/$helper-$suffix"
+        "vendor/binaries/dialog-macos/$helper-universal"
+        "vendor/binaries/dialog-macos/$helper-$suffix"
     )) {
         $path = Join-Path $root $rel
         if (Test-Path -LiteralPath $path) {
@@ -138,7 +147,7 @@ function Invoke-AppMacOsSecurePasswordDialog {
     <#
     .SYNOPSIS
         Show a secure-entry password prompt and return the plain-text entry.
-        windeploykit-dialog (bundled AppKit helper, argv-only, no AppleScript) first;
+        The bundled native AppKit helper (argv-only, no AppleScript) first;
         osascript `display dialog ... with hidden answer` as fallback.
         Throws on cancel or empty entry.
     #>
@@ -158,7 +167,7 @@ function Invoke-AppMacOsSecurePasswordDialog {
         if ($code -eq 2) {
             throw 'Administrator permission was not granted (cancelled).'
         }
-        Write-SidecarLog "macOS: windeploykit-dialog helper failed (exit $code) - falling back to osascript. $($plain.Trim())"
+        Write-SidecarLog "macOS: native dialog helper failed (exit $code) - falling back to osascript. $($plain.Trim())"
     }
 
     if (-not (Get-Command osascript -ErrorAction SilentlyContinue)) {
@@ -198,7 +207,7 @@ function Invoke-AppMacOsAdminCredentialPrompt {
         [string]$Message
     } else {
         @(
-            'WinDeployKit needs your macOS administrator password for this session'
+            "$(Get-AppProductDisplayName) needs your macOS administrator password for this session"
             '(TFTP port 69, network routes). It is kept in memory only - not saved to disk.'
         ) -join ' '
     }
@@ -232,13 +241,13 @@ function Start-AppMacOsAdminCredentialPrefetch {
 
     $msg = if ($Purpose -eq 'pxe') {
         @(
-            'WinDeployKit needs your macOS administrator password for Netboot (TFTP port 69).'
+            "$(Get-AppProductDisplayName) needs your macOS administrator password for Netboot (TFTP port 69)."
             'It is kept in memory only - not saved to disk.'
             'Enter it now - boot menus and HTTP continue starting while this dialog is open.'
         ) -join ' '
     } else {
         @(
-            'WinDeployKit needs your macOS administrator password for this session'
+            "$(Get-AppProductDisplayName) needs your macOS administrator password for this session"
             '(TFTP port 69, network routes). It is kept in memory only - not saved to disk.'
         ) -join ' '
     }
