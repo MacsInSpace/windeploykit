@@ -80,6 +80,45 @@ function Get-AppLocalVaultManifestPath {
     return Get-AppVendoredPsModuleManifestPath -ProjectRoot $ProjectRoot -Name 'SecretManagement.LocalVault'
 }
 
+function Test-AppSameFilePath {
+    # Case-insensitive, separator- and trailing-slash-insensitive path comparison.
+    param([AllowEmptyString()][string]$A, [AllowEmptyString()][string]$B)
+    if ([string]::IsNullOrWhiteSpace($A) -or [string]::IsNullOrWhiteSpace($B)) { return $false }
+    $norm = {
+        param($p)
+        ($p -replace '\\', '/').TrimEnd('/').ToLowerInvariant()
+    }
+    return ((& $norm $A) -eq (& $norm $B))
+}
+
+function Get-AppLocalVaultModuleVersionAt {
+    <#
+    .SYNOPSIS
+        ModuleVersion of a SecretManagement.LocalVault copy at $Path (a module root,
+        a versioned folder, or a manifest). $null when it cannot be read.
+    #>
+    param([AllowEmptyString()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+    try {
+        $candidates = @()
+        if ($Path -like '*.psd1') {
+            $candidates += $Path
+        } else {
+            $candidates += (Join-Path $Path 'SecretManagement.LocalVault.psd1')
+            foreach ($dir in @(Get-ChildItem -LiteralPath $Path -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending)) {
+                $candidates += (Join-Path $dir.FullName 'SecretManagement.LocalVault.psd1')
+            }
+        }
+        foreach ($c in $candidates) {
+            if (Test-Path -LiteralPath $c) {
+                $data = Import-PowerShellDataFile -LiteralPath $c -ErrorAction Stop
+                if ($data.ModuleVersion) { return [string]$data.ModuleVersion }
+            }
+        }
+    } catch { }
+    return $null
+}
+
 function Initialize-AppSharedSecretVault {
     <#
     .SYNOPSIS
@@ -121,8 +160,26 @@ function Initialize-AppSharedSecretVault {
         } else {
             $what = if ($info['healed']) { 'registered (healed a dead registration left by another copy)' } elseif ($info.registered) { 'registered' } else { 'already registered' }
             $had = if ($info.exists) { "$($info.secretCount) secret(s)" } else { 'no store yet (created on first write)' }
-            $from = if ($info.registered) { $lvManifest } else { [string]$info['modulePath'] }
+            # Always the path SecretManagement will actually LOAD, never our own copy:
+            # the registry holds one module path per vault name, so a sibling product can
+            # own it. Logging $lvManifest here read as "we are using our copy" when we
+            # were not (Craig, 2026-08-23 - the registration pointed at a v0.1.0 build
+            # output in another project and nothing said so).
+            $from = if ($info['modulePath']) { [string]$info['modulePath'] } else { $lvManifest }
             Write-SidecarLog "Secret vault: '$($info.vault)' $what from $from; $had at $($info.storeRoot)"
+            $ourRoot = Split-Path -Parent $lvManifest
+            $registeredVersion = Get-AppLocalVaultModuleVersionAt -Path $from
+            $ourVersion = Get-AppLocalVaultModuleVersionAt -Path $lvManifest
+            if (-not (Test-AppSameFilePath -A $from -B $ourRoot) -and -not (Test-AppSameFilePath -A $from -B (Split-Path -Parent $ourRoot))) {
+                $verText = if ($registeredVersion -and $ourVersion -and $registeredVersion -ne $ourVersion) {
+                    " (v$registeredVersion; this app bundles v$ourVersion)"
+                } elseif ($registeredVersion) {
+                    " (v$registeredVersion)"
+                } else {
+                    ''
+                }
+                Write-SidecarLog "Secret vault: NOTE another product owns the 'shared' registration$verText - the store is shared by design, the module code is theirs. Unregister-SecretVault -Name shared to hand it back."
+            }
         }
     } catch {
         $msg = $_.Exception.Message
