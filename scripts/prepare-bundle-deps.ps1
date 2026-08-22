@@ -67,8 +67,11 @@ function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
 function Remove-AppStagedFieldIsoBuildArtifacts {
     <#
-    FieldIso.wim is downloaded at runtime (asset-feed manifest). wim-inject/ and Windows
-    fieldiso/tools/*.exe are maintainer-only inputs for build-fieldiso-wim.sh - not for the app bundle.
+    wim-inject/ (an ADK PowerShell tree) is a maintainer-only input for
+    build-fieldiso-wim.sh and never ships. fieldiso/tools/ DOES ship since 2026-08-23:
+    the deploy client injects 7z.exe/7za.dll/7zxa.dll/curl.exe into a stock boot.wim
+    at boot (overlay, not baked) - without them a corporate install can expand only
+    .cab driver packs and cannot push a log line to the panel.
     #>
     param([Parameter(Mandatory)][string]$SidecarDest)
 
@@ -79,16 +82,13 @@ function Remove-AppStagedFieldIsoBuildArtifacts {
     }
 
     $toolsDir = Join-Path $SidecarDest 'pxe/fieldiso/tools'
+    $kept = @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe')
     if (Test-Path -LiteralPath $toolsDir) {
-        $removed = 0
-        foreach ($tool in Get-ChildItem -LiteralPath $toolsDir -File -ErrorAction SilentlyContinue) {
-            if ($tool.Extension -match '^\.(exe|dll)$') {
-                Remove-Item -LiteralPath $tool.FullName -Force
-                $removed++
-            }
-        }
-        if ($removed -gt 0) {
-            Write-Step "Excluded $removed Windows fieldiso/tools binary(ies) from staged bundle"
+        $present = @($kept | Where-Object { Test-Path -LiteralPath (Join-Path $toolsDir $_) })
+        if ($present.Count -lt $kept.Count) {
+            Write-Warning "Deploy client tools missing from sidecar/pxe/fieldiso/tools ($(($kept | Where-Object { $present -notcontains $_ }) -join ', ')) - run pwsh -File ./scripts/fetch-fieldiso-tools.ps1; the bundle will inject what it has."
+        } else {
+            Write-Step 'Kept the deploy client tools (7z.exe, 7za.dll, 7zxa.dll, curl.exe) in the staged bundle'
         }
     }
 }

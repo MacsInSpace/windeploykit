@@ -8,14 +8,19 @@ rem  already has - ships dism, diskpart, bcdboot, net and robocopy, and ships
 rem  NO PowerShell and NO curl. Anything richer would mean an ADK, which is a
 rem  download, a licence and a Windows machine to run it on.
 rem
-rem  Reads three files that iPXE drops into System32 at boot (see the
-rem  'deploy-client' overlay profile):
+rem  Reads the files that iPXE drops into System32 at boot (the 'deploy-share'
+rem  overlay profile - served by Caddy, injected by wimboot, nothing in the WIM):
 rem     deploy.unc      \\host\Deploy$
 rem     deploy.cred     line 1 user, line 2 password
+rem     deploy.loghost  http://host:port - log lines are POSTed here (optional)
 rem     deploy.autoprep present = may repartition disk 0 without asking
-rem  and one published file per task sequence on the share:
+rem     7z.exe, 7za.dll, 7zxa.dll, curl.exe - the two tools a stock WinPE lacks
+rem  and per task sequence on the share:
 rem     Z:\TaskSequences\_default.txt   the sequence id to run
 rem     Z:\TaskSequences\<id>.env       KEY=VALUE, written by the panel
+rem  Drivers come from Z:\Drivers\<Make>\<Model>\ (one archive or an INF tree),
+rem  matched on the SMBIOS manufacturer/product, then Z:\Drivers\aliases.txt,
+rem  then Z:\Drivers\_default - the same layout ImageDeployer searches.
 rem
 rem  Anything missing drops to the WinPE prompt with the reason on screen -
 rem  never a silent reboot loop.
@@ -24,12 +29,44 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 set "LOG=X:\Windows\Temp\deploy.log"
 if not exist "X:\Windows\Temp" md "X:\Windows\Temp" >nul 2>&1
+set "SYS=%SystemRoot%\System32"
+
+rem --- who we are (no wmic, no PowerShell: SMBIOS strings live in the registry) ---
+set "MAKE="
+set "MODEL="
+for /f "tokens=2,*" %%A in ('reg query "HKLM\HARDWARE\DESCRIPTION\System\BIOS" /v SystemManufacturer 2^>nul ^| find "REG_SZ"') do set "MAKE=%%B"
+for /f "tokens=2,*" %%A in ('reg query "HKLM\HARDWARE\DESCRIPTION\System\BIOS" /v SystemProductName 2^>nul ^| find "REG_SZ"') do set "MODEL=%%B"
+if not defined MAKE set "MAKE=Unknown"
+if not defined MODEL set "MODEL=Unknown"
 
 call :log "=== WinDeployKit deploy client ==="
+call :log "Machine: %MAKE% / %MODEL%"
 call :log "Starting network (wpeinit)..."
 wpeinit
 
-set "SYS=%SystemRoot%\System32"
+rem The serial is not in the registry; the first NIC's MAC is the stable id the
+rem Netboot panel files this device's log under (the same for a re-image).
+set "SERIAL="
+for /f "tokens=2 delims=:" %%A in ('ipconfig /all ^| find "Physical Address"') do (
+    if not defined SERIAL set "SERIAL=%%A"
+)
+set "SERIAL=%SERIAL: =%"
+set "SERIAL=%SERIAL:-=%"
+if not defined SERIAL set "SERIAL=UNKNOWN"
+set "SESSION=%RANDOM%%RANDOM%%RANDOM%"
+
+rem Live log to the Netboot panel - same endpoint ImageDeployer pushes to. Only
+rem possible because curl.exe rides in with this script; silent when it cannot.
+set "LOGHOST="
+if exist "%SYS%\deploy.loghost" set /p LOGHOST=<"%SYS%\deploy.loghost"
+set "CURL="
+if exist "%SYS%\curl.exe" set "CURL=%SYS%\curl.exe"
+if defined LOGHOST if defined CURL (
+    call :log "Log push: %LOGHOST%/imaging-log/ingest (device %SERIAL%)"
+) else (
+    call :log "Log push off (no loghost or no curl) - log is %LOG% only."
+)
+
 set "UNC="
 set "DUSER="
 set "DPASS="
@@ -101,6 +138,28 @@ if not exist "%WIMPATH%" (
 )
 call :log "Image: %WIMPATH% (index %TS_INDEX%)"
 
+rem --- WinPE-side drivers: the disk has to exist before diskpart can see it ---
+rem  Storage INFs from the matched pack are loaded into THIS WinPE (drvload).
+rem  Proxmox/VirtIO is the case that matters; on bare metal this is a no-op.
+set "SEVENZIP="
+if exist "%SYS%\7z.exe" set "SEVENZIP=%SYS%\7z.exe"
+set "DRIVERDIR="
+call :find_drivers
+if defined DRIVERDIR (
+    call :log "Driver pack: %DRIVERDIR%"
+    call :stage_drivers
+    if defined DRIVERSTAGE (
+        for /r "!DRIVERSTAGE!" %%I in (vioscsi.inf viostor.inf) do (
+            if exist "%%~fI" (
+                call :log "drvload %%~nxI (WinPE storage)"
+                drvload "%%~fI" >> "%LOG%" 2>&1
+            )
+        )
+    )
+) else (
+    call :log "No driver pack for this machine on the share (Z:\Drivers\%MAKE%\%MODEL%) - continuing without."
+)
+
 rem --- target volume --------------------------------------------------------
 rem  Reuse a prepared W: if it is already there; otherwise repartition disk 0 -
 rem  and ONLY without asking when the panel published deploy.autoprep.
@@ -150,6 +209,17 @@ if errorlevel 1 (
 )
 call :log "DISM apply complete."
 
+rem --- drivers into the applied image (same call ImageDeployer makes) --------
+if defined DRIVERSTAGE (
+    call :log "DISM /Add-Driver /Recurse from %DRIVERSTAGE%"
+    dism /Image:%APPLYDIR% /Add-Driver /Driver:"%DRIVERSTAGE%" /Recurse >> "%LOG%" 2>&1
+    if errorlevel 1 (
+        call :log "WARNING: DISM /Add-Driver reported errors - see the log; Windows will still boot with inbox drivers."
+    ) else (
+        call :log "Drivers injected."
+    )
+)
+
 rem --- boot files -----------------------------------------------------------
 set "EFILETTER=S"
 if not exist "%EFILETTER%:\" set "EFILETTER="
@@ -188,6 +258,78 @@ goto :eof
 :log
 echo [deploy] %~1
 >> "%LOG%" echo %DATE% %TIME% %~1
+if defined LOGHOST if defined CURL call :push "%~1"
+goto :eof
+
+:push
+rem One line per POST, JSON built by hand: quotes become apostrophes and
+rem backslashes forward slashes, because cmd has no escaping and the panel
+rem would rather see C:/x than a dropped line.
+set "MSG=%~1"
+set "MSG=%MSG:"='%"
+set "MSG=%MSG:\=/%"
+set "MSG=%MSG:{=(%"
+set "MSG=%MSG:}=)%"
+"%CURL%" -s -m 3 -o NUL -H "Content-Type: application/json" -d "{\"serial\":\"%SERIAL%\",\"make\":\"%MAKE%\",\"model\":\"%MODEL%\",\"session\":\"%SESSION%\",\"lines\":[\"%MSG%\"]}" "%LOGHOST%/imaging-log/ingest" >nul 2>&1
+goto :eof
+
+:find_drivers
+rem Z:\Drivers\<Make>\<Model> by exact name, then model starts-with folder
+rem (Lenovo: product 21F5001AAU, folder 21F), then folder contained in product
+rem (Acer: product "TravelMate P414-52", folder the same). Then aliases.txt
+rem (alias=Make\Folder, exact), then _default. First hit wins.
+set "DRIVERDIR="
+if exist "Z:\Drivers\%MAKE%\%MODEL%\" set "DRIVERDIR=Z:\Drivers\%MAKE%\%MODEL%" & goto :eof
+for /d %%V in ("Z:\Drivers\*") do (
+    for /d %%M in ("%%~fV\*") do (
+        if not defined DRIVERDIR (
+            set "F=%%~nxM"
+            if /i "!MODEL:~0,4!"=="!F:~0,4!" if "!F:~4,1!"=="" set "DRIVERDIR=%%~fM"
+            if not defined DRIVERDIR if not "!MODEL:%%~nxM=!"=="!MODEL!" set "DRIVERDIR=%%~fM"
+        )
+    )
+)
+if defined DRIVERDIR goto :eof
+if exist "Z:\Drivers\aliases.txt" (
+    for /f "usebackq tokens=1,* delims==" %%K in ("Z:\Drivers\aliases.txt") do (
+        if not defined DRIVERDIR if /i "%%K"=="%MODEL%" if exist "Z:\Drivers\%%L\" set "DRIVERDIR=Z:\Drivers\%%L"
+    )
+)
+if defined DRIVERDIR goto :eof
+if exist "Z:\Drivers\_default\" (
+    dir /b /s "Z:\Drivers\_default\*.inf" "Z:\Drivers\_default\*.cab" "Z:\Drivers\_default\*.exe" "Z:\Drivers\_default\*.zip" "Z:\Drivers\_default\*.7z" >nul 2>&1 && set "DRIVERDIR=Z:\Drivers\_default"
+)
+goto :eof
+
+:stage_drivers
+rem An INF tree is used in place. An archive is expanded to X:\Drivers: .cab with
+rem expand.exe (always there), anything else with 7z.exe (injected) - without 7z
+rem a .exe/.zip/.7z pack is reported and skipped, never half-applied.
+set "DRIVERSTAGE="
+dir /b /s "%DRIVERDIR%\*.inf" >nul 2>&1 && set "DRIVERSTAGE=%DRIVERDIR%" & goto :eof
+set "PACK="
+for %%E in (cab exe zip 7z) do (
+    if not defined PACK for %%P in ("%DRIVERDIR%\*.%%E") do if not defined PACK set "PACK=%%~fP"
+)
+if not defined PACK (
+    call :log "WARNING: %DRIVERDIR% has no INF and no archive - skipped."
+    goto :eof
+)
+set "STAGE=X:\Drivers\pack"
+if exist "%STAGE%" rd /s /q "%STAGE%" >nul 2>&1
+md "%STAGE%" >nul 2>&1
+call :log "Expanding %PACK%"
+if /i "%PACK:~-4%"==".cab" (
+    expand.exe -F:* "%PACK%" "%STAGE%" >> "%LOG%" 2>&1
+) else (
+    if not defined SEVENZIP (
+        call :log "WARNING: %PACK% needs 7z.exe, which was not injected - drivers skipped."
+        goto :eof
+    )
+    "%SEVENZIP%" x -y -o"%STAGE%" "%PACK%" >> "%LOG%" 2>&1
+)
+dir /b /s "%STAGE%\*.inf" >nul 2>&1 && set "DRIVERSTAGE=%STAGE%"
+if not defined DRIVERSTAGE call :log "WARNING: %PACK% expanded to no INF files - drivers skipped."
 goto :eof
 
 :fail

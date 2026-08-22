@@ -1175,6 +1175,41 @@ block; `StopPxeBootServices` broke exactly this way and only an IPC round-trip c
 What is left: `GetPxeBootWimLibrary` (642 ms warm) and `GetPxeBootPluginConfig` (418 ms) both
 still rebuild status-shaped data. Worth another look only if the panel still feels slow.
 
+### Drivers and live logs from the cmd-only client (2026-08-23)
+
+Craig: "WDK needs the same driver install injection as ImageDeployer (noting boot
+wim doesn't have pwsh) - how are we installing drivers?" and "we are also not
+getting any logs back". Both were gaps in the first cut of the deploy client.
+
+- **Identity without wmic/PowerShell**: `reg query HKLM\HARDWARE\DESCRIPTION\System\BIOS`
+  gives SystemManufacturer/SystemProductName (the same SMBIOS strings as
+  Win32_ComputerSystem). There is no serial in the registry, so the device id the
+  panel files the log under is the first NIC MAC from `ipconfig /all`.
+- **Pack lookup** mirrors ImageDeployer's search of `Z:\Drivers\<Make>\<Model>`:
+  exact folder, model-starts-with-folder (Lenovo `21F…`), folder-contained-in-model
+  (Acer), then `Z:\Drivers\aliases.txt` (`alias=Make\Folder`, exact - the JSON map
+  the panel already writes, flattened because cmd cannot parse JSON), then `_default`.
+- **Expand**: an INF tree is used in place; `.cab` via `expand.exe` (in every WinPE);
+  `.exe/.zip/.7z` via `7z.exe`, which now rides in as an overlay initrd beside
+  startnet.cmd. Without it such packs are reported and skipped, never half-applied.
+- **Inject**: storage INFs (vioscsi/viostor) are `drvload`ed into WinPE BEFORE
+  diskpart so a Proxmox VirtIO disk exists at all; after apply, the same
+  `dism /Image:W:\ /Add-Driver /Recurse` call ImageDeployer and FieldIso make.
+- **Live log**: `curl.exe` rides in the same way and every `:log` line POSTs the same
+  JSON ImageDeployer sends to `/imaging-log/ingest`. Quotes become apostrophes and
+  backslashes forward slashes - cmd has no escaping. Silent when curl is absent;
+  `X:\Windows\Temp\deploy.log` is always written and copied into the applied image.
+- **The tools now ship.** `scripts/prepare-bundle-deps.ps1` used to strip
+  `sidecar/pxe/fieldiso/tools/*.exe|dll` as "maintainer-only"; a corporate install
+  therefore had no 7z and no curl. They are kept now (LGPL / curl licence - see
+  `sidecar/pxe/deploy-client/THIRD-PARTY.txt`). Still nothing is downloaded at runtime.
+- **Mounts are re-asserted, not assumed.** The first real boot stopped at "Image not
+  on the share": `hdiutil detach` is host-global, and a test harness calling Stop
+  took the live app's ISO mounts away while its share stayed up.
+  `Sync-AppPxeBootInstallWimMounts` (housekeeping, 20s) re-mounts anything missing
+  while this process is serving. Lesson for agents: never run Start/Stop against a
+  host where the app is live - use the gates' temp dirs.
+
 ### How a corporate user's boot.wim installs install.wim (2026-08-23)
 
 Craig: "When a corporate person downloads WDK, how is the install.wim installed via

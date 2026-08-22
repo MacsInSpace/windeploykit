@@ -1104,6 +1104,14 @@ function Get-AppPxeBootWimOverlayProfiles {
             # exactly as imported, and editing the client is a file copy, not a rebake.
             Runtime       = @(
                 @{ ServedName = 'startnet.cmd'; WinPeName = 'startnet.cmd'; Required = $false }
+                # The two things a stock WinPE cannot do: expand a vendor .exe/.zip/.7z
+                # driver pack, and talk HTTP. Both LGPL/MIT-licensed, both already in
+                # the repo for FieldIso, both now shipped in the app bundle. None is
+                # Required - the client degrades (cab-only, local log) without them.
+                @{ ServedName = '7z.exe';   WinPeName = '7z.exe';   Required = $false }
+                @{ ServedName = '7za.dll';  WinPeName = '7za.dll';  Required = $false }
+                @{ ServedName = '7zxa.dll'; WinPeName = '7zxa.dll'; Required = $false }
+                @{ ServedName = 'curl.exe'; WinPeName = 'curl.exe'; Required = $false }
                 @{ ServedName = 'deploy.unc';  WinPeName = 'deploy.unc';  Required = $true }
                 @{ ServedName = 'deploy.cred'; WinPeName = 'deploy.cred'; Required = $false }
                 @{ ServedName = 'loghost';     WinPeName = 'deploy.loghost'; Required = $false }
@@ -3538,6 +3546,24 @@ function Get-AppPxeBootDeployClientStartnetSource {
     return $null
 }
 
+function Get-AppPxeBootDeployClientToolsDir {
+    # Windows binaries injected beside the client. Kept with the FieldIso tools
+    # (one fetch script, scripts/fetch-fieldiso-tools.ps1) and shipped in the
+    # bundle since 2026-08-23 - before that prepare-bundle-deps stripped them as
+    # "maintainer-only", which left a corporate install with no way to expand a
+    # vendor driver pack or push a log line.
+    $candidates = @()
+    if ($SidecarRoot) { $candidates += (Join-Path $SidecarRoot 'pxe/fieldiso/tools') }
+    if (Test-Path variable:script:AppSidecarProjectRoot) {
+        if ($script:AppSidecarProjectRoot) { $candidates += (Join-Path $script:AppSidecarProjectRoot 'sidecar/pxe/fieldiso/tools') }
+    }
+    foreach ($c in $candidates) {
+        $path = ($c -replace '/', [IO.Path]::DirectorySeparatorChar)
+        if (Test-Path -LiteralPath (Join-Path $path '7z.exe')) { return (Resolve-Path -LiteralPath $path).Path }
+    }
+    return $null
+}
+
 function Test-AppPxeBootDeployClientInjectEnabled {
     <#
     .SYNOPSIS
@@ -3711,6 +3737,25 @@ function Write-AppPxeBootDeployOverlayFiles {
         }
     } elseif (Test-Path -LiteralPath $startnetFile) {
         Remove-Item -LiteralPath $startnetFile -Force -ErrorAction SilentlyContinue
+    }
+    # Tools the client needs that WinPE lacks, served beside it. Copied once
+    # (size+mtime), removed with the toggle so nothing stale is ever injected.
+    $toolsSrcDir = Get-AppPxeBootDeployClientToolsDir
+    foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe')) {
+        $dst = Join-Path $Dir $tool
+        $src = if ($toolsSrcDir) { Join-Path $toolsSrcDir $tool } else { $null }
+        if ((Test-AppPxeBootDeployClientInjectEnabled) -and $src -and (Test-Path -LiteralPath $src)) {
+            $s = Get-Item -LiteralPath $src
+            $d = Get-Item -LiteralPath $dst -ErrorAction SilentlyContinue
+            if (-not $d -or $d.Length -ne $s.Length -or $d.LastWriteTimeUtc -lt $s.LastWriteTimeUtc) {
+                Copy-Item -LiteralPath $src -Destination $dst -Force
+            }
+        } elseif (Test-Path -LiteralPath $dst) {
+            Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ((Test-AppPxeBootDeployClientInjectEnabled) -and -not (Test-Path -LiteralPath (Join-Path $Dir '7z.exe'))) {
+        Write-SidecarLogVerbose 'PXE boot: deploy client tools (7z/curl) not found - .cab packs only, no live log'
     }
 
     $uncFile = Join-Path $Dir 'deploy.unc'
@@ -9078,6 +9123,43 @@ function Mount-AppPxeBootInstallWimIsos {
         }
     }
     @($result)
+}
+
+$script:AppPxeBootInstallWimMountsCheckedAt = $null
+
+function Sync-AppPxeBootInstallWimMounts {
+    <#
+    .SYNOPSIS
+        Housekeeping: while THIS sidecar is serving, make sure every ISO it mounted
+        is still mounted, and re-mount what is not.
+    .NOTES
+        hdiutil detach is host-global. A second sidecar on the same Mac (a test
+        harness, a dev shell, another copy of the app) calling Stop takes the mounts
+        out from under the one that is live - which is exactly how a deployment on
+        2026-08-23 reached "Image not on the share" with the share itself up.
+        Mounting is idempotent and borrows an existing attach, so re-asserting is
+        cheap; checked every 20s, and only when this process started HTTP.
+    #>
+    $state = $script:AppPxeBootState
+    $serving = $state.HttpProcess -and -not $state.HttpProcess.HasExited
+    if (-not $serving) { return }
+    if ($state.IsoMounts.Count -eq 0) { return }
+    $now = [DateTime]::UtcNow
+    if ($script:AppPxeBootInstallWimMountsCheckedAt -and ($now - $script:AppPxeBootInstallWimMountsCheckedAt).TotalSeconds -lt 20) { return }
+    $script:AppPxeBootInstallWimMountsCheckedAt = $now
+    $lost = @($state.IsoMounts.Values | Where-Object {
+            $wim = [string]$_.installWim
+            $wim -and -not (Test-Path -LiteralPath $wim)
+        })
+    if ($lost.Count -eq 0) { return }
+    Write-SidecarLog "PXE boot: $($lost.Count) ISO mount(s) went away while serving ($((@($lost | ForEach-Object { [string]$_.isoFileName })) -join ', ')) - re-mounting"
+    foreach ($entry in $lost) { [void]$state.IsoMounts.Remove([string]$entry.base) }
+    try {
+        Mount-AppPxeBootInstallWimIsos | Out-Null
+        Clear-AppPxeBootMemo
+    } catch {
+        Write-SidecarLog "PXE boot: re-mount failed - $($_.Exception.Message)"
+    }
 }
 
 function Dismount-AppPxeBootInstallWimIso {

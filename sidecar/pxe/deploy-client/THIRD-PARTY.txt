@@ -1,0 +1,17 @@
+Binaries the deploy client injects into WinPE at boot (served from http/deploy/,
+never written into a WIM). Fetched by scripts/fetch-fieldiso-tools.ps1 into
+sidecar/pxe/fieldiso/tools/ and shipped in the app bundle.
+
+7z.exe, 7za.dll, 7zxa.dll
+  7-Zip (the 7za standalone build), https://www.7-zip.org/
+  Licence: GNU LGPL v2.1 (+ unRAR restriction). Source and licence text at
+  https://www.7-zip.org/license.txt and https://www.7-zip.org/download.html.
+  Used unmodified to expand vendor driver packs (.exe/.zip/.7z) in WinPE.
+
+curl.exe
+  curl for Windows (win64-mingw static build), https://curl.se/windows/
+  Licence: the curl licence (MIT/X derivative), https://curl.se/docs/copyright.html
+  Used unmodified to POST deployment log lines to the Netboot panel.
+
+Everything else the client runs (dism, diskpart, bcdboot, drvload, expand, net,
+reg, find, ipconfig) is part of the user's own Windows boot.wim.

@@ -210,17 +210,22 @@ try {
             $text = [System.IO.File]::ReadAllText($served)
             if ($text -match "(?<!`r)`n") { throw 'published startnet.cmd has LF-only line endings' }
             # The client must do each stage of the deployment, in this order.
-            $stages = @('wpeinit', 'net use Z:', 'TaskSequences\_default.txt', '.env', 'diskpart', 'dism /Apply-Image', 'bcdboot', 'Panther\unattend.xml', 'wpeutil reboot')
+            $stages = @('wpeinit', 'net use Z:', 'TaskSequences\_default.txt', '.env', ':find_drivers', 'drvload', 'diskpart', 'dism /Apply-Image', '/Add-Driver', 'bcdboot', 'Panther\unattend.xml', 'wpeutil reboot')
             $pos = -1
             foreach ($s in $stages) {
                 $next = $text.IndexOf($s, [Math]::Max(0, $pos), [StringComparison]::OrdinalIgnoreCase)
                 if ($next -lt 0) { throw "client is missing stage '$s'" }
                 $pos = $next
             }
-            # And it must only use what a stock WinPE carries - no PowerShell, no curl.
-            foreach ($tool in @('powershell', 'pwsh', 'curl')) {
+            # And it must only use what a stock WinPE carries plus what we inject
+            # beside it (7z.exe, curl.exe) - never PowerShell or wmic.
+            foreach ($tool in @('powershell', 'pwsh', 'wmic')) {
                 if ($text -match "(?im)^\s*$tool(\.exe)?\b") { throw "client invokes '$tool', which a stock boot.wim does not have" }
             }
+            # The injected tools are optional: every use is guarded so their absence
+            # degrades (cab-only packs, local log) rather than errors.
+            if ($text -notmatch '(?i)if not defined SEVENZIP') { throw '7z use is not guarded' }
+            if ($text -notmatch '(?i)if defined LOGHOST if defined CURL') { throw 'curl use is not guarded' }
         } finally {
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
         }

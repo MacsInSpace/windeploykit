@@ -372,6 +372,18 @@ function Write-AppPxeBootDriverAliasMap {
         entries   = @($entries)
     }
     ($doc | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $mapPath -Encoding UTF8 -Force
+    # aliases.txt - the same map for the cmd-only deploy client, which cannot read
+    # JSON: one `alias=Make\Folder` per line, CRLF, exact-match only (a trailing
+    # wildcard is dropped; the client's own prefix/containment rules cover it).
+    $txtLines = [System.Collections.Generic.List[string]]::new()
+    foreach ($e in $entries) {
+        foreach ($a in @($e.aliases)) {
+            $alias = ([string]$a).TrimEnd('*').Trim()
+            if ($alias -and $alias -notmatch '[=\r\n]') { [void]$txtLines.Add("$alias=$($e.vendor)\$($e.folder)") }
+        }
+    }
+    $txtBody = if ($txtLines.Count -gt 0) { ($txtLines -join "`r`n") + "`r`n" } else { '' }
+    [System.IO.File]::WriteAllText((Join-Path $root 'aliases.txt'), $txtBody, (New-Object System.Text.UTF8Encoding $false))
     $script:AppPxeBootAliasMapSignature = $sig
     Write-SidecarLog "PXE boot: driver alias map published ($($entries.Count) entr$(if ($entries.Count -eq 1) { 'y' } else { 'ies' }))"
 }
