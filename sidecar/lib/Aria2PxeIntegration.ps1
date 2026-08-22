@@ -635,7 +635,10 @@ $script:AppAria2DirectDownloadMaxActive = 10
 $script:AppAria2DirectDownloadQueue = [System.Collections.Generic.List[hashtable]]::new()
 
 $script:AppAria2DirectDownloadWorker = {
-    param($Uri, $OutFile, $TimeoutSec, $Sync, $ExpectedHash, $HashAlgorithm)
+    # Runs in a bare runspace: NO sidecar function exists here. Everything it needs - the
+    # user agent included - arrives as an argument (field regression 2026-08-22: calling
+    # Get-AppUserAgent from here threw 'not recognized' and every direct download failed).
+    param($Uri, $OutFile, $TimeoutSec, $Sync, $ExpectedHash, $HashAlgorithm, $UserAgent)
     $client = $null; $resp = $null; $inStream = $null; $outStream = $null; $hasher = $null
     try {
         # Hash while streaming (catalog SHA-256/MD5 where published) - zero extra I/O
@@ -647,7 +650,7 @@ $script:AppAria2DirectDownloadWorker = {
         }
         $client = [System.Net.Http.HttpClient]::new()
         $client.Timeout = [TimeSpan]::FromSeconds([Math]::Max(30, [int]$TimeoutSec))
-        [void]$client.DefaultRequestHeaders.UserAgent.TryParseAdd((Get-AppUserAgent))
+        if (-not [string]::IsNullOrWhiteSpace([string]$UserAgent)) { [void]$client.DefaultRequestHeaders.UserAgent.TryParseAdd([string]$UserAgent) }
         $resp = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         if (-not $resp.IsSuccessStatusCode) {
             throw "HTTP $([int]$resp.StatusCode) ($($resp.ReasonPhrase)) for $Uri"
@@ -936,7 +939,7 @@ function Start-AppAria2DirectDownloadEntry {
     $rs.Open()
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
-    [void]$ps.AddScript($script:AppAria2DirectDownloadWorker.ToString()).AddArgument([string]$Entry.uri).AddArgument($destPath).AddArgument([int]$Entry.timeoutSec).AddArgument($sync).AddArgument([string]$Entry.expectedHash).AddArgument([string]$Entry.expectedHashAlgorithm)
+    [void]$ps.AddScript($script:AppAria2DirectDownloadWorker.ToString()).AddArgument([string]$Entry.uri).AddArgument($destPath).AddArgument([int]$Entry.timeoutSec).AddArgument($sync).AddArgument([string]$Entry.expectedHash).AddArgument([string]$Entry.expectedHashAlgorithm).AddArgument([string](Get-AppUserAgent))
     $handle = $ps.BeginInvoke()
 
     $script:AppAria2DirectDownloadJobs[[string]$Entry.key] = @{
