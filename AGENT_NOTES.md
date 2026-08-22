@@ -12,8 +12,9 @@ is, where it came from, what is decided, what works, and what is booby-trapped.
 | Fact | Value |
 | --- | --- |
 | Project root | `/Volumes/Data/projects/windeploykit` |
-| GitHub | `MacsInSpace/windeploykit` (**private**, empty - nothing pushed yet) |
-| Git | on `main`; initial commit `75d3f25` landed 2026-08-21 |
+| GitHub | `MacsInSpace/windeploykit` (**private**). `main` is pushed and tracks `origin/main`; commit and push as you go |
+| Git | on `main`; initial commit `75d3f25` landed 2026-08-21. Latest state: section 9 |
+| Vault module | `MacsInSpace/SecretManagement.LocalVault` (private) - its own repo since 2026-08-22, vendored at tag `v1.0.2` |
 | App data (macOS) | `~/Library/Application Support/WinDeployKit` |
 | Bundle id | `com.macsinspace.windeploykit` |
 | Dev server | Vite on **42410** (HMR 42411) |
@@ -43,7 +44,7 @@ from. It is **under active development by the user**.
 
 > **Never modify, never `git checkout`, never `git stash` in that repo.**
 > Copy out of it only. If you find a bug there, write it up in
-> `usm-reference/HANDOVER_TO_USM_AGENT.md` - do not fix it in place.
+> `docs/handover/HANDOVER_TO_USM_AGENT.md` - do not fix it in place.
 
 **Direction changed 2026-08-21 (Craig):** WinDeployKit and PSOpenAD-FE are both
 off on their own corporate dev paths, and **USM now takes from this project**,
@@ -92,22 +93,28 @@ USM vendoring its own credential-prompt machinery back from a downstream project
 > byte-comparable. `AppHttp.ps1` is a deliberate 56-line stub of USM's 546 - that
 > asymmetry is intentional, not drift.
 
-### Identity injection - contract proposed, not yet agreed
+### Identity injection - contract AGREED 2026-08-21, implementation not started
 
 The domain libs hardcode product identity, which is why a cross-repo diff is ~90%
 noise and hid three real bugs for a day. The fix is one `$script:AppProductIdentity`
 object set by the host sidecar before any lib is dot-sourced (same constraint as
-`$script:AppSidecarProjectRoot`), with fields `DisplayName` / `Slug` / `BinaryName`
-/ `UserAgentToken`, and the rule that **a domain lib contains no product literal at
-all**.
+`$script:AppSidecarProjectRoot`), fields `DisplayName` / `Slug` / `BinaryName` /
+`UserAgentToken`, and the rule that **a domain lib contains no product literal at
+all**. Our values: `WinDeployKit` / `windeploykit` / `windeploykit` /
+`WinDeployKit/1.0`. Canonical text: USM's
+`docs/handover/PRODUCT_IDENTITY_CONTRACT.md` (read-only; copy the grep from its
+section 2, it is the drift check).
 
 Our functional surface is **20 sites** (`AppPaths` x5, `Aria2Plugin` x3, one
 User-Agent per vendor catalog, `Ipc` x1, `PxeBootTaskSequences` x1,
-`Aria2PxeIntegration` x1); ~53 further mentions are prose and are being left alone.
+`Aria2PxeIntegration` x1); ~50 further mentions are prose, and the contract's grep
+counts those too, so they go as well.
 
-**Field names are with USM for agreement - do not start coding this until they
-confirm.** Both sides implementing different shapes is the failure this prevents.
-Full proposal and rationale in `docs/handover/HANDOVER_TO_USM_AGENT.md`.
+**Status 2026-08-22 - nobody has started, on either side.** Checked, not assumed:
+`AppProductIdentity` is defined in neither repo; USM's 32 sites still hit the grep;
+`AppElevation.ps1` / `AppNativeProcess.ps1` have never been committed to USM even
+though USM said it would take them and de-identify them first. The contract says
+we may convert our 20 sites now; see section 9.
 
 **Explicitly NOT shared: the frontend.** WinDeployKit is corporate - no themes,
 no arcade, no personality. USM keeps all of that. Panels, theme system and
@@ -115,6 +122,16 @@ no arcade, no personality. USM keeps all of that. Panels, theme system and
 only. Do not try to reconcile the UI.
 
 ---
+
+## 0b. Building the macOS app
+
+Do not work this out from scratch - it is written down.
+[`docs/AGENT_NOTES_MACOS_BUILD.md`](docs/AGENT_NOTES_MACOS_BUILD.md) has the
+build command, notarisation (it works, and needs no App Store Connect app
+record), why stapling fails and why that is expected, bundling the sidecar so a
+packaged build can find it, and a release checklist. Carried over from
+PSOpenAD-FE where each item was tested against a real release rather than
+assumed.
 
 ## 1. What this is
 
@@ -226,7 +243,7 @@ a cache description, correctly left alone.
 - Console tree navigates; each node renders only its own sections; zero console
   errors in a headless browser check.
 
-### Carried in from USM, 2026-08-21 (see `usm-reference/HANDOVER_TO_USM_AGENT.md`)
+### Carried in from USM, 2026-08-21 (see `docs/handover/HANDOVER_TO_USM_AGENT.md`)
 
 - **Lenovo catalog fix.** `$bestScore = -1` -> `[int]::MinValue` at three sites.
   Lenovo is the only *signed* scorer of the five (win10 = -100), so the old seed
@@ -279,7 +296,7 @@ guidance, `GPO-disable` step sets, and the vendor SCCM driver catalogs.
 | Transfers | **Wired** - download client |
 | Applications | Placeholder (deferred, section 2.6) |
 | Site Profile | **Placeholder - needed**, see section 5 |
-| Sidecar Log | Placeholder |
+| Sidecar Log | **Wired** - live stderr tail, Pause / Clear / Restart Sidecar verbs (`panels/SidecarLogPanel.tsx`) |
 | Deployment Share (root) | Placeholder |
 
 ### Shared secret vault (built 2026-08-21)
@@ -306,15 +323,22 @@ Names we use, from contract section 3:
   share credentials.
 - **`local-machine/admin`** - read. **UserName IS the login** (e.g. `st00447`),
   not a tag.
-- **`dept/edu001`** - read-only *unless* USM has no legacy `DeptCredentials.xml`.
-  That file is the source of truth while `Set-DeptCreds`-era tools exist and USM
-  refreshes the vault from it, so writing over it is pointless - USM wins on its
-  next read. When no file exists, a sign-in here IS adopted and promoted by USM.
+- **`dept/edu001`** - read, and **write freely from our own sign-in** (contract
+  section 5a, 2026-08-21 night). USM treats its `DeptCredentials.xml` as
+  authoritative when present and refreshes the vault from it on its next read, so
+  our write is either adopted (no file) or superseded (file wins). Neither is
+  harmful, so there is no guard - the path-mirroring guard we first built failed
+  open and was deleted. `Set-AppVaultDeptCredential` is the writer.
 
 Rules that are not negotiable:
 
-> Registration is **by full path**, once at startup, guarded. There is no reset
-> concept in this vault - the SecretStore bootstrap that had one was withdrawn
+> Registration is **by manifest path, at every start-up** (contract section 8b:
+> SecretManagement's in-process registry cache only refreshes on a file-watcher
+> event, so a running product never sees a sibling's change). `Register-LocalVault`
+> is idempotent and **self-heals** a dead entry left by an uninstalled or cleaned
+> sibling - expect one `healed` line in the log after a `cargo clean` in
+> PSOpenAD-FE, whose `target/debug` copy currently holds the registration on
+> Craig's Mac. There is no reset concept in this vault - the SecretStore bootstrap that had one was withdrawn
 > (contract section 4a) after it was shown to wipe every kit's secrets.
 > **Every credential function must work with the vault unavailable**, falling
 > back to the legacy Clixml file, so a vault fault degrades to yesterday's
@@ -348,16 +372,19 @@ is the section 3b lesson made visible rather than just documented.
 > to the default regardless of the setting. If the Deploy$ base ever appears to be
 > ignored, check that call first.
 
-### Unwired - code exists, nothing reaches it (found 2026-08-21)
+### Commands without a sidecar handler (re-measured 2026-08-22)
 
-These are **incomplete ports, not residue**. Do not delete them; finish them.
+`app/src/lib/types.ts` declares 69 `SidecarCommand`s; six have no `Handle-*`:
 
-| Gap | Evidence | Consequence |
+| Command | Callers | What it is |
 | --- | --- | --- |
+| `GetSiteProfile` / `SetSiteProfile` | none | Expected - section 5 |
+| `LoadLocalMachineCredentialToSession` | 1 | Incomplete credential port; wire it or cut the caller |
+| `ClearMacOsAdminCredentialCache` / `PrefetchMacOsAdminCredential` | 1 each | macOS elevation cache from upstream; decide with the `AppElevation` re-vendor (section 9) |
+| `harvest_acer_sccm_urls` | 1 | **Not a sidecar command** - a Rust `#[tauri::command]` in `acer_harvest.rs` that is wrongly in the sidecar union. Move it out |
 
-12 of the 67 commands in `types.ts` have no handler: the 7 credential ones above,
-`ClearMacOsAdminCredentialCache`, `PrefetchMacOsAdminCredential`,
-`DeleteInfraSshCredential`, and `GetSiteProfile`/`SetSiteProfile` (expected - section 5).
+The 2026-08-21 list of 12 is closed: the seven credential commands and
+`DeleteInfraSshCredential` got handlers with the vault.
 
 ### Not built yet
 
@@ -649,11 +676,100 @@ The full table is `SHARED_SECRET_VAULT_CONTRACT.md` section 5c in the USM repo.
 1. Read this file, then `usm-reference/PORT_NOTES.md` for the long history.
 2. `cd app && npm install && npm run tauri:dev`.
 3. Smoke-test the sidecar from a shell before blaming the UI.
-4. Highest-value next steps, in order:
-   1. **Site Profile** (section 5) - unblocks 10 `TODO(Site Profile)` sites and the
-      task-sequence token expansion
-   2. **Phase-C first-boot runner** (section 2.3) - unblocks Applications and everything
-      MDT did after the first reboot
-   3. **WinPE client rewrite** (section 2.1) - grow `fieldiso/run.ps1` into the agent
-   4. Boot Images UI over the existing overlay engine
-5. Commit early and often - the tree is committed now, so keep it that way.
+4. The to-do list, in order, is **section 9**. Read it before picking anything.
+5. Commit early and often, and push - `main` tracks `origin/main`.
+
+---
+
+## 9. Handover - where things stand and the to-do list (2026-08-22)
+
+Written for whoever picks this up next. Everything here was checked against the
+trees on 2026-08-22, not copied from earlier notes. Dates are absolute.
+
+### Done and closed - do not redo
+
+| Thread | State |
+| --- | --- |
+| Extraction, rename to WinDeployKit, generic-isation (`siteId`) | Done 2026-08-21 (sections 1, 3) |
+| Scope sweep (no MDM, no VPN/Tailscale, no school model) | Done 2026-08-21, commit `859e8cf` |
+| StrictMode, ASCII-only and storage-split gates | `scripts/test-strictmode.ps1`, `test-ascii.ps1`, `test-storage-policy.ps1`; all clean at `49114d8`. Run all three before every commit |
+| First-run wizard + Deploy$ base in Settings | Done (section 3) |
+| MMC console shell (menus, toolbar, splitter, verbs registry) | Done (section 4). All verbs live in Action / right-click / toolbar, never in panel headers |
+| Sidecar auto-start from the app | `lib/sidecarBoot.ts`, commit `12bc591` |
+| Shared secret vault, Option B | Built 2026-08-21, re-vendored from the module's own repo at `v1.0.2` on 2026-08-22 (`49114d8`). USM: "nothing owed" |
+| Application icon | `31f68b6` |
+| macOS build / notarisation notes | `docs/AGENT_NOTES_MACOS_BUILD.md`, carried from PSOpenAD-FE 2026-08-22 (section 0b) |
+
+### Open threads with the other agents
+
+| With | Thread | Who moves next |
+| --- | --- | --- |
+| USM | **Arch trees** for Secure Boot. USM `main` (merge `8e9f998f`) has all nine `sidecar/pxe/<arch>/` trees (37 files, 24.5 MB). Ours has none, so Option 67's default `x86_64-sb/shimx64.efi` 404s at boot | **Craig's go**, then us: copy byte-identical from USM `main` (`git show main:sidecar/pxe/<arch>/<file>`), never the upstream root `snponly.efi`, verify every blob's SHA against `git rev-parse main:<path>` in USM, commit. `.gitattributes` already marks `*.efi *.pxe *.kpxe` binary |
+| USM | **Identity contract** (section 0). Agreed; not started by anyone | Us, now: (1) set `$script:AppProductIdentity` in `sidecar/windeploykit-sidecar.ps1` before any dot-source - one commit, no behaviour change; (2) convert lib by lib, each file's contract grep hitting 0 before moving on; (3) tell USM in the handover which files are clean so they can vendor them |
+| USM | **`AppElevation.ps1` / `AppNativeProcess.ps1`** - USM owns them, said it would take and de-identify them first, has not committed either | Ask USM in the handover. If they stay silent, de-identify our copies under (2) above and offer those; do not edit them for any other reason without telling USM |
+| USM | Still owed to USM: nothing. Their last section (2026-08-22 later) closes the vault | - |
+| PSOpenAD-FE | Nothing owed either way. They re-vendor the vault themselves (USM told them). Their `target/debug` copy holds the `shared` registration on Craig's Mac until they clean it | - |
+| Module repo | Vault bugs go to `MacsInSpace/SecretManagement.LocalVault` as issues/PRs, never to the USM handover | - |
+
+### To-do list, in order
+
+1. **Arch trees** (above) - one commit once Craig says go. Then boot a Secure
+   Boot client and watch `Sync-AppPxeBootBundledArchTftpTrees` stage all nine.
+2. **Identity object + our 20 sites** (above). Start with `AppPaths.ps1` (x5)
+   and `Ipc.ps1` (x1) - they are runtime core, so a clean copy is immediately
+   useful to USM; then `Aria2Plugin`, `Aria2PxeIntegration`,
+   `PxeBootTaskSequences`, the five vendor catalogs (one UA each via a shared
+   `Get-AppUserAgent`), then the prose in `PxeBootPlugin.ps1` (47 hits, all
+   comments and log strings).
+3. **Confirm the app end to end on this Mac** after a fresh `npm run tauri:dev`:
+   `SIDECAR STARTING` clears, Netboot shows the LAN IP, Sidecar Log shows the
+   vault `already registered` line. Nobody has confirmed this in the **app**
+   since `12bc591`; everything was verified over stdio and headless. When it is
+   confirmed, delete `~/Library/Application Support/DeployKit.old-name.bak`.
+4. **Handler gaps** (section 3 table): wire or cut
+   `LoadLocalMachineCredentialToSession`; move `harvest_acer_sccm_urls` out of
+   the sidecar union; decide the two macOS credential-cache commands alongside
+   the `AppElevation` re-vendor.
+5. **Site Profile** (section 5) - the main design task. 10 `TODO(Site Profile)`
+   sites and the `{{SITE}}` / `{{LocalAdminPw}}` token expansion block on it.
+   `GetSiteProfile` / `SetSiteProfile` are already in the command union.
+6. **Phase-C first-boot runner** (section 2.3) - unblocks Applications and
+   everything MDT did after the first reboot.
+7. **WinPE client rewrite** (section 2.1) - grow `fieldiso/run.ps1` into the
+   server-driven agent.
+8. **Boot Images UI** over the existing wimlib overlay engine.
+9. **Intune / Autopilot decision** - parked by Craig. Suggested: relabel the
+   task-sequence option "None (clean OOBE)" and treat Autopilot hash harvesting
+   as its own feature. Do not remove the Intune vendor-binary staging in
+   `prepare-bundle-deps.ps1` until he decides.
+10. **Secure Boot build dependency** - `ipxeboot` sibling is an undeclared build
+    dependency of the byte-patched `snponly.efi` (section 6). Formalise it once
+    the arch trees are in.
+
+### Rules that bit us this week - read before writing code
+
+- StrictMode: `$obj.missing` throws, `if ($null -ne $obj.missing)` throws too,
+  `$x = [void](Fn)` never calls `Fn`, `@($null).Count` is 1, `Where-Object` on an
+  emptying list yields `$null`. Section 6 and README "Code conventions".
+- ASCII only, everywhere in the tree. No em dashes, no emoji, no smart quotes.
+  The gate content-sniffs binaries, so it is safe to run on everything.
+- Verbs never go in panel headers (section 4). Register them through
+  `useConsoleActions`.
+- Never edit `vendor/psmodules/**` or `vendor/psmodules.lock.json` by hand -
+  edit the pin in the sync script and rerun it.
+- USM's repo is read-only. `git -C` with absolute paths; never `cd` into it.
+- Nothing Microsoft-licensed (`mdt-boot-x64/`, `wim-inject/`) is ever committed.
+
+### How to check the state in one minute
+
+```bash
+git log --oneline -5
+pwsh -NoProfile -File scripts/test-ascii.ps1
+pwsh -NoProfile -File scripts/test-strictmode.ps1
+pwsh -NoProfile -File scripts/test-storage-policy.ps1
+pwsh -NoProfile -File scripts/sync-secret-vault-modules.ps1 -VerifyOnly
+grep -rn "TODO(Site Profile)" sidecar/ app/src/ | wc -l          # 10
+ls sidecar/pxe/x86_64-sb 2>/dev/null || echo "arch trees not copied yet"
+cd app && npx tsc --noEmit
+```
+

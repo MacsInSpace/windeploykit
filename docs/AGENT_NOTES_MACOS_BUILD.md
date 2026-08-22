@@ -1,0 +1,183 @@
+# Agent notes - building and releasing the macOS app
+
+Carried over from PSOpenAD-FE, 2026-08-22, where all of this was worked out
+against a real release. WinDeployKit is the same shape - Tauri 2 desktop app
+with a PowerShell sidecar - so it applies with only the names changed.
+
+Nothing here is theory. Every claim was tested on Craig's machine, and the
+places where the obvious thing is wrong are called out.
+
+## The build command
+
+```bash
+cd app && env -u APPLE_ID -u APPLE_PASSWORD -u APPLE_TEAM_ID \
+  APPLE_SIGNING_IDENTITY="Developer ID Application: Craig Hair (C6VNMT964L)" \
+  npm run tauri:build:universal
+```
+
+Add the script if it is missing - `tauri build` alone produces an **arm64-only**
+DMG, which is not what ships:
+
+```json
+"tauri:build:universal": "tauri build --target universal-apple-darwin"
+```
+
+Both rustup targets are needed: `aarch64-apple-darwin` and
+`x86_64-apple-darwin`. Verify the result rather than trusting it:
+
+```bash
+lipo -archs <app>/Contents/MacOS/<binary>     # expect: x86_64 arm64
+```
+
+- The signing identity is passed **by environment variable, deliberately not in
+  `tauri.conf.json`**. It names a person and a team; keep it out of a file that
+  might one day be public.
+- `env -u` on the three `APPLE_*` variables is what makes this build *skip*
+  notarisation. Leave them set and Tauri notarises - see below.
+
+## Notarisation
+
+It works, and it needs nothing set up beyond what is already in `.env.local`
+(`APPLE_ID`, `APPLE_PASSWORD` as an app-specific password, `APPLE_TEAM_ID`).
+
+Specifically, **no App Store Connect app record and no App ID are required.**
+This is worth stating because it looks like they should be. The reverse-domain
+string in the flow is the **bundle identifier** from `tauri.conf.json`
+(`com.macsinspace.windeploykit`), which appears in the ticket as `signingId` -
+it is not something you register anywhere.
+
+To notarise, run the same build with the variables left in place:
+
+```bash
+cd app
+set -a; . ../.env.local; set +a
+APPLE_SIGNING_IDENTITY="Developer ID Application: Craig Hair (C6VNMT964L)" \
+  npm run tauri:build:universal
+```
+
+Check the credentials first if anything looks off - this submits nothing:
+
+```bash
+xcrun notarytool history --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID"
+```
+
+### Stapling fails, and that is expected here
+
+`xcrun stapler staple` fails with **Error 65, "Could not validate ticket"**,
+even though Apple accepted the submission and the verbose log shows the ticket
+being found and downloaded. Do not treat this as a broken build. Ruled out on
+2026-08-22:
+
+- **cdhash mismatch** - no. The on-disk hashes matched Apple's ticket exactly,
+  both slices. Compare with
+  `codesign -dvvv --arch arm64 <app>` against `xcrun notarytool log <id> ...`.
+- **Propagation delay** - no. Five retries over 2.5 minutes.
+- **Filesystem** - no. Fails on the APFS system volume as well as `/Volumes/Data`.
+- **Notarising the DMG instead of the app** - no. Accepted, same staple failure.
+
+USM documents the same behaviour across every build it has ever shipped
+(`docs/core/git/AGENT_NOTES_MACOS_RELEASE.md`, "Stapling: shipped apps have
+never been stapled (finding, not a bug)"). Gatekeeper fetches the ticket
+**online at first launch** instead, which works in the field.
+
+**Consequence for the release notes:** the app opens normally on a machine that
+can reach Apple once. A first launch with no route to Apple is still refused,
+and only then is the quarantine command needed:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/WinDeployKit.app
+```
+
+`-d` alone is wrong - it clears only the top-level bundle and the app still
+refuses to start. Tested: 2 of 3 quarantined paths survived `-d`, 0 survived
+`-dr`. Avoid `-c`/`-cr`, which strip every extended attribute rather than the
+one. Code signing survives either.
+
+### If uploads fail
+
+USM has hit `deadlineExceeded` on the upload to Apple. Their finding: it was
+the local uplink, not the tooling. If it recurs, `notarytool submit` accepts
+`--no-s3-acceleration`, and notarytool does not retry uploads on its own - the
+loop has to.
+
+## Bundling the sidecar - two things that only fail in a packaged build
+
+Both of these worked in `tauri dev` and failed the moment it was a real `.app`.
+
+**1. Declare the payload as resources.** Without this the bundle contains the
+Rust host and nothing for it to talk to:
+
+```json
+"bundle": { "resources": { "../../sidecar": "sidecar", "../../vendor": "vendor" } }
+```
+
+Keeping the repo's own layout means the sidecar's relative lookups keep working
+unchanged. On the Rust side, check `resource_dir()` **first**: a Finder-launched
+app has a working directory of `/`, so every relative candidate is meaningless
+there.
+
+**2. Find `pwsh` without PATH.** An app launched from Finder inherits a minimal
+PATH that does not include `/usr/local/bin`, so `which pwsh` fails in exactly
+the case that matters. Check the installer locations directly:
+
+```
+/usr/local/bin/pwsh, /opt/homebrew/bin/pwsh,
+/usr/local/microsoft/powershell/7/pwsh, /usr/bin/pwsh, /snap/bin/pwsh
+```
+
+Then tell the user when it is missing. PowerShell 7 is the one dependency a
+bundle cannot carry, and meeting its absence as a spawn error on first use is
+the worst way to learn it.
+
+## Prove the bundle, do not assume it
+
+The `.app` is the only thing worth testing, and it must be tested the way a
+double-click runs it - not from a shell that already has your PATH:
+
+```bash
+RES=<app>/Contents/Resources
+printf '%s\n' '{"id":"1","method":"ping","params":{}}' '{"id":"9","method":"quit"}' \
+  | ( cd "$RES" && env -i HOME="$HOME" PATH=/usr/bin:/bin \
+      /usr/local/bin/pwsh -NoProfile -NoLogo -File "$RES/sidecar/<Sidecar>.ps1" )
+```
+
+`env -i` and the cut-down PATH are the point. A sidecar that is lazily started
+will not be running just because the app is open - that is expected, not a
+failure.
+
+## Release checklist
+
+Verified in this order, because each answers a different way of being wrong:
+
+| Check | Command |
+| --- | --- |
+| Both architectures | `lipo -archs <app>/Contents/MacOS/<binary>` |
+| Version really bumped | `/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' <app>/Contents/Info.plist` |
+| Signature | `codesign --verify --deep --strict <app>` |
+| Payload present | check `Contents/Resources/sidecar` and `vendor` |
+| Built from the tag | clean tree, and `HEAD` is what the tag points at |
+| Published asset is the built one | download it back and compare SHA-256 |
+
+Bump the version in **three** places or the bundle disagrees with the tag:
+`app/package.json`, `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml`.
+
+Publishing, once the tag is on the commit the DMG was built from:
+
+```bash
+gh release create vX.Y.Z <dmg> --title "WinDeployKit X.Y.Z" --notes-file <body>
+```
+
+Relative image links do not resolve on a release page - rewrite them to
+`raw.githubusercontent.com/<owner>/<repo>/vX.Y.Z/...` in the release body.
+
+## Two traps worth carrying over
+
+**Cargo locks the shared `target/` directory.** A release build and a running
+`tauri dev` block each other. If a dev rebuild seems to hang, look for a release
+build first.
+
+**A value assigned inside a React state updater is not available to the line
+after `setState`.** React runs updaters during render. This shipped twice in
+PSOpenAD-FE as a tree that expanded but never loaded its children, because a
+`needsLoad` flag was assigned inside the updater and read immediately after.
+Decide from a ref holding current state instead.
