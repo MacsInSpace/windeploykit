@@ -845,4 +845,7 @@ Mirrored from USM the same night (converged libs, ASCII-clean, all three gates g
   quiet minutes); `Get-AppPxeBootImagingClients` exposes it.
 - Decision tests live in USM (`sidecar/tests/PxeBootDriverPullThroughLedger.Tests.ps1`, 11
   cases, every dependency stubbed) - port them when this repo grows a Pester tree.
+- Also mirrored: the direct-download worker writes `<name>.part` and the archive is renamed only
+  after verified completion; the staging-recovery sweep skips active staging folders and archives
+  modified in the last two minutes. A half-downloaded pack can no longer be promoted into the store.
 

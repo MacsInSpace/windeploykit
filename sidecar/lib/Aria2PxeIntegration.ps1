@@ -504,11 +504,33 @@ function Sync-AppAria2RecoverIncomingDriverStaging {
     $incoming = Get-AppAria2PxeIncomingRoot
     if (-not $incoming -or -not (Test-Path -LiteralPath $incoming)) { return 0 }
 
+    # Never touch a folder a direct download is still writing into (running or queued),
+    # and never promote an archive that changed in the last two minutes: in-flight files
+    # are named <name>.part (excluded by the extension filter below) but archives staged
+    # by older builds carry their final name from byte one.
+    $activeStaging = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $liveEntries = @()
+    if (Get-Variable -Name AppAria2DirectDownloadJobs -Scope Script -ErrorAction SilentlyContinue) {
+        $liveEntries += @($script:AppAria2DirectDownloadJobs.Values)
+    }
+    if (Get-Variable -Name AppAria2DirectDownloadQueue -Scope Script -ErrorAction SilentlyContinue) {
+        $liveEntries += @($script:AppAria2DirectDownloadQueue)
+    }
+    foreach ($live in $liveEntries) {
+        $livePlan = Get-AppAria2JsonProp -Item $live -Name 'plan'
+        foreach ($name in @('stagingDir', 'aria2Dir')) {
+            $liveDir = [string](Get-AppAria2JsonProp -Item $livePlan -Name $name)
+            if ($liveDir) { [void]$activeStaging.Add($liveDir.TrimEnd('/', '\')) }
+        }
+    }
+
     $recovered = 0
     foreach ($dir in @(Get-ChildItem -LiteralPath $incoming -Directory -ErrorAction SilentlyContinue)) {
+        if ($activeStaging.Contains($dir.FullName.TrimEnd('/', '\'))) { continue }
         $files = @(Get-AppAria2StagingFiles -StagingDir $dir.FullName)
         $archive = @($files | Where-Object { $_.Extension -match '^\.(7z|cab|zip|exe)$' } | Sort-Object Length -Descending | Select-Object -First 1)
         if ($archive.Count -eq 0) { continue }
+        if (((Get-Date) - $archive[0].LastWriteTime).TotalMinutes -lt 2) { continue }
 
         $target = $null
         if (Get-Command Get-AppAcerSccmModelCodesFromFileName -ErrorAction SilentlyContinue) {
@@ -767,8 +789,10 @@ function Sync-AppAria2DirectDownloadJobs {
             # failed note and the USER retries (the Netboot pull-through retries on the
             # next device of the same model, see PxeBootDriverPullThrough.ps1) - no auto-retry (Craig, 2026-08-20).
             # (v1 promoted the partial here, replacing a good pack with a truncated one.)
-            if (Test-Path -LiteralPath $job.destPath) {
-                Remove-Item -LiteralPath $job.destPath -Force -ErrorAction SilentlyContinue
+            foreach ($partial in @($job.destPath, $job.partPath)) {
+                if ($partial -and (Test-Path -LiteralPath $partial)) {
+                    Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+                }
             }
             Set-AppAria2DirectDownloadOutcome -Key ([string]$key) -Status 'failed' -Error ([string]$err) -FileName ([string]$job.fileName)
             if ($canEmit) {
@@ -783,6 +807,25 @@ function Sync-AppAria2DirectDownloadJobs {
                 }
             }
             continue
+        }
+
+        # Verified complete: give the archive its real name (see Start-AppAria2DirectDownloadEntry).
+        if ($job.partPath -and (Test-Path -LiteralPath $job.partPath)) {
+            try {
+                Move-Item -LiteralPath $job.partPath -Destination $job.destPath -Force -ErrorAction Stop
+            } catch {
+                $msg = "could not finalise $($job.fileName): $($_.Exception.Message)"
+                Write-SidecarLog "aria2: direct download failed for $($job.fileName) - $msg"
+                Remove-Item -LiteralPath $job.partPath -Force -ErrorAction SilentlyContinue
+                Set-AppAria2DirectDownloadOutcome -Key ([string]$key) -Status 'failed' -Error $msg -FileName ([string]$job.fileName)
+                if ($canEmit) {
+                    Write-SidecarEvent -EventName 'driver-download-progress' -Data @{
+                        key = [string]$key; bytesDone = [long]$sync['bytesDone']; totalBytes = [long]$sync['totalBytes']
+                        done = $true; failed = $true; message = $msg; fileName = [string]$job.fileName
+                    }
+                }
+                continue
+            }
         }
 
         if ($canEmit) {
@@ -973,13 +1016,20 @@ function Start-AppAria2DirectDownloadEntry {
         $null = New-Item -Path $destDir -ItemType Directory -Force
     }
     $destPath = Join-Path $destDir ([string]$Entry.fileName)
+    # The worker writes <name>.part; the file only takes its real name once the download
+    # verified complete, so a half-written archive can never be promoted - not by the
+    # Drivers tab, not by the staging-recovery sweep (field lesson 2026-08-22: an app
+    # restart mid-download left a 401 MB partial that the sweep would have promoted over
+    # the good 1.25 GB pack).
+    $partPath = $destPath + '.part'
+    Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
 
     $sync = [hashtable]::Synchronized(@{ bytesDone = [long]0; totalBytes = [long]0; done = $false; error = $null })
     $rs = [runspacefactory]::CreateRunspace()
     $rs.Open()
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
-    [void]$ps.AddScript($script:AppAria2DirectDownloadWorker.ToString()).AddArgument([string]$Entry.uri).AddArgument($destPath).AddArgument([int]$Entry.timeoutSec).AddArgument($sync).AddArgument([string]$Entry.expectedHash).AddArgument([string]$Entry.expectedHashAlgorithm).AddArgument([string](Get-AppUserAgent))
+    [void]$ps.AddScript($script:AppAria2DirectDownloadWorker.ToString()).AddArgument([string]$Entry.uri).AddArgument($partPath).AddArgument([int]$Entry.timeoutSec).AddArgument($sync).AddArgument([string]$Entry.expectedHash).AddArgument([string]$Entry.expectedHashAlgorithm).AddArgument([string](Get-AppUserAgent))
     $handle = $ps.BeginInvoke()
 
     $script:AppAria2DirectDownloadJobs[[string]$Entry.key] = @{
@@ -989,6 +1039,7 @@ function Start-AppAria2DirectDownloadEntry {
         sync      = $sync
         plan      = $plan
         destPath  = $destPath
+        partPath  = $partPath
         fileName  = [string]$Entry.fileName
         uri       = [string]$Entry.uri
         stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1050,8 +1101,10 @@ function Stop-AppAria2DirectDownload {
         try { $job.rs.Dispose() } catch { }
         # The worker's finally released the file handles on Stop; purge the partial.
         Start-Sleep -Milliseconds 100
-        if (Test-Path -LiteralPath $job.destPath) {
-            Remove-Item -LiteralPath $job.destPath -Force -ErrorAction SilentlyContinue
+        foreach ($partial in @($job.destPath, $job.partPath)) {
+            if ($partial -and (Test-Path -LiteralPath $partial)) {
+                Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+            }
         }
         $cancelled = $true
     }
