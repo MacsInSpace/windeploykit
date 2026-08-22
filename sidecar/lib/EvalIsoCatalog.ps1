@@ -63,6 +63,31 @@ $script:AppEvalIsoProducts = @(
     [ordered]@{ id = 'srv2016'; name = 'Windows Server 2016';   kind = 'server'; slug = 'download-windows-server-2016';   probe = $false }
 )
 
+# Media Microsoft only ships through the consumer download page, which cannot be
+# automated: the session API lists language SKUs fine, then the link call is refused
+# with "Sentinel marked this request as rejected" (anti-bot). Verified 2026-08-22.
+# These are surfaced as links so a tech can fetch and import by hand in one click.
+$script:AppEvalIsoManualSources = @(
+    [ordered]@{
+        id     = 'win11-arm64'
+        name   = 'Windows 11 ARM64'
+        url    = 'https://www.microsoft.com/en-us/software-download/windows11arm64'
+        reason = 'no ARM64 evaluation ISO is published - consumer media, download and import'
+    }
+    [ordered]@{
+        id     = 'win10-retail'
+        name   = 'Windows 10 22H2'
+        url    = 'https://www.microsoft.com/en-us/software-download/windows10ISO'
+        reason = 'evaluation retired - consumer media, download and import'
+    }
+)
+
+function Get-AppEvalIsoManualSources {
+    @($script:AppEvalIsoManualSources | ForEach-Object { [ordered]@{
+        id = [string]$_.id; name = [string]$_.name; url = [string]$_.url; reason = [string]$_.reason
+    } })
+}
+
 function Get-AppEvalIsoProducts {
     @($script:AppEvalIsoProducts | ForEach-Object { [ordered]@{
         id    = [string]$_.id
@@ -282,9 +307,12 @@ function Update-AppEvalIsoCatalogCache {
         }
         $rows = @()
         if ($html) {
+            # arm64 is accepted on sight: Microsoft publishes no ARM evaluation ISO today
+            # (checked 2026-08-22 - zero ARM anchors on every product page), but the parser
+            # already classifies it, so the row appears by itself the day they do.
             $rows = @(ConvertFrom-AppEvalIsoPage -Html $html -ProductId $productId -ProductName ([string]$product.name) |
                 Where-Object {
-                    $_.media -eq 'ISO' -and $_.arch -eq 'x64' -and $_.culture -ieq $script:AppEvalIsoCulture
+                    $_.media -eq 'ISO' -and ($_.arch -eq 'x64' -or $_.arch -eq 'arm64') -and $_.culture -ieq $script:AppEvalIsoCulture
                 })
             if ($rows.Count -eq 0) {
                 $status = if ([bool]$product.probe) { 'not-published' } else { 'unavailable' }
@@ -403,8 +431,9 @@ function Get-AppEvalIsoCatalog {
 
     $ageHours = Get-AppEvalIsoCacheAgeHours -Cache $cache
     [ordered]@{
-        entries     = @($entries)
-        products    = @($products)
+        entries       = @($entries)
+        products      = @($products)
+        manualSources = @(Get-AppEvalIsoManualSources)
         cached      = [bool]$cache
         fetchedAt   = if ($cache) { [string](Get-AppEvalIsoProp -Item $cache -Name 'fetchedAt') } else { '' }
         ageHours    = $ageHours

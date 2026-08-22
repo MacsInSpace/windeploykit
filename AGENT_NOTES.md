@@ -931,3 +931,27 @@ working the day Microsoft publishes it. Adding another release is one line in
 array unrolls it to the element, and `.Count` on a hashtable is its KEY count - "1
 offered row" silently read as 9. Return `,@(...)` from helpers that must stay arrays.
 
+### ARM64 (checked 2026-08-22)
+
+Craig asked for ARM. **Microsoft publishes no ARM64 evaluation ISO** - zero ARM anchors
+on all six Evaluation Center pages, and `download-windows-11-enterprise-arm64` and
+friends 404. The only ARM64 Windows media is the consumer page
+(`software-download/windows11arm64`, product edition 3324, "Windows 11 Arm64 25H2").
+
+That page cannot be automated. Its current API (`/software-download-connector/api/`)
+happily returns the 38 language SKUs, and then the link call is refused:
+
+    {"Errors":[{"Key":"ErrorSettings.SentinelReject",
+                "Value":"Sentinel marked this request as rejected.","Type":8}]}
+
+i.e. Microsoft's anti-bot gate. Windows 10 22H2 sits behind the same wall. So:
+
+- the catalog filter now accepts `x64` OR `arm64`, and the parser already classifies
+  ARM64 labels - if Microsoft ever ships ARM eval media the row appears by itself
+  (covered by a synthetic-anchor test);
+- ARM64 and Win10 22H2 are listed as **manual sources** - a link under the table, with
+  the reason in the tooltip. Netboot's ISO import takes them from there.
+
+Do not re-attempt the consumer connector flow without new evidence; it is bot-gated by
+design and would be a second fragile path to maintain (Craig's call).
+

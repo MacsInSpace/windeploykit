@@ -1160,7 +1160,7 @@ export function ContentWorkspace({
               {r.edition === "LTSC" ? " LTSC" : ""}
             </span>
             <span className="text-[10px]" style={{ color: "var(--text3)" }}>
-              {[r.release, r.build, r.culture].filter(Boolean).join(" | ")}
+              {[r.release, r.build, r.arch !== "x64" ? r.arch : null, r.culture].filter(Boolean).join(" | ")}
             </span>
           </span>
         ),
@@ -1704,6 +1704,16 @@ export function ContentWorkspace({
                 {evalIsoNotes.length > 0 && (
                   <p className="text-[10px]" style={{ color: "var(--text3)" }}>
                     {evalIsoNotes.join("  |  ")}
+                  </p>
+                )}
+                {(evalIso?.manualSources?.length ?? 0) > 0 && (
+                  <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]" style={{ color: "var(--text3)" }}>
+                    <span>Not published as evaluation media - download and import:</span>
+                    {(evalIso?.manualSources ?? []).map((m) => (
+                      <a key={m.id} href={m.url} target="_blank" rel="noreferrer" title={m.reason} style={{ color: "var(--text2)" }}>
+                        {m.name} &gt;
+                      </a>
+                    ))}
                   </p>
                 )}
               </div>

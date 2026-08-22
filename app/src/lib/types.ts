@@ -736,9 +736,18 @@ export interface EvalIsoProduct {
   count?: number;
 }
 
+/** Media Microsoft only ships through the consumer page - link out, import by hand. */
+export interface EvalIsoManualSource {
+  id: string;
+  name: string;
+  url: string;
+  reason: string;
+}
+
 export interface EvalIsoCatalogResponse {
   entries: EvalIsoEntry[];
   products: EvalIsoProduct[];
+  manualSources: EvalIsoManualSource[];
   cached: boolean;
   fetchedAt: string;
   ageHours: number | null;

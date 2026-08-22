@@ -31,7 +31,7 @@ function Test-Case {
         & $Body
         Write-Host "  [OK  ] $Name"
     } catch {
-        Write-Host "  [FAIL] $Name - $($_.Exception.Message)"
+        Write-Host "  [FAIL] $Name - $($_.Exception.Message) (line $($_.InvocationInfo.ScriptLineNumber))"
         $script:failures++
     }
 }
@@ -87,6 +87,28 @@ Test-Case 'Server pages offer a VHD that never reaches the catalog' {
 Test-Case 'Windows 10 page parses to nothing (evaluation retired, not an error)' {
     $all = Get-Rows -Fixture 'win10-enterprise.html' -ProductId 'win10' -ProductName 'Windows 10 Enterprise'
     Assert-True ($all.Count -eq 0) "expected 0 rows, got $($all.Count)"
+}
+
+Test-Case 'An ARM64 row would be offered the day Microsoft publishes one' {
+    # Microsoft ships no ARM64 evaluation ISO today (checked 2026-08-22), so this is a
+    # synthetic anchor in their exact shape - it proves the parser and the offer filter
+    # are already ready rather than needing a change later.
+    $html = '<a aria-label="64-bit edition: Download Windows 11 Enterprise ISO ARM64 (en-US)" href="https://go.microsoft.com/fwlink/?linkid=9999999&clcid=0x409&culture=en-us&country=us">ARM64 edition</a>'
+    $rows = @(ConvertFrom-AppEvalIsoPage -Html $html -ProductId 'win11' -ProductName 'Windows 11 Enterprise')
+    Assert-True ($rows.Count -eq 1) "expected 1 row, got $($rows.Count)"
+    Assert-True ($rows[0].arch -eq 'arm64') "arch was '$($rows[0].arch)'"
+    Assert-True ($rows[0].id -eq 'win11-arm64') "id was '$($rows[0].id)'"
+    # The catalog filter takes x64 OR arm64 (do not pipe a helper's ,@() result: an
+    # EMPTY protected array is emitted as one object, and $_.arch then throws).
+    $catalogFilter = @($rows | Where-Object { $_.media -eq 'ISO' -and ($_.arch -eq 'x64' -or $_.arch -eq 'arm64') -and $_.culture -ieq 'en-US' })
+    Assert-True ($catalogFilter.Count -eq 1) 'the catalog filter should accept arm64'
+}
+
+Test-Case 'Media Microsoft only ships to consumers is listed as a manual source' {
+    $manual = @(Get-AppEvalIsoManualSources)
+    Assert-True ($manual.Count -ge 2) "expected at least 2 manual sources, got $($manual.Count)"
+    Assert-True (@($manual | Where-Object { $_.id -eq 'win11-arm64' }).Count -eq 1) 'expected an ARM64 manual source'
+    foreach ($m in $manual) { Assert-True ([string]$m.url -match '^https://') "bad url for $($m.id)" }
 }
 
 Test-Case 'Empty or junk HTML is tolerated' {
