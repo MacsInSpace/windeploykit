@@ -240,6 +240,19 @@ try {
             # apply, and must be stopped on BOTH exits (reboot and the failure prompt).
             if ($text -notmatch '(?i)call :heartbeat_start') { throw 'no heartbeat' }
             if (([regex]::Matches($text, '(?i)call :heartbeat_stop')).Count -lt 2) { throw 'heartbeat is not stopped on both exits' }
+            # `> file echo on` writes nothing and flips console echo on for the rest of
+            # the script (the echoed-everything wall, 2026-08-23). Only @echo off on
+            # line 1 may control echo - no other executable echo on/off directive.
+            foreach ($line in ($text -split "`r`n")) {
+                $trimmed = $line.Trim()
+                if ($trimmed -like 'rem *' -or $trimmed -eq '@echo off') { continue }
+                if ($trimmed -match '(?i)(^|[&(]|>[^ ]*\s+)echo (on|off)($|\s*[&)>])') {
+                    throw "executable echo on/off directive (turns console echo on): $trimmed"
+                }
+            }
+            # The share is reached by IP and the connect is retried - a WinPE name
+            # lookup of the macOS host is what failed between boots.
+            if ($text -notmatch '(?i)for /l %%A in \(1,1,5\)') { throw 'net use is not retried' }
             if ($text -notmatch '(?i)"heartbeat\\":true') { throw 'heartbeat payload is not the ingest heartbeat shape' }
         } finally {
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
@@ -253,6 +266,17 @@ try {
         )
         # KEY=VALUE, one per line, value may contain backslashes and spaces, no quoting.
         foreach ($r in $rows) { if ($r -notmatch '^[A-Z_]+=[^\r\n]+$') { throw "row '$r' is not KEY=VALUE" } }
+    }
+
+    Test-Case 'the deploy UNC is the LAN IP, not the host name' {
+        # WinPE could not resolve the Mac's host name reliably; everything else the
+        # client talks to is the IP (Craig, 2026-08-23).
+        $cfg = Read-AppPxeBootConfig
+        $unc = Get-AppPxeBootDeployOverlayUnc -Cfg $cfg -LanIp '10.20.30.40'
+        Assert-Equal '\\10.20.30.40\Deploy$' $unc 'unc uses the IP'
+        # Falls back to a host name only when no IP is known.
+        $fallback = Get-AppPxeBootDeployOverlayUnc -Cfg $cfg -LanIp ''
+        if ($fallback -match '^\\\d+\.') { throw 'fallback should be a host name, not an IP' }
     }
 
     Test-Case 'no profile carries the old name' {

@@ -86,15 +86,29 @@ if exist "%SYS%\deploy.cred" (
     )
 )
 
-call :log "Connecting %UNC%"
+rem The NIC may still be settling right after wpeinit, so give the connect a few
+rem tries before giving up; the real net use error goes to the log on each miss.
 net use Z: >nul 2>&1 && net use Z: /delete /y >nul 2>&1
-if defined DUSER (
-    net use Z: "%UNC%" /user:"%DUSER%" "%DPASS%" >nul 2>&1
-) else (
-    net use Z: "%UNC%" >nul 2>&1
+set "ZOK="
+for /l %%A in (1,1,5) do (
+    if not defined ZOK (
+        call :log "Connecting %UNC% (attempt %%A of 5)"
+        if defined DUSER (
+            net use Z: "%UNC%" /user:"%DUSER%" "%DPASS%" >"%SYS%\netuse.txt" 2>&1
+        ) else (
+            net use Z: "%UNC%" >"%SYS%\netuse.txt" 2>&1
+        )
+        if not errorlevel 1 (
+            set "ZOK=1"
+        ) else (
+            for /f "usebackq delims=" %%E in ("%SYS%\netuse.txt") do call :log "  net use: %%E"
+            ping -n 4 127.0.0.1 >nul
+        )
+    )
 )
-if errorlevel 1 (
-    call :fail "Could not connect %UNC% - check the share credentials in the Netboot panel."
+del /q "%SYS%\netuse.txt" >nul 2>&1
+if not defined ZOK (
+    call :fail "Could not connect %UNC% after 5 tries - see the net use lines above and check the share in the Netboot panel."
     goto :shell
 )
 
@@ -266,7 +280,10 @@ rem nested `cmd /c "..."`. It exits on its own when the flag file disappears;
 rem WinPE has no taskkill. ping is the sleep - WinPE has no timeout.exe either.
 set "HBFLAG=X:\Windows\Temp\deploy.heartbeat"
 set "HBCMD=X:\Windows\Temp\deploy-heartbeat.cmd"
-> "%HBFLAG%" echo on
+rem A literal word, never `echo on`/`echo off` - those are the echo directive,
+rem not text, so `> file echo on` flips command-echo on for the whole script
+rem (the wall of echoed lines Craig saw, 2026-08-23) and writes nothing.
+> "%HBFLAG%" echo hb
 > "%HBCMD%" (
     echo @echo off
     echo :loop

@@ -3631,17 +3631,17 @@ function Get-AppPxeBootDeployOverlayUnc {
     } else {
         [string]$script:AppPxeBootImageLibraryShareName
     }
-    if ([bool]$Cfg.smbOverlayEnabled) {
-        $hostPart = if ([string]::IsNullOrWhiteSpace($LanIp)) {
-            try { [System.Net.Dns]::GetHostName() } catch { 'localhost' }
-        } else {
-            [string]$LanIp
-        }
-        return "\\$hostPart\$shareName"
+    # ALWAYS the LAN IP when we know it, never the hostname. WinPE resolves a macOS
+    # host name over the network unreliably (mDNS/NetBIOS both patchy) - a deploy that
+    # connected once then failed the next boot on a stale name lookup (Craig, 2026-08-23,
+    # \\5573-fgmv7wt1pc). install.wim and the log push already use the IP; hostname is
+    # only the fallback when no IP was resolved. (smbOverlayEnabled just picks the host
+    # differently for an on-site WDS; here both paths want this machine.)
+    $hostPart = if (-not [string]::IsNullOrWhiteSpace($LanIp)) {
+        [string]$LanIp
+    } else {
+        try { [System.Net.Dns]::GetHostName() } catch { 'localhost' }
     }
-    # TODO(Site Profile): the deploy-share host will come from the Site Profile.
-    # Until then default to this machine's own share, same as the overlay branch.
-    $hostPart = try { [System.Net.Dns]::GetHostName() } catch { 'localhost' }
     return "\\$hostPart\$shareName"
 }
 
