@@ -168,12 +168,12 @@ export interface PxeBootPluginConfig {
   autoBootDefault?: boolean;
   /** When true, share the image library root as a hidden, read-only SMB share (Deploy$). */
   smbShareEnabled?: boolean;
-  /** When true (and smbShareEnabled), overlay ImageDeployer UNC points at THIS machine's Deploy$. Off = on-site WDS UNC. */
+  /** When true (and smbShareEnabled), the deploy UNC points at THIS machine's Deploy$. Off = on-site WDS UNC. */
   smbOverlayEnabled?: boolean;
   /** Overlay credentials: blank | throwaway | dept | vault:<infra-credential-id> */
-  imageDeployerOverlayCreds?: string;
+  deployOverlayCreds?: string;
   /** Share name used in the overlaid Deploy UNC (\\<this-machine>\<share>). Default Deploy$. */
-  imageDeployerOverlayShare?: string;
+  deployOverlayShare?: string;
   /** When true, mount library ISOs read-only and serve sources/install.wim in place (no extraction). */
   isoMountServe?: boolean;
   updatedAt?: string | null;
@@ -200,7 +200,7 @@ export interface PxeBootSmbShareStatus {
   readOnly: boolean;
   platform: "windows" | "macos" | "linux" | string;
   active: boolean;
-  /** Throwaway SMB account WinPE/ImageDeployer authenticates with (WORKGROUP\<user>). */
+  /** Throwaway SMB account WinPE authenticates with (WORKGROUP\<user>). */
   authUser?: string | null;
   authDomain?: string | null;
   /** macOS: root is under a TCC-protected folder (Downloads/Desktop/Documents) so smbd can't serve it. */
@@ -363,7 +363,7 @@ export interface PxeBootPluginStatus {
   defaultBootWim?: string | null;
   defaultBootWimUrl?: string | null;
   defaultBootIso?: string | null;
-  /** wimboot:ImageDeployer.wim | fieldiso-catalog | fieldiso-iso:... | deploy-iso */
+  /** wimboot:<boot.wim> | fieldiso-catalog | fieldiso-iso:... | deploy-iso */
   bootChainMode?: string | null;
   /** e.g. " index=1 gui" for default WIM local wimboot line */
   defaultWimbootKernelOptions?: string | null;
@@ -480,7 +480,7 @@ export interface AcerSccmCatalogHarvestResponse {
   modelCount: number;
 }
 
-/** One device that has pushed ImageDeployer imaging logs to this host. */
+/** One device that has pushed imaging logs to this host. */
 export interface PxeBootImagingClient {
   /** BIOS serial; devices with no serial report MAC-<address> instead. */
   serial: string;
@@ -637,7 +637,7 @@ export interface SetPxeBootPluginConfigParams {
   autoBootDefault?: boolean;
   smbShareEnabled?: boolean;
   smbOverlayEnabled?: boolean;
-  imageDeployerOverlayCreds?: string;
+  deployOverlayCreds?: string;
   isoMountServe?: boolean;
   /** Skip boot.ipxe regen when only changing Option 67. */
   skipMenuRegen?: boolean;

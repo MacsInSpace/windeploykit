@@ -4,7 +4,7 @@ WinPE **`run.ps1`** fetches `drivers/index.json`, matches **WMI model**, downloa
 
 ## Store layout
 
-Drivers live under the user-chosen **ISO & driver root** (Settings -> Downloads -> *ISO & driver root*, default follows the Downloads location; macOS diverts TCC-protected bases to `~/Public/WinDeployKit/`), **not** the PXE store. Layout is **`Drivers/<Make>/<Model>/`** - ImageDeployer 1.10's publish/search convention (`Win32_ComputerSystem` Manufacturer + Model; its cache search under `Deploy$\Drivers` is `-Recurse -Depth 1`, so pre-seeded and client-downloaded packs share one tree):
+Drivers live under the user-chosen **ISO & driver root** (Settings -> Downloads -> *ISO & driver root*, default follows the Downloads location; macOS diverts TCC-protected bases to `~/Public/WinDeployKit/`), **not** the PXE store. Layout is **`Drivers/<Make>/<Model>/`** - the MDT-style publish/search convention (`Win32_ComputerSystem` Manufacturer + Model; its cache search under `Deploy$\Drivers` is `-Recurse -Depth 1`, so pre-seeded and client-downloaded packs share one tree):
 
 ```
 <ISO & driver root>/Drivers/

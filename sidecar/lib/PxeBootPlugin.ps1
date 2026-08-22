@@ -120,8 +120,8 @@ function Read-AppPxeBootConfig {
         autoBootDefault      = $false
         smbShareEnabled      = $false
         smbOverlayEnabled    = $false
-        imageDeployerOverlayCreds = 'throwaway'
-        imageDeployerOverlayShare = 'Deploy$'
+        deployOverlayCreds = 'throwaway'
+        deployOverlayShare = 'Deploy$'
         isoMountServe        = $true
         updatedAt            = $null
     }
@@ -140,6 +140,12 @@ function Read-AppPxeBootConfig {
                 $defaults[$key] = $obj.$key
             }
         }
+        # Pre-2026-08-22 configs stored these under imageDeployer* names.
+        foreach ($pair in @(@('imageDeployerOverlayCreds', 'deployOverlayCreds'), @('imageDeployerOverlayShare', 'deployOverlayShare'))) {
+            if ($null -eq $obj.PSObject.Properties[$pair[1]] -and $null -ne $obj.PSObject.Properties[$pair[0]]) {
+                $defaults[$pair[1]] = $obj.($pair[0])
+            }
+        }
         # ISO mount + in-place install.wim serving is now default behavior (the toggle
         # was removed from the UI). Ignore any stale persisted false so the mounter and
         # the WIMs/ install.wim symlinks always run when HTTP starts.
@@ -147,12 +153,12 @@ function Read-AppPxeBootConfig {
         if (-not (Test-AppPxeBootWanDeployMenuEnabled) -and [string]$defaults.isoCatalogSource -eq 'wan') {
             $defaults.isoCatalogSource = 'local'
         }
-        # ImageDeployer overlay creds: blank | throwaway | dept | vault:<id>
-        if (-not (Test-AppPxeBootImageDeployerOverlayCredsModeValue -Value ([string]$defaults.imageDeployerOverlayCreds))) {
-            $defaults.imageDeployerOverlayCreds = 'throwaway'
+        # deploy overlay creds: blank | throwaway | dept | vault:<id>
+        if (-not (Test-AppPxeBootDeployOverlayCredsModeValue -Value ([string]$defaults.deployOverlayCreds))) {
+            $defaults.deployOverlayCreds = 'throwaway'
         }
-        if ([string]::IsNullOrWhiteSpace([string]$defaults.imageDeployerOverlayShare)) {
-            $defaults.imageDeployerOverlayShare = 'Deploy$'
+        if ([string]::IsNullOrWhiteSpace([string]$defaults.deployOverlayShare)) {
+            $defaults.deployOverlayShare = 'Deploy$'
         }
         return [pscustomobject]$defaults
     } catch {
@@ -175,8 +181,8 @@ function Write-AppPxeBootConfig {
         [bool]$AutoBootDefault,
         [bool]$SmbShareEnabled,
         [bool]$SmbOverlayEnabled,
-        [string]$ImageDeployerOverlayCreds,
-        [string]$ImageDeployerOverlayShare,
+        [string]$DeployOverlayCreds,
+        [string]$DeployOverlayShare,
         [bool]$IsoMountServe
     )
     $existing = Read-AppPxeBootConfig
@@ -252,18 +258,18 @@ function Write-AppPxeBootConfig {
         } else {
             $false
         }
-        imageDeployerOverlayCreds = if ($PSBoundParameters.ContainsKey('ImageDeployerOverlayCreds')) {
-            $next = ([string]$ImageDeployerOverlayCreds).Trim()
-            if (Test-AppPxeBootImageDeployerOverlayCredsModeValue -Value $next) { $next } else { 'throwaway' }
-        } elseif (Test-AppPxeBootImageDeployerOverlayCredsModeValue -Value ([string]$existing.imageDeployerOverlayCreds)) {
-            ([string]$existing.imageDeployerOverlayCreds).Trim()
+        deployOverlayCreds = if ($PSBoundParameters.ContainsKey('DeployOverlayCreds')) {
+            $next = ([string]$DeployOverlayCreds).Trim()
+            if (Test-AppPxeBootDeployOverlayCredsModeValue -Value $next) { $next } else { 'throwaway' }
+        } elseif (Test-AppPxeBootDeployOverlayCredsModeValue -Value ([string]$existing.deployOverlayCreds)) {
+            ([string]$existing.deployOverlayCreds).Trim()
         } else {
             'throwaway'
         }
-        imageDeployerOverlayShare = if ($PSBoundParameters.ContainsKey('ImageDeployerOverlayShare')) {
-            if ([string]::IsNullOrWhiteSpace($ImageDeployerOverlayShare)) { 'Deploy$' } else { ([string]$ImageDeployerOverlayShare).Trim() }
-        } elseif (-not [string]::IsNullOrWhiteSpace([string]$existing.imageDeployerOverlayShare)) {
-            ([string]$existing.imageDeployerOverlayShare).Trim()
+        deployOverlayShare = if ($PSBoundParameters.ContainsKey('DeployOverlayShare')) {
+            if ([string]::IsNullOrWhiteSpace($DeployOverlayShare)) { 'Deploy$' } else { ([string]$DeployOverlayShare).Trim() }
+        } elseif (-not [string]::IsNullOrWhiteSpace([string]$existing.deployOverlayShare)) {
+            ([string]$existing.deployOverlayShare).Trim()
         } else {
             'Deploy$'
         }
@@ -338,7 +344,6 @@ function Get-AppPxeBootLayoutPaths {
         fieldisoBootstrapUrl = Join-Path $root 'http/fieldiso/bootstrap.url'
         fieldisoRunScript     = Join-Path $root 'http/fieldiso/run.ps1'
         fieldisoToolsDir      = Join-Path $root 'http/fieldiso/tools'
-        imagedeployerDir      = Join-Path $root 'http/imagedeployer'
         shareDir            = Join-Path $root 'http/share'
         dnsmasqConf = Join-Path $root 'dnsmasq-tftp.conf'
     }
@@ -706,23 +711,32 @@ function Test-AppPxeBootWimIsFieldIso {
     return [string]$FileName -match '(?i)^FieldIso\.wim$'
 }
 
-function Test-AppPxeBootWimIsImageDeployer {
-    # ImageDeployer.wim and creds-baked variants (e.g. ImageDeployerCH.wim) all run
-    # ImageDeployer.ps1, which can consume the Deploy$ overlay we inject at boot.
+function Test-AppPxeBootWimIsMdtLiteTouch {
+    <#
+    .SYNOPSIS
+        True for an MDT LiteTouch-built WinPE (LiteTouchPE_x64.wim and friends).
+    .NOTES
+        These ship without a coherent in-WIM BCD, so they boot from the bundled MDT
+        boot files and keep bootmgfw inside the WIM for Secure Boot. A WIM under any
+        other name can opt in through sidecar/pxe/wimboot-recipes.json.
+    #>
     param([Parameter(Mandatory)][string]$FileName)
-    return [string]$FileName -match '(?i)^ImageDeployer.*\.wim$'
+    return ([string]$FileName -match '(?i)litetouch')
 }
 
-function Test-AppPxeBootWimIsImageDeployerStock {
-    # Bake target is *ImageDeployer*.wim (Craig, 2026-08-18) - any ImageDeployer-named
-    # WIM gets the project's credential-free, overlay-aware ImageDeployer.ps1, including
-    # numbered download copies kept side by side and legacy creds-baked variants. The
-    # real guard is the bake entry's RequiresWimPaths XAML probe: pre-1.10 WIMs (inline
-    # XAML - including old creds-baked variants like ImageDeployerCH.wim) are skipped,
-    # so a bake can only land where the 1.10 layout exists, and runtime overlay
-    # credentials supersede baked ones anyway.
+function Test-AppPxeBootWimUsesDeployOverlay {
+    <#
+    .SYNOPSIS
+        True for a boot WIM that can consume the Deploy$ overlay we inject at boot.
+    .NOTES
+        Every imported WinPE except FieldIso.wim: FieldIso takes its install.wim URL
+        straight from iPXE and needs nothing injected. Injection only happens when the
+        overlay is enabled (Test-AppPxeBootDeployOverlayEnabled).
+    #>
     param([Parameter(Mandatory)][string]$FileName)
-    return [string]$FileName -imatch '(?i)imagedeployer.*\.wim$'
+    if ([string]::IsNullOrWhiteSpace($FileName)) { return $false }
+    if (Test-AppPxeBootWimIsFieldIso -FileName $FileName) { return $false }
+    return ([string]$FileName -match '(?i)\.wim$')
 }
 
 function Get-AppPxeBootDirectBootWimName {
@@ -872,7 +886,7 @@ function Test-AppPxeBootWimExtractBootmgrFromWim {
         [hashtable]$Recipe = $null
     )
     if ($Recipe -and (Test-AppPxeBootRecipeFlag -Recipe $Recipe -Key 'extractBootmgrFromWim')) { return $true }
-    return $WimFileName -match '(?i)imagedeployer'
+    return (Test-AppPxeBootWimIsMdtLiteTouch -FileName $WimFileName)
 }
 
 function Get-AppPxeBootWimBootmgrAssetCandidates {
@@ -883,7 +897,7 @@ function Get-AppPxeBootWimBootmgrAssetCandidates {
     if (Test-AppPxeBootWimExtractBootmgrFromWim -WimFileName $WimFileName -Recipe $Recipe) {
         return @()
     }
-    if ($WimFileName -match '(?i)imagedeployer') {
+    if (Test-AppPxeBootWimIsMdtLiteTouch -FileName $WimFileName) {
         $assetsDir = Get-AppPxeBootWimBootAssetsDir -WimFileName $WimFileName
         if ($assetsDir -and (Test-Path -LiteralPath (Join-Path $assetsDir 'BCD'))) {
             return @('bootmgfw.efi', 'bootmgr', 'bootmgr.exe')
@@ -907,11 +921,11 @@ function Get-AppPxeBootWimbootRecipe {
         } else {
             foreach ($p in $src.PSObject.Properties) { $recipe[$p.Name] = $p.Value }
         }
-    } elseif ($WimFileName -match '(?i)techtools|imagedeployer') {
+    } elseif (($WimFileName -match '(?i)techtools') -or (Test-AppPxeBootWimIsMdtLiteTouch -FileName $WimFileName)) {
         $recipe['useBootAssets'] = $true
         $recipe['index'] = 1
         $recipe['gui'] = $true
-        if ($WimFileName -match '(?i)imagedeployer') {
+        if (Test-AppPxeBootWimIsMdtLiteTouch -FileName $WimFileName) {
             $recipe['extractBootmgrFromWim'] = $true
         }
     } elseif (Test-AppPxeBootWimIsFieldIso -FileName $WimFileName) {
@@ -974,7 +988,7 @@ function Format-AppPxeBootWimbootInitrdLine {
         [Parameter(Mandatory)][string]$LegacyName
     )
     # iPXE tokenizes commands on spaces, so the URL path must be percent-encoded:
-    # "wim/ImageDeployer (1).wim" truncated at the space and 404'd at boot.
+    # "wim/LiteTouchPE_x64 (1).wim" truncated at the space and 404'd at boot.
     $encoded = (@(([string]$HttpRel) -split '/') | ForEach-Object { [Uri]::EscapeDataString($_) }) -join '/'
     "initrd -n $EfiName `${http_base}/$encoded $LegacyName"
 }
@@ -1063,45 +1077,22 @@ function Get-AppPxeBootWimOverlayProfiles {
     #>
     @(
         @{
-            Id            = 'imagedeployer-deploy'
-            ServedSubdir  = 'imagedeployer'
-            # Runtime injection applies to all ImageDeployer-family WIMs...
-            AppliesTo     = { param($Name) Test-AppPxeBootWimIsImageDeployer -FileName $Name }
-            # ...but baking the credential-free script only targets the stock WIM, never
-            # private creds-baked variants (e.g. ImageDeployerCH.wim).
-            BakeAppliesTo = { param($Name) Test-AppPxeBootWimIsImageDeployerStock -FileName $Name }
+            Id            = 'deploy-share'
+            ServedSubdir  = 'deploy'
+            # Any imported WinPE except FieldIso, which gets its install.wim URL from
+            # iPXE and needs no injection. A custom deploy client reads these files from
+            # its own root at boot.
+            AppliesTo     = { param($Name) Test-AppPxeBootWimUsesDeployOverlay -FileName $Name }
             # Deploy source (smbOverlayEnabled) picks the UNC target; credentials are
-            # independent. This machine needs the local Deploy$ share; on-site WDS only
-            # needs the overlay-aware script + runtime UNC/cred injection.
-            IsEnabled     = { Test-AppPxeBootImageDeployerOverlayEnabled }
-            Bakes         = @(
-                # RequiresWimPaths: the project script is rebased on vendor 1.10, which loads
-                # its XAML from /Deploy/ImageDeployer.xaml. Baking it into a pre-1.10 stock WIM
-                # (inline XAML, no Tools) would crash WinPE at startup, so the engine skips the
-                # bake unless the WIM already carries the external XAML.
-                @{
-                    MarkerName       = '.imagedeployer-script'
-                    WimPath          = '/Deploy/ImageDeployer.ps1'
-                    Source           = { Get-AppPxeBootImageDeployerScriptSource }
-                    RequiresWimPaths = @('/Deploy/ImageDeployer.xaml')
-                    RequiresHint     = 'stock WIM is pre-1.10 (no external XAML) - re-download ImageDeployer.wim from the Netboot panel'
-                }
-                # Task Sequence picker row (script references cmbTaskSequence, so the
-                # XAML must ship with the same bake generation).
-                @{
-                    MarkerName       = '.imagedeployer-xaml'
-                    WimPath          = '/Deploy/ImageDeployer.xaml'
-                    Source           = { Get-AppPxeBootImageDeployerXamlSource }
-                    RequiresWimPaths = @('/Deploy/ImageDeployer.xaml')
-                    RequiresHint     = 'stock WIM is pre-1.10 (no external XAML) - re-download ImageDeployer.wim from the Netboot panel'
-                }
-            )
+            # independent. This machine needs the local Deploy$ share; an on-site WDS
+            # only needs the runtime UNC/cred injection.
+            IsEnabled     = { Test-AppPxeBootDeployOverlayEnabled }
             Runtime       = @(
-                @{ ServedName = 'deploy.unc';  WinPeName = 'imagedeployer.deploy.unc';  Required = $true }
-                @{ ServedName = 'deploy.cred'; WinPeName = 'imagedeployer.deploy.cred'; Required = $false }
-                @{ ServedName = 'loghost';     WinPeName = 'imagedeployer.loghost';     Required = $false }
+                @{ ServedName = 'deploy.unc';  WinPeName = 'deploy.unc';  Required = $true }
+                @{ ServedName = 'deploy.cred'; WinPeName = 'deploy.cred'; Required = $false }
+                @{ ServedName = 'loghost';     WinPeName = 'deploy.loghost'; Required = $false }
             )
-            PublishRuntime = { param($Dir, $LanIp) Write-AppPxeBootImageDeployerDeployOverlayFiles -Dir $Dir -LanIp $LanIp }
+            PublishRuntime = { param($Dir, $LanIp) Write-AppPxeBootDeployOverlayFiles -Dir $Dir -LanIp $LanIp }
         }
         # Example (future): bake a static unattend.xml into a custom install WIM -
         # @{
@@ -1553,35 +1544,7 @@ function Sync-AppPxeBootFieldIsoWinPeOverlay {
     }
 }
 
-function Get-AppPxeBootImageDeployerScriptSource {
-    <#
-    .SYNOPSIS
-        Project copy of the overlay-aware, credential-free ImageDeployer.ps1 that gets
-        baked into ImageDeployer.wim. Source of truth is sidecar/pxe/imagedeployer/.
-    #>
-    $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
-    if (-not $root) { return $null }
-    foreach ($rel in @('sidecar/pxe/imagedeployer/ImageDeployer.ps1', 'pxe/imagedeployer/ImageDeployer.ps1')) {
-        $path = Join-Path $root ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
-        if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
-    }
-    return $null
-}
 
-function Get-AppPxeBootImageDeployerXamlSource {
-    <#
-    .SYNOPSIS
-        Project copy of ImageDeployer.xaml (vendor 1.10 + the Task Sequence picker
-        row) baked alongside the script. Source of truth is sidecar/pxe/imagedeployer/.
-    #>
-    $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
-    if (-not $root) { return $null }
-    foreach ($rel in @('sidecar/pxe/imagedeployer/ImageDeployer.xaml', 'pxe/imagedeployer/ImageDeployer.xaml')) {
-        $path = Join-Path $root ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
-        if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
-    }
-    return $null
-}
 
 function Sync-AppPxeBootWimOverlays {
     <#
@@ -1731,7 +1694,7 @@ function Read-AppPxeBootFieldIsoDriversSeed {
 
 function Get-AppPxeBootFieldIsoDriversOsRoot {
     # User-relocatable driver root: <image library>/Drivers/<Make>/<Model>/ -
-    # ImageDeployer 1.10's publish/search convention (Win32_ComputerSystem
+    # the MDT-style publish/search convention (Win32_ComputerSystem
     # Manufacturer + Model; its cache-hit search is -Recurse -Depth 1 under
     # Deploy$\Drivers). Vendor folder names come from models.seed.json keys,
     # which are Manufacturer-style (Acer, LENOVO).
@@ -1810,7 +1773,7 @@ function Sync-AppPxeBootFieldIsoDriverStore {
 
     $seed = Read-AppPxeBootFieldIsoDriversSeed
 
-    # Layout is <Drivers>/<Make>/<Model>/ - ImageDeployer 1.10's publish/search
+    # Layout is <Drivers>/<Make>/<Model>/ - the MDT-style publish/search
     # convention (its cache-hit search is -Recurse -Depth 1, so pre-seeded packs and
     # client-downloaded packs coexist in one tree). Beta call (Craig, 2026-08-18):
     # legacy flat <Drivers>/<model>/ dirs are trashed, not migrated - any child dir
@@ -1832,7 +1795,7 @@ function Sync-AppPxeBootFieldIsoDriverStore {
         foreach ($child in @(Get-ChildItem -LiteralPath $osRoot -Directory -Force -ErrorAction SilentlyContinue)) {
             if ($keepDirs.Contains($child.Name)) { continue }
             # Only a FLAT legacy model folder (files, no subdirs) is trash. A dir with
-            # model SUBDIRS is a Make container - ImageDeployer 1.10 publishes under raw
+            # model SUBDIRS is a Make container - MDT-style clients publish under raw
             # WMI Manufacturer names ('Dell Inc.', 'Microsoft Corporation') and techs
             # mirror remote deploy-share trees the same way; v1 silently deleted those (review
             # finding, 2026-08-20).
@@ -1872,7 +1835,7 @@ function Sync-AppPxeBootFieldIsoDriverStore {
     }
 
     $index = Write-AppPxeBootFieldIsoDriversIndex
-    # aliases.json for the baked ImageDeployer (model names / machine types / seed
+    # aliases.json for the deploy client (model names / machine types / seed
     # wmiPatterns -> installed pack folders); no-ops unless the installed set changed.
     if (Get-Command Write-AppPxeBootDriverAliasMap -ErrorAction SilentlyContinue) {
         try { Write-AppPxeBootDriverAliasMap } catch {
@@ -2017,7 +1980,7 @@ function Move-AppPxeBootWimBootAssetsToRoot {
 
 function Test-AppPxeBootWimUsesBundledMdtBootAssets {
     param([Parameter(Mandatory)][string]$WimFileName)
-    return $WimFileName -match '(?i)imagedeployer'
+    return (Test-AppPxeBootWimIsMdtLiteTouch -FileName $WimFileName)
 }
 
 function Get-AppPxeBootBundledMdtBootAssetsDir {
@@ -2183,9 +2146,9 @@ function Get-AppPxeBootWimBootAssetsFailureMessage {
     )
     if (Test-AppPxeBootWimUsesBundledMdtBootAssets -WimFileName $WimFileName) {
         if (-not (Get-AppPxeBootBundledMdtBootAssetsDir)) {
-            return "PXE boot: this app install is missing ImageDeployer boot files. Reinstall $(Get-AppProductDisplayName) or contact support."
+            return "PXE boot: this app install is missing MDT boot files. Reinstall $(Get-AppProductDisplayName) or contact support."
         }
-        return "PXE boot: could not install ImageDeployer boot files for $WimFileName."
+        return "PXE boot: could not install MDT boot files for $WimFileName."
     }
     if (-not (Get-AppPxeBootWimlibImagexPath)) {
         return "PXE boot: this app install is missing WIM tools needed to prepare boot files. Reinstall $(Get-AppProductDisplayName) or contact support."
@@ -2209,7 +2172,7 @@ function Ensure-AppPxeBootWimBootAssets {
             return @{ complete = $true; skipped = $true }
         }
         if (Test-AppPxeBootWimUsesBundledMdtBootAssets -WimFileName $WimFileName) {
-            # Always refresh ImageDeployer from bundled MDT (cheap; keeps stack coherent).
+            # Always refresh LiteTouch WIMs from the bundled MDT boot files (cheap; keeps stack coherent).
         } elseif (Test-AppPxeBootWimBootAssetsComplete -WimFileName $WimFileName) {
             return @{ complete = $true; skipped = $true }
         }
@@ -2219,9 +2182,9 @@ function Ensure-AppPxeBootWimBootAssets {
         }
         return $export
     } finally {
-        # Apply any enabled WIM overlays (e.g. bake the credential-free ImageDeployer.ps1)
-        # on import too (idempotent), so they are ready before first boot. The registry
-        # decides which WIMs each overlay targets.
+        # Apply any enabled WIM overlays (the deploy UNC/cred files a custom deploy
+        # client reads) on import too (idempotent), so they are ready before first boot.
+        # The registry decides which WIMs each overlay targets.
         $overlayWim = Join-Path (Get-AppPxeBootLayoutPaths).wimDir (Get-AppPxeBootSafeWimFileName -FileName $WimFileName)
         if (Test-Path -LiteralPath $overlayWim) {
             Sync-AppPxeBootWimOverlays -WimPath $overlayWim | Out-Null
@@ -2318,7 +2281,7 @@ function Export-AppPxeBootWimBootAssets {
     if (-not (Test-Path -LiteralPath (Join-Path $destDir 'BCD'))) { $needBorrow += 'BCD' }
     if (-not (Test-Path -LiteralPath (Join-Path $destDir 'boot.sdi'))) { $needBorrow += 'boot.sdi' }
     if ($needBorrow.Count -gt 0 -and -not (Test-AppPxeBootWimUsesBundledMdtBootAssets -WimFileName $name)) {
-        # BCD/boot.sdi must match bootmgfw - mixing ImageDeployer bootmgr with TechTools BCD causes 0xc000000f.
+        # BCD/boot.sdi must match bootmgfw - mixing one WIM's bootmgr with another WIM's BCD causes 0xc000000f.
         $borrowNames = @($needBorrow + @('bootmgfw.efi'))
         $bootRoot = Join-Path $paths.httpRoot 'wim-boot'
         $borrowDir = Get-AppPxeBootWimBootAssetBorrowDir -Stem $stem -BootRoot $bootRoot
@@ -2390,9 +2353,9 @@ function Export-AppPxeBootWimBootAssets {
 function Sync-AppPxeBootWimBootAssets {
     $changed = $false
     foreach ($wim in @(Get-AppPxeBootWimInventory)) {
-        # Apply any enabled WIM overlays (e.g. bake the credential-free ImageDeployer.ps1
-        # into the stock ImageDeployer.wim) so Deploy$ auto-mounts without a tech hand-
-        # running wimlib. The registry decides which WIMs each overlay targets.
+        # Apply any enabled WIM overlays (the deploy UNC/cred files a custom deploy
+        # client reads) so Deploy$ auto-mounts without a tech hand-running wimlib.
+        # The registry decides which WIMs each overlay targets.
         $overlayWim = Join-Path (Get-AppPxeBootLayoutPaths).wimDir $wim.fileName
         if (Test-Path -LiteralPath $overlayWim) {
             Sync-AppPxeBootWimOverlays -WimPath $overlayWim | Out-Null
@@ -3500,7 +3463,7 @@ function Write-AppPxeBootWimOverlayRuntimeAssets {
     }
 }
 
-function Test-AppPxeBootImageDeployerOverlayCredsModeValue {
+function Test-AppPxeBootDeployOverlayCredsModeValue {
     param([string]$Value)
     $v = ([string]$Value).Trim()
     if ($v -in @('throwaway', 'blank', 'dept')) { return $true }
@@ -3508,14 +3471,14 @@ function Test-AppPxeBootImageDeployerOverlayCredsModeValue {
     return $false
 }
 
-function Get-AppPxeBootImageDeployerOverlayCredsMode {
+function Get-AppPxeBootDeployOverlayCredsMode {
     param($Cfg = $(Read-AppPxeBootConfig))
-    $v = if ($Cfg) { [string]$Cfg.imageDeployerOverlayCreds } else { '' }
-    if (Test-AppPxeBootImageDeployerOverlayCredsModeValue -Value $v) { return $v.Trim() }
+    $v = if ($Cfg) { [string]$Cfg.deployOverlayCreds } else { '' }
+    if (Test-AppPxeBootDeployOverlayCredsModeValue -Value $v) { return $v.Trim() }
     return 'throwaway'
 }
 
-function Test-AppPxeBootImageDeployerOverlayEnabled {
+function Test-AppPxeBootDeployOverlayEnabled {
     param($Cfg = $(Read-AppPxeBootConfig))
     if ([bool]$Cfg.smbOverlayEnabled) {
         return [bool]$Cfg.smbShareEnabled
@@ -3523,13 +3486,13 @@ function Test-AppPxeBootImageDeployerOverlayEnabled {
     return $true
 }
 
-function Get-AppPxeBootImageDeployerDeployUnc {
+function Get-AppPxeBootDeployOverlayUnc {
     param(
         [Parameter(Mandatory)]$Cfg,
         [string]$LanIp
     )
-    $shareName = if (-not [string]::IsNullOrWhiteSpace([string]$Cfg.imageDeployerOverlayShare)) {
-        ([string]$Cfg.imageDeployerOverlayShare).Trim()
+    $shareName = if (-not [string]::IsNullOrWhiteSpace([string]$Cfg.deployOverlayShare)) {
+        ([string]$Cfg.deployOverlayShare).Trim()
     } else {
         [string]$script:AppPxeBootImageLibraryShareName
     }
@@ -3547,14 +3510,14 @@ function Get-AppPxeBootImageDeployerDeployUnc {
     return "\\$hostPart\$shareName"
 }
 
-function Get-AppPxeBootImageDeployerOverlayCredentialPair {
+function Get-AppPxeBootDeployOverlayCredentialPair {
     <#
     .SYNOPSIS
         Resolve overlay credential user + password for the configured creds mode.
         Returns @{ User; Pass } or $null when blank / unavailable.
     #>
     param([string]$CredsMode)
-    $mode = if (Test-AppPxeBootImageDeployerOverlayCredsModeValue -Value $CredsMode) {
+    $mode = if (Test-AppPxeBootDeployOverlayCredsModeValue -Value $CredsMode) {
         ([string]$CredsMode).Trim()
     } else {
         'throwaway'
@@ -3605,7 +3568,7 @@ function Get-AppPxeBootImageDeployerOverlayCredentialPair {
         try {
             if (-not (Get-Command Test-AppInfraSshCredentialExists -ErrorAction SilentlyContinue)) { return $null }
             if (-not (Test-AppInfraSshCredentialExists -Id $id)) {
-                Write-SidecarLog "PXE boot: vault credential '$id' not configured for ImageDeployer overlay"
+                Write-SidecarLog "PXE boot: vault credential '$id' not configured for deploy overlay"
                 return $null
             }
             if (-not (Get-Command Get-AppInfraSshCredentialLoginNameById -ErrorAction SilentlyContinue)) { return $null }
@@ -3616,7 +3579,7 @@ function Get-AppPxeBootImageDeployerOverlayCredentialPair {
                 return @{ User = $user.Trim(); Pass = ([string]$pass).Trim() }
             }
         } catch {
-            Write-SidecarLog "PXE boot: vault credential '$id' for ImageDeployer overlay unavailable - $($_.Exception.Message)"
+            Write-SidecarLog "PXE boot: vault credential '$id' for deploy overlay unavailable - $($_.Exception.Message)"
         }
         return $null
     }
@@ -3624,12 +3587,12 @@ function Get-AppPxeBootImageDeployerOverlayCredentialPair {
     return $null
 }
 
-function Write-AppPxeBootImageDeployerDeployOverlayFiles {
+function Write-AppPxeBootDeployOverlayFiles {
     <#
     .SYNOPSIS
-        ImageDeployer Deploy$ overlay content writer (the 'imagedeployer-deploy' profile's
+        Deploy$ overlay content writer (the 'deploy-share' profile's
         PublishRuntime). Writes deploy.unc (local Deploy$ or on-site WDS) and deploy.cred
-        (throwaway, DE, or vault credential) so ImageDeployer.ps1 auto-maps Z: when both
+        (throwaway, DE, or vault credential) so the deploy client auto-maps Z: when both
         user and password are present. The engine only calls this when the profile is enabled.
     #>
     param(
@@ -3641,7 +3604,7 @@ function Write-AppPxeBootImageDeployerDeployOverlayFiles {
     $logHostFile = Join-Path $Dir 'loghost'
     $cfg = Read-AppPxeBootConfig
 
-    $unc = Get-AppPxeBootImageDeployerDeployUnc -Cfg $cfg -LanIp $LanIp
+    $unc = Get-AppPxeBootDeployOverlayUnc -Cfg $cfg -LanIp $LanIp
     Set-Content -LiteralPath $uncFile -Value $unc -Encoding ASCII -NoNewline -Force
 
     # Imaging-log push target: the baked script POSTs Write-Log lines to
@@ -3654,8 +3617,8 @@ function Write-AppPxeBootImageDeployerDeployOverlayFiles {
         Remove-Item -LiteralPath $logHostFile -Force -ErrorAction SilentlyContinue
     }
 
-    $credsMode = Get-AppPxeBootImageDeployerOverlayCredsMode -Cfg $cfg
-    $pair = Get-AppPxeBootImageDeployerOverlayCredentialPair -CredsMode $credsMode
+    $credsMode = Get-AppPxeBootDeployOverlayCredsMode -Cfg $cfg
+    $pair = Get-AppPxeBootDeployOverlayCredentialPair -CredsMode $credsMode
     if ($pair -and -not [string]::IsNullOrWhiteSpace($pair.User) -and -not [string]::IsNullOrWhiteSpace($pair.Pass)) {
         $credText = ('{0}{2}{1}{2}' -f $pair.User, $pair.Pass, "`r`n")
         Set-Content -LiteralPath $credFile -Value $credText -Encoding ASCII -NoNewline -Force
@@ -3664,14 +3627,14 @@ function Write-AppPxeBootImageDeployerDeployOverlayFiles {
         $publishKey = "$($pair.User)|$credsMode"
         if ($script:AppPxeBootState.LastOverlayCredPublishKey -ne $publishKey) {
             $script:AppPxeBootState.LastOverlayCredPublishKey = $publishKey
-            Write-SidecarLog "PXE boot: published ImageDeployer overlay credential ($($pair.User), mode=$credsMode)"
+            Write-SidecarLog "PXE boot: published deploy overlay credential ($($pair.User), mode=$credsMode)"
         } else {
-            Write-SidecarLogVerbose "PXE boot: refreshed ImageDeployer overlay credential ($($pair.User), mode=$credsMode)"
+            Write-SidecarLogVerbose "PXE boot: refreshed deploy overlay credential ($($pair.User), mode=$credsMode)"
         }
     } elseif (Test-Path -LiteralPath $credFile) {
         Remove-Item -LiteralPath $credFile -Force -ErrorAction SilentlyContinue
         $script:AppPxeBootState.LastOverlayCredPublishKey = $null
-        Write-SidecarLog "PXE boot: ImageDeployer overlay credential not published (mode=$credsMode)"
+        Write-SidecarLog "PXE boot: deploy overlay credential not published (mode=$credsMode)"
     }
 }
 
@@ -4624,7 +4587,7 @@ function Test-AppPxeBootLayout {
     $isoFiles = @(Get-ChildItem -LiteralPath $paths.isoDir -Filter '*.iso' -File -ErrorAction SilentlyContinue)
     $cfg = Read-AppPxeBootConfig
     if ($wimFiles.Count -eq 0) {
-        [void]$warnings.Add('http/wim/*.wim - add a boot WIM below (ImageDeployer.wim / TechTools)')
+        [void]$warnings.Add('http/wim/*.wim - add a boot WIM below (FieldIso / LiteTouch / TechTools)')
     }
     if ($isoFiles.Count -gt 0) {
         $fieldIso = Get-AppPxeBootFieldIsoWimName
@@ -5430,7 +5393,7 @@ function Write-AppPxeBootCaddyfile {
         [Parameter(Mandatory)][int]$Port,
         [Parameter(Mandatory)][string]$BindAddress,
         # When > 0, POST /imaging-log/* reverse-proxies to the sidecar's loopback ingest
-        # listener (ImageDeployer live-log push). 0 = route omitted; clients fail fast.
+        # listener (deploy client live-log push). 0 = route omitted; clients fail fast.
         [int]$ImagingLogIngestPort = 0
     )
     $rootNorm = ($HttpRoot -replace '\\', '/')
@@ -6992,7 +6955,7 @@ function Get-AppPxeBootHttpPortConflictMessage {
 }
 
 function Get-AppPxeBootImagingLogDir {
-    # Per-client imaging logs pushed by ImageDeployer's Write-Log over HTTP. Lives beside
+    # Per-client imaging logs pushed by a deploy client's log push over HTTP. Lives beside
     # (not under) http/ - the panel reads via IPC; Caddy never serves these files.
     $dir = Join-Path (Get-AppPxeBootStoreRoot) 'imaging-logs'
     if (-not (Test-Path -LiteralPath $dir)) {
@@ -7004,7 +6967,7 @@ function Get-AppPxeBootImagingLogDir {
 function Start-AppPxeBootImagingLogIngest {
     <#
     .SYNOPSIS
-        Loopback ingest endpoint for ImageDeployer imaging-log pushes. Caddy reverse-proxies
+        Loopback ingest endpoint for deploy client imaging-log pushes. Caddy reverse-proxies
         POST /imaging-log/ingest here, so no new public port, no firewall prompt, and no
         http.sys URL-ACL headaches - a plain TcpListener on 127.0.0.1 with a minimal HTTP
         responder running in its own runspace. Returns the bound port, or 0 on failure
@@ -7134,7 +7097,7 @@ function Start-AppPxeBootImagingLogIngest {
                                 $previousIp = [string](Get-IngestProp $previous 'ip')
                                 if ($previousIp) { $clientIp = $previousIp }
                             }
-                            # Imaging-session identity: newer ImageDeployer builds send one id per
+                            # Imaging-session identity: newer deploy clients send one id per
                             # WinPE boot; for older clients the host derives one that rolls over
                             # when a serial reappears after 10 quiet minutes. The driver
                             # pull-through uses it to retry a failed pack fetch on the NEXT
@@ -7221,7 +7184,7 @@ function Get-AppPxeBootImagingClients {
     <#
     .SYNOPSIS
         Devices that have pushed imaging logs: one row per <serial>.json status snapshot,
-        newest activity first. active = pushed within the last 3 minutes (ImageDeployer
+        newest activity first. active = pushed within the last 3 minutes (the client
         pushes at most every 2 seconds while logging).
     #>
     $dir = Join-Path (Get-AppPxeBootStoreRoot) 'imaging-logs'
@@ -7825,12 +7788,12 @@ function Get-AppPxeBootStatus {
 }
 
 # Hidden, read-only SMB share exposing the image library root as a
-# Deploy$-equivalent so ImageDeployer reads <root>\Drivers\<model> and <root>\WIMs
+# Deploy$-equivalent so the deploy client reads <root>\Drivers\<model> and <root>\WIMs
 # the same way it reads the configured deploy share.
 $script:AppPxeBootImageLibraryShareName = 'Deploy$'
 
 # --- Throwaway SMB account (reused from the FieldIso authenticated-SMB spike) ---
-# WinPE/ImageDeployer can consume a low-value local WORKGROUP account for Deploy$
+# WinPE can consume a low-value local WORKGROUP account for Deploy$
 # auto-connect (credentials carried in the overlay's deploy.cred). Same cred file the
 # FieldIso smb-test serves, so the two share one throwaway account.
 function Get-AppPxeBootSmbCredFilePath {
@@ -8035,7 +7998,7 @@ function Ensure-AppPxeBootMacOsImageLibraryShare {
     .SYNOPSIS
         Create/repoint the hidden read-only Deploy$ SMB share on the image library
         root and (idempotently) provision the random hidden throwaway SMB-NT account
-        WinPE/ImageDeployer authenticate with as WORKGROUP\<user>. One elevation.
+        WinPE authenticates with as WORKGROUP\<user>. One elevation.
     #>
     param([Parameter(Mandatory)][string]$Root)
     if (-not (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue)) {
@@ -8159,7 +8122,7 @@ function Get-AppPxeBootImageLibraryShareStatusUncached {
                 $share = Get-SmbShare -Name $name -ErrorAction SilentlyContinue
                 if ($share) { $status.active = $true; $status.path = [string]$share.Path }
             }
-            $credsMode = Get-AppPxeBootImageDeployerOverlayCredsMode -Cfg $cfg
+            $credsMode = Get-AppPxeBootDeployOverlayCredsMode -Cfg $cfg
             if ($credsMode -eq 'throwaway') {
                 $cred = Read-AppPxeBootSmbThrowawayCred
                 if ($cred -and (Test-AppPxeBootWindowsUserExists -Name $cred.User)) {
@@ -8188,7 +8151,7 @@ function Get-AppPxeBootImageLibraryShareStatusUncached {
                 # to tick a box that is already ticked.
                 $status.guidance = "$name is enabled but not published right now, so WinPE will fail with 'network path not found'. Start Imaging Services (or un-tick and re-tick this box) to re-create it - you will be asked for your administrator password."
             } elseif (-not $status.active) {
-                $status.guidance = "Tick this box and Start Imaging Services to auto-create $name (read-only, hidden) and a throwaway SMB user. ImageDeployer/WinPE then mounts $($status.unc) as WORKGROUP\<user>."
+                $status.guidance = "Tick this box and Start Imaging Services to auto-create $name (read-only, hidden) and a throwaway SMB user. WinPE then mounts $($status.unc) as WORKGROUP\<user>."
             }
         } else {
             $status.guidance = 'Export the image library root via Samba as a read-only share.'
@@ -8223,7 +8186,7 @@ function Ensure-AppPxeBootImageLibraryShare {
                     -Description "$(Get-AppProductDisplayName) imaging library (read-only)" -ErrorAction Stop | Out-Null
                 Write-SidecarLog "PXE boot: SMB share $name -> $root"
             }
-            $credsMode = Get-AppPxeBootImageDeployerOverlayCredsMode -Cfg $cfg
+            $credsMode = Get-AppPxeBootDeployOverlayCredsMode -Cfg $cfg
             if ([bool]$cfg.smbOverlayEnabled -and $credsMode -eq 'throwaway') {
                 $cred = Ensure-AppPxeBootWindowsSmbThrowawayCredential -Root $root
                 if ($cred -and $cred.User) {
@@ -8407,7 +8370,7 @@ function Start-AppPxeBootServices {
                 }
                 Ensure-AppPxeBootImageLibraryShare | Out-Null
                 # First-ever start mints the throwaway cred *inside* the ensure above, after
-                # boot.ipxe was already generated without the ImageDeployer overlay cred. Now
+                # boot.ipxe was already generated without the deploy overlay cred. Now
                 # that the cred exists, regenerate the boot menu so the overlay initrds are
                 # injected for this boot too (subsequent starts pick it up in one pass).
                 Write-AppPxeBootMenuFiles
@@ -8818,7 +8781,7 @@ function Dismount-AppPxeBootIso {
 # when imaging services start, so sources/install.wim is served two ways with no copy and
 # no extraction:
 #   - HTTP : Caddy handle_path /iso-wim/<token>/* -> <mount>/sources
-#   - SMB  : the overlay-aware ImageDeployer.ps1 scans Z:\.mounts\*\sources\install.wim and
+#   - SMB  : an overlay-aware deploy client scans Z:\.mounts\*\sources\install.wim and
 #            reads the REAL file straight across the sub-mount (verified working on macOS
 #            smbd and Windows - DISM reads it directly).
 # <token> is a deterministic, path-/Caddyfile-/URL-safe slug + 8-char hash of the ISO file
@@ -8828,7 +8791,7 @@ function Dismount-AppPxeBootIso {
 # We previously tried symlinking a WIMs/<base>-install.wim entry to avoid putting the file
 # at top level, but Apple's smbd does not emit a Windows-followable symlink (WinPE DISM
 # fails error 58 even with every `fsutil SymlinkEvaluation` mode on). Mounting in-share +
-# teaching ImageDeployer to scan the mount avoids both the symlink and any ~5 GB copy.
+# teaching the deploy client to scan the mount avoids both the symlink and any ~5 GB copy.
 # Mounts are torn down on Stop.
 
 function Resolve-AppPxeBootMountInstallWim {
@@ -8852,7 +8815,7 @@ function Clear-AppPxeBootStaleIsoMountDirs {
     # current ISO tokens (<slug>-<hash>). Anything else is debris: a legacy pre-token mount
     # named after the raw ISO base (e.g. ".mounts/Windows 11"), an ISO that has since left the
     # library, or a crash leftover. Detach (macOS) / drop the junction (Windows) and delete the
-    # now-empty dir so they neither accumulate nor get scanned by ImageDeployer. Runs on every
+    # now-empty dir so they neither accumulate nor get scanned by the deploy client. Runs on every
     # Start; the first run after upgrade clears the old base-named mounts, then it no-ops.
     $paths = Get-AppPxeBootLayoutPaths
     $mountsRoot = $paths.isoMountDir
@@ -8890,7 +8853,7 @@ function Mount-AppPxeBootInstallWimIsos {
     .SYNOPSIS
         Mount every library ISO read-only inside the Deploy$ share (.mounts/<token>) and
         register its sources/install.wim for in-place HTTP + SMB serving (zero-copy). The
-        overlay-aware ImageDeployer.ps1 scans Z:\.mounts\*\sources\install.wim. Idempotent.
+        an overlay-aware deploy client scans Z:\.mounts\*\sources\install.wim. Idempotent.
     .NOTES
         Each ISO gets a deterministic, path-/Caddyfile-/URL-safe mount token
         (Get-AppPxeBootIsoMountToken) so multiple - and awkwardly named - ISOs never collide.
@@ -8917,7 +8880,7 @@ function Mount-AppPxeBootInstallWimIsos {
         try {
             Write-SidecarLog "PXE boot: mounting ISO $($iso.Name) (read-only) to serve install.wim in place"
             # Expose the mount INSIDE the Deploy$ share at .mounts/<token> so SMB clients -
-            # and the overlay-aware ImageDeployer scan of Z:\.mounts\*\sources\install.wim -
+            # and an overlay-aware deploy client's scan of Z:\.mounts\*\sources\install.wim -
             # read the real file across the sub-mount.
             #   macOS  : hdiutil mounts directly at .mounts/<token>.
             #   Windows: Mount-DiskImage gives a drive letter, so we junction
@@ -8952,7 +8915,7 @@ function Mount-AppPxeBootInstallWimIsos {
                 Dismount-AppPxeBootIso -MountInfo $mountInfo
                 continue
             }
-            # Persist the friendly name next to the mount so the overlay-aware ImageDeployer
+            # Persist the friendly name next to the mount so an overlay-aware deploy client
             # WIM picker can label the install.wim with the real ISO name, not the slug token.
             try {
                 $nameFile = (Join-Path $paths.isoMountDir $token) + '.name'
@@ -9432,8 +9395,8 @@ function Set-AppPxeBootPluginConfig {
         [bool]$AutoBootDefault,
         [bool]$SmbShareEnabled,
         [bool]$SmbOverlayEnabled,
-        [string]$ImageDeployerOverlayCreds,
-        [string]$ImageDeployerOverlayShare,
+        [string]$DeployOverlayCreds,
+        [string]$DeployOverlayShare,
         [bool]$IsoMountServe,
         [switch]$SkipMenuRegen
     )
@@ -9458,11 +9421,11 @@ function Set-AppPxeBootPluginConfig {
     if ($PSBoundParameters.ContainsKey('SmbOverlayEnabled')) {
         $writeParams['SmbOverlayEnabled'] = [bool]$SmbOverlayEnabled
     }
-    if ($PSBoundParameters.ContainsKey('ImageDeployerOverlayCreds')) {
-        $writeParams['ImageDeployerOverlayCreds'] = [string]$ImageDeployerOverlayCreds
+    if ($PSBoundParameters.ContainsKey('DeployOverlayCreds')) {
+        $writeParams['DeployOverlayCreds'] = [string]$DeployOverlayCreds
     }
-    if ($PSBoundParameters.ContainsKey('ImageDeployerOverlayShare')) {
-        $writeParams['ImageDeployerOverlayShare'] = [string]$ImageDeployerOverlayShare
+    if ($PSBoundParameters.ContainsKey('DeployOverlayShare')) {
+        $writeParams['DeployOverlayShare'] = [string]$DeployOverlayShare
     }
     if ($PSBoundParameters.ContainsKey('IsoMountServe')) {
         $writeParams['IsoMountServe'] = [bool]$IsoMountServe
@@ -9504,12 +9467,11 @@ function Set-AppPxeBootPluginConfig {
             Write-SidecarLog "PXE boot: ISO mount toggle error - $($_.Exception.Message)"
         }
     }
-    # Apply an overlay toggle live: (re)bake the ImageDeployer script and publish/remove
-    # the runtime cred/UNC files, then refresh boot.ipxe so the iPXE initrd lines match -
+    # Apply an overlay toggle live: publish/remove the runtime cred/UNC files, then refresh boot.ipxe so the iPXE initrd lines match -
     # no full service restart needed. All idempotent and gated on the config flags.
     if ($PSBoundParameters.ContainsKey('SmbOverlayEnabled') -or
-        $PSBoundParameters.ContainsKey('ImageDeployerOverlayCreds') -or
-        $PSBoundParameters.ContainsKey('ImageDeployerOverlayShare')) {
+        $PSBoundParameters.ContainsKey('DeployOverlayCreds') -or
+        $PSBoundParameters.ContainsKey('DeployOverlayShare')) {
         try {
             Sync-AppPxeBootWimBootAssets | Out-Null
             Sync-AppPxeBootFieldIsoHttpAssets | Out-Null

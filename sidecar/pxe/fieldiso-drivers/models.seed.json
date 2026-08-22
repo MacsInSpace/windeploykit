@@ -2,7 +2,7 @@
   "schema": 1,
   "os": "Win11x64",
   "notes": [
-    "folder = flat OOBD layout under <ISO & driver root>/Drivers/<folder>/ (served at /drivers/<folder>/); folder name matches Win32_ComputerSystem.Model so ImageDeployer finds it.",
+    "folder = flat OOBD layout under <ISO & driver root>/Drivers/<folder>/ (served at /drivers/<folder>/); folder name matches Win32_ComputerSystem.Model so the deploy client finds it.",
     "Store vendor SCCM packs as downloaded (.cab, .exe, .7z, .zip) - FieldIso WinPE extracts with 7z at boot.",
     "nsspCatalogLabels = Notebook NSSP fleet display names - tranche/catalog text like (2024 GS) is NOT a hardware model number and must never be a folder name.",
     "wmiPatterns = Win32_ComputerSystem.Model substrings in WinPE (e.g. P414-51, TravelMate P414-51)."

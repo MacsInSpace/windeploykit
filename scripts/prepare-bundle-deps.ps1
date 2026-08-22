@@ -451,7 +451,7 @@ if (Test-Path -LiteralPath (Join-Path $vendorMdtDir 'BCD')) {
     }
     Write-Step 'Bundled MDT boot assets from vendor/binaries/pxe-mdt-boot/x64'
 } elseif (-not (Test-Path -LiteralPath (Join-Path $pxeBundledMdtDir 'BCD'))) {
-    Write-Warning 'MDT boot assets missing - run pwsh -File ./scripts/fetch-mdt-boot-assets.ps1 before release packaging (ImageDeployer wimboot)'
+    Write-Warning 'MDT boot assets missing - run pwsh -File ./scripts/fetch-mdt-boot-assets.ps1 before release packaging (LiteTouch wimboot)'
 }
 
 Copy-Item -LiteralPath $SidecarSrc -Destination $sidecarDest -Recurse -Force

@@ -68,8 +68,8 @@ function Handle-SetPxeBootPluginConfig {
     $autoBootDefault = Get-AppSidecarParam -Params $Params -Name 'autoBootDefault'
     $smbShareEnabled = Get-AppSidecarParam -Params $Params -Name 'smbShareEnabled'
     $smbOverlayEnabled = Get-AppSidecarParam -Params $Params -Name 'smbOverlayEnabled'
-    $imageDeployerOverlayCreds = Get-AppSidecarParam -Params $Params -Name 'imageDeployerOverlayCreds'
-    $imageDeployerOverlayShare = Get-AppSidecarParam -Params $Params -Name 'imageDeployerOverlayShare'
+    $deployOverlayCreds = Get-AppSidecarParam -Params $Params -Name 'deployOverlayCreds'
+    $deployOverlayShare = Get-AppSidecarParam -Params $Params -Name 'deployOverlayShare'
     $isoMountServe = Get-AppSidecarParam -Params $Params -Name 'isoMountServe'
     $skipMenuRegen = Get-AppSidecarParam -Params $Params -Name 'skipMenuRegen'
     $setParams = @{
@@ -93,11 +93,11 @@ function Handle-SetPxeBootPluginConfig {
     if (Test-AppSidecarParamPresent -Params $Params -Name 'smbOverlayEnabled') {
         $setParams['SmbOverlayEnabled'] = [bool]$smbOverlayEnabled
     }
-    if (Test-AppSidecarParamPresent -Params $Params -Name 'imageDeployerOverlayCreds') {
-        $setParams['ImageDeployerOverlayCreds'] = [string]$imageDeployerOverlayCreds
+    if (Test-AppSidecarParamPresent -Params $Params -Name 'deployOverlayCreds') {
+        $setParams['DeployOverlayCreds'] = [string]$deployOverlayCreds
     }
-    if (Test-AppSidecarParamPresent -Params $Params -Name 'imageDeployerOverlayShare') {
-        $setParams['ImageDeployerOverlayShare'] = [string]$imageDeployerOverlayShare
+    if (Test-AppSidecarParamPresent -Params $Params -Name 'deployOverlayShare') {
+        $setParams['DeployOverlayShare'] = [string]$deployOverlayShare
     }
     if (Test-AppSidecarParamPresent -Params $Params -Name 'isoMountServe') {
         $setParams['IsoMountServe'] = [bool]$isoMountServe

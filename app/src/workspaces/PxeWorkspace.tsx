@@ -209,7 +209,7 @@ function normalizeOverlayCreds(raw: string | undefined): string {
 function pxeHostFormFromConfig(resp: PxeBootPluginConfigResponse): PxeHostFormSnapshot {
   const mode = resp.config.tftpMode;
   const smbOverlayEnabled = resp.config.smbOverlayEnabled === true;
-  let overlayCreds = normalizeOverlayCreds(resp.config.imageDeployerOverlayCreds);
+  let overlayCreds = normalizeOverlayCreds(resp.config.deployOverlayCreds);
   if (!smbOverlayEnabled && overlayCreds === "throwaway") {
     overlayCreds = "blank";
   }
@@ -406,7 +406,7 @@ export function PxeWorkspace({
   const [tsNewName, setTsNewName] = useState("");
   // Sequences whose local-domain machine OU is in "Custom..." free-text mode (the
   // select alone can't tell "custom equals the suggestion" from "picked the suggestion").
-  // Preselected ImageDeployer menu item ("" = tech picks at the device).
+  // Preselected deploy-client menu item ("" = tech picks at the device).
   const [tsDefaultId, setTsDefaultId] = useState("");
   // Visible DNS rows per sequence (1-3; the values live in fields dns1..dns3).
   const [tsDnsVisible, setTsDnsVisible] = useState<Record<string, number>>({});
@@ -739,8 +739,8 @@ export function PxeWorkspace({
         if (overrides?.smbOverlayEnabled !== undefined) {
           params.smbOverlayEnabled = overrides.smbOverlayEnabled;
         }
-        if (overrides?.imageDeployerOverlayCreds !== undefined) {
-          params.imageDeployerOverlayCreds = overrides.imageDeployerOverlayCreds;
+        if (overrides?.deployOverlayCreds !== undefined) {
+          params.deployOverlayCreds = overrides.deployOverlayCreds;
         }
         const resp = await sidecar.invoke<PxeBootPluginConfigResponse>("SetPxeBootPluginConfig", params);
         syncConfigFromResponse(resp);
@@ -861,7 +861,7 @@ export function PxeWorkspace({
       tftpBootFile,
       smbShareEnabled,
       smbOverlayEnabled,
-      imageDeployerOverlayCreds: overlayCreds,
+      deployOverlayCreds: overlayCreds,
       tftpd64Path: tftpd64Path.trim() || undefined,
     };
     if (onlyBootFile) {
@@ -1405,7 +1405,7 @@ export function PxeWorkspace({
   const smbShareUnc = lanIp
     ? `\\\\${lanIp}\\${smbShareName}`
     : data?.smbShare?.unc ?? `\\\\<host>\\${smbShareName}`;
-  const smbShareTooltip = `${smbShareName} - hidden, read-only, shared when imaging services start.\n${smbSharePath} -> ${smbShareUnc}\nImageDeployer maps it as Z: (WIMs\\, Drivers\\<model>)${
+  const smbShareTooltip = `${smbShareName} - hidden, read-only, shared when imaging services start.\n${smbSharePath} -> ${smbShareUnc}\nThe deploy client maps it as Z: (WIMs\\, Drivers\\<model>)${
     data?.smbShare?.authUser ? `. Auth: ${data.smbShare.authDomain ?? "WORKGROUP"}\\${data.smbShare.authUser}` : ""
   }`;
   const tftpBootFiles = status?.tftpBootFiles ?? [];
@@ -2052,7 +2052,7 @@ export function PxeWorkspace({
                   <div className="mt-3">
                     <div className="mb-2 flex items-center gap-2">
                       <p className="text-[11px]" style={{ color: "var(--text3)" }}>
-                        Devices running ImageDeployer push their deployment log here live - select one to tail it.
+                        Devices running a deploy client push their deployment log here live - select one to tail it.
                       </p>
                       <button
                         type="button"
@@ -2074,7 +2074,7 @@ export function PxeWorkspace({
                     </div>
                     {(imagingClients?.length ?? 0) === 0 ? (
                       <p className="px-1 py-4 text-center text-[12px]" style={{ color: "var(--text3)" }}>
-                        No imaging clients yet - devices appear here once ImageDeployer starts logging.
+                        No imaging clients yet - devices appear here once a client starts logging.
                       </p>
                     ) : (
                       <DataTable
@@ -2180,16 +2180,16 @@ export function PxeWorkspace({
                         className="text-[11px]"
                         style={{ color: "var(--text3)" }}
                         title={
-                          "Published to TaskSequences/ in the deploy share - pick one in ImageDeployer's Task Sequence menu. " +
+                          "Published to TaskSequences/ in the deploy share - pick one in the deploy client's Task Sequence menu. " +
                           "{{SERIAL}} and the connect credentials fill on the device at deploy time, so no secrets are stored here."
                         }
                       >
-                        Named first-boot setups ImageDeployer can apply after imaging.
+                        Named first-boot setups the deploy client can apply after imaging.
                       </p>
                       <label
                         className="mono ml-auto flex items-center gap-1.5 text-[10px] uppercase tracking-wider"
                         style={{ color: "var(--text3)" }}
-                        title="Preselected in ImageDeployer's Task Sequence menu at Connect - set one for touch-free deployments. The tech can still change it on the device."
+                        title="Preselected in the deploy client's Task Sequence menu at Connect - set one for touch-free deployments. The tech can still change it on the device."
                       >
                         Default at boot
                         <select

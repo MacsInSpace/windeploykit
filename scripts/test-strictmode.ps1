@@ -87,14 +87,14 @@ foreach ($f in $libs) {
 $allowed = @{
     # Read-AppPxeBootConfig merges the file over a full $defaults set, so every key
     # of the object it returns is always present.
-    'PxeBootPlugin.ps1:236' = 'config object always carries every default key'
-    'PxeBootPlugin.ps1:243' = 'config object always carries every default key'
-    'PxeBootPlugin.ps1:250' = 'config object always carries every default key'
-    'PxeBootPlugin.ps1:272' = 'config object always carries every default key'
+    'PxeBootPlugin.ps1:242' = 'config object always carries every default key'
+    'PxeBootPlugin.ps1:249' = 'config object always carries every default key'
+    'PxeBootPlugin.ps1:256' = 'config object always carries every default key'
+    'PxeBootPlugin.ps1:278' = 'config object always carries every default key'
     # $prop came from .PSObject.Properties[...] on the line above and is short-circuit
     # guarded by -not $prop; PSPropertyInfo always exposes .Value.
-    'PxeBootPlugin.ps1:1767' = 'PSPropertyInfo.Value, guarded by -not $prop first'
-    'PxeBootPlugin.ps1:1777' = 'PSPropertyInfo.Value, guarded by -not $prop first'
+    'PxeBootPlugin.ps1:1730' = 'PSPropertyInfo.Value, guarded by -not $prop first'
+    'PxeBootPlugin.ps1:1740' = 'PSPropertyInfo.Value, guarded by -not $prop first'
     # Invoke-WebRequest response objects always expose .Content.
     'Aria2TrackerScrape.ps1:180' = 'web response object always has .Content'
 }

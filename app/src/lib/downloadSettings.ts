@@ -24,7 +24,7 @@ export const SETTING_IMAGE_LIBRARY_DIR = defineSetting({
   group: "Downloads",
   label: "ISO & driver root",
   description:
-    "Where ISOs, driver packs, and imageable WIMs are stored and served from (Netboot/ImageDeployer read the iso/, Drivers/<model>/ and WIMs/ structure beneath it). Leave empty for the default (Windows: Downloads; macOS: ~/Public - Downloads/Desktop/Documents are TCC-protected and can't be served over SMB). Point it at an external drive or NAS for large images.",
+    "Where ISOs, driver packs, and imageable WIMs are stored and served from (Netboot and the deploy client read the iso/, Drivers/<model>/ and WIMs/ structure beneath it). Leave empty for the default (Windows: Downloads; macOS: ~/Public - Downloads/Desktop/Documents are TCC-protected and can't be served over SMB). Point it at an external drive or NAS for large images.",
   type: "string",
   defaultValue: "",
   hidden: true,

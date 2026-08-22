@@ -187,7 +187,7 @@ export function DownloadSettingsSection() {
           </div>
           <div className="mt-1 text-[10.5px]" style={{ color: "var(--text3)" }}>
             Where ISOs, driver packs, and imageable WIMs are stored and served from
-            (Netboot/ImageDeployer read the <span className="mono">iso/</span>,{" "}
+            (Netboot and the deploy client read the <span className="mono">iso/</span>,{" "}
             <span className="mono">Drivers/&lt;model&gt;/</span> and{" "}
             <span className="mono">WIMs/</span> structure beneath it). Empty follows
             your Downloads folder. Point it at an external drive or NAS for large

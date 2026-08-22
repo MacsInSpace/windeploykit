@@ -188,7 +188,7 @@ function Get-AppImageLibraryPaths {
     }
 }
 
-# Sanitise a device model (or make) into a single safe folder name. ImageDeployer
+# Sanitise a device model (or make) into a single safe folder name. the deploy client
 # matches the literal Win32_ComputerSystem.Model (Lenovo: 4-char short), so we keep
 # the name as-is apart from characters that are illegal in a path component.
 function ConvertTo-AppImageDriverModelFolderName {
@@ -204,9 +204,9 @@ function ConvertTo-AppImageDriverModelFolderName {
 }
 
 function Get-AppImageDriverModelDir {
-    # Drivers/<Make>/<Model> - ImageDeployer 1.10's publish/search convention.
+    # Drivers/<Make>/<Model> - the MDT-style publish/search convention.
     # Make omitted -> legacy flat Drivers/<Model> (kept for callers that only
-    # know the model; ImageDeployer's -Recurse -Depth 1 search finds both).
+    # know the model; a -Recurse -Depth 1 search finds both).
     param(
         [Parameter(Mandatory)][string]$Model,
         [string]$Make,

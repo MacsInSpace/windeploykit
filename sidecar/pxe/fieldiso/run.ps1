@@ -194,7 +194,7 @@ function Test-FieldIsoQemuVirtualMachine {
 function Test-FieldIsoAutoPrepDiskEnabled {
     if ($env:FIELDISO_AUTO_PREP_DISK -eq '0') { return $false }
     if ($env:FIELDISO_AUTO_PREP_DISK -eq '1') { return $true }
-    # Default on: fleet laptops (e.g. staff Acers) need diskpart after ImageDeployer driver inject.
+    # Default on: fleet laptops (e.g. staff Acers) need diskpart after the driver inject.
     return $true
 }
 
@@ -584,21 +584,21 @@ function Invoke-FieldIsoApplyInstallWim {
     return $applyDir
 }
 
-function Install-FieldIsoImageDeployerDrivers {
-    $importDir = Join-Path $env:SystemRoot 'Drivers\ImageDeployerImport'
+function Install-FieldIsoInjectedDrivers {
+    $importDir = Join-Path $env:SystemRoot 'Drivers\FieldIsoImport'
     if (-not (Test-Path -LiteralPath $importDir)) {
         return $false
     }
-    Write-FieldIsoLog 'Installing ImageDeployer driver packages...'
+    Write-FieldIsoLog 'Installing injected driver packages...'
     & pnputil /add-driver (Join-Path $importDir '*.inf') /subdirs /install
     $exitCode = $LASTEXITCODE
     if ($exitCode -eq 0 -or $exitCode -eq 3010) {
         if ($exitCode -eq 3010) {
-            Write-FieldIsoLog 'ImageDeployer pnputil exit 3010 (drivers installed - rescan next)'
+            Write-FieldIsoLog 'Injected-driver pnputil exit 3010 (drivers installed - rescan next)'
         }
         return $true
     }
-    Write-FieldIsoLog "ImageDeployer pnputil exit $(Format-FieldIsoNativeExitCode $exitCode)"
+    Write-FieldIsoLog "Injected-driver pnputil exit $(Format-FieldIsoNativeExitCode $exitCode)"
     return $false
 }
 
@@ -931,7 +931,7 @@ function Install-FieldIsoOobdDrivers {
         } else {
             Write-FieldIsoLog 'WMI model unknown - Drivers/_default/ has no archive on PXE host (copy a .cab/.exe/.7z there, Start field PXE).'
         }
-        Write-FieldIsoLog 'ImageDeployer drivers (if any) are already installed - continuing without OOBD pack.'
+        Write-FieldIsoLog 'Injected drivers (if any) are already installed - continuing without OOBD pack.'
         return
     }
     Write-FieldIsoLog "OOBD match: $(Get-FieldIsoEntryProp -Entry $entry -Name 'vendor')/$(Get-FieldIsoEntryProp -Entry $entry -Name 'folder') -> $(Get-FieldIsoEntryProp -Entry $entry -Name 'archive')"
@@ -1029,7 +1029,7 @@ $sevenZip = Ensure-FieldIsoTool -Name '7z.exe' -HttpBase $httpBase -CandidateRel
 )
 
 try {
-    $null = Install-FieldIsoImageDeployerDrivers
+    $null = Install-FieldIsoInjectedDrivers
     Write-FieldIsoDiskInventory
     $virtioRoot = Install-FieldIsoVirtioWinFromCd -SevenZipPath $sevenZip
 

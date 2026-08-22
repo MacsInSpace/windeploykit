@@ -1,4 +1,4 @@
-# Netboot task sequences - MDT-style named deployments for ImageDeployer.
+# Netboot task sequences - MDT-style named deployments for the deploy client.
 #
 # Craig's real unattend templates (Client/Server) are embedded below with a split
 # token model:
@@ -9,13 +9,13 @@
 #     what lands in <library>/TaskSequences/<id>.xml is concrete.
 #   * deploy-time tokens ({{SITE}}, {{SERIAL}}, and for ambient-credential joins the
 #     whole {{JoinDom}}/{{JoinUser}}/{{JoinPw}} triplet) - left intact in the
-#     published file. ImageDeployer fills them on the client at deploy time
+#     published file. the client fills them at deploy time
 #     (site id, device serial, and the credentials typed for the share
 #     connect - one coherent credential, never publisher identity + deployer
 #     password). Join passwords therefore NEVER sit in a file on the share.
 #
 # The published files are served over the existing read-only Deploy$ share as
-# Z:\TaskSequences\<id>.xml; ImageDeployer's Task Sequence picker lists them and
+# Z:\TaskSequences\<id>.xml; the deploy client's Task Sequence picker lists them and
 # copies the chosen one to <OS volume>\Windows\Panther\unattend.xml after apply -
 # the standard first-boot (specialize + oobeSystem) mechanism. The windowsPE pass
 # from the original hand-built files is omitted: it only runs under setup.exe,
@@ -282,7 +282,7 @@ function Save-AppPxeBootTaskSequences {
         if ($records.Count -ge $script:AppPxeBootTaskSequenceMaxCount) { break }
     }
     # Default must reference a saved sequence; anything else saves as "no default"
-    # (= ImageDeployer's None item, clean OOBE / Intune) so a renamed/removed id
+    # (= the client's None item, clean OOBE) so a renamed/removed id
     # can't preselect garbage.
     $default = ([string]$DefaultSequenceId).Trim()
     if ($default) {
@@ -1026,7 +1026,7 @@ function Sync-AppPxeBootTaskSequenceStore {
         }
     }
 
-    # _default.txt preselects the ImageDeployer menu (touch-free deploys). Written
+    # _default.txt preselects the client menu (touch-free deploys). Written
     # only when the default resolves to a published file; a dangling default is
     # pruned rather than preselecting a missing sequence (no marker = None item).
     $marker = Join-Path $dir '_default.txt'

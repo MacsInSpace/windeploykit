@@ -1,7 +1,7 @@
 #requires -Version 7.0
 <#
 .SYNOPSIS
-    Copy MDT LiteTouch UEFI boot assets into vendor/ for ImageDeployer wimboot packaging.
+    Copy MDT LiteTouch UEFI boot assets into vendor/ for LiteTouch wimboot packaging.
 
 .PARAMETER SourceRoot
     MDT Boot/x64 folder (deployment share). Example: \\wds\DeployShare$\Boot\x64

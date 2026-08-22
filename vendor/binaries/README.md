@@ -11,7 +11,7 @@ Prebuilt tools copied into `packaging/staged/` during `prepare-bundle-deps.ps1`.
 | `pxe-macos/wimlib-imagex-universal` | macOS (Intel + Apple Silicon) | `.app` -> `Resources/binaries/` (Netboot boot assets) |
 | `pxe-wimboot/wimboot` | macOS + Windows | `resources/sidecar/pxe/wimboot` -> user store on field PXE start |
 | `pxe-secure-boot-x64/x86_64-sb/` | macOS + Windows | `resources/sidecar/pxe/x86_64-sb/` -> `tftp/x86_64-sb/` on Netboot enable / Start Imaging Services |
-| `pxe-mdt-boot/x64/` | macOS + Windows | `resources/sidecar/pxe/mdt-boot-x64/` -> `http/wim-boot/<ImageDeployer*>` on import |
+| `pxe-mdt-boot/x64/` | macOS + Windows | `resources/sidecar/pxe/mdt-boot-x64/` -> `http/wim-boot/<LiteTouch*>` on import |
 | `pxe-windows/wimlib/` | Windows x64 + ARM64 | `Resources/binaries/wimlib/` (Netboot boot assets) |
 | *(none)* | Windows x64 TFTP | Use **Tftpd64** on the laptop - dnsmasq is not buildable for native Windows |
 | `../intune-win-app-util/IntuneWinAppUtil.exe` | Windows x64 | `resources/sidecar/tools/` |
@@ -60,7 +60,7 @@ pwsh -File ./scripts/fetch-pxe-secure-boot.ps1 -SourceDir D:\ipxeboot\contrib\de
 git add vendor/binaries/pxe-secure-boot-x64/ sidecar/pxe/x86_64-sb/
 ```
 
-## Refresh Netboot MDT boot assets (ImageDeployer wimboot)
+## Refresh Netboot MDT boot assets (LiteTouch wimboot)
 
 Coherent BCD + boot.sdi + UEFI bootmgr from MDT LiteTouch `Boot/x64` (not live server mounts at runtime):
 

@@ -8,11 +8,11 @@ import { getSystemDownloadsDir } from "./downloadPath";
 
 // The "ISO & driver root" - where ISOs, driver packs, and imageable WIMs are
 // stored and served from. Mirrors sidecar/lib/AppPaths.ps1 (Get-AppImageLibraryPaths)
-// and the Deploy$ shape ImageDeployer.ps1 expects, so the laptop can serve it
+// and the Deploy$ shape a deploy client expects, so the laptop can serve it
 // directly over SMB/HTTP:
 //
 //   <root>/iso/<name>.iso
-//   <root>/Drivers/<Make>/<Model>/    (ImageDeployer 1.10 publish/search convention)
+//   <root>/Drivers/<Make>/<Model>/    (MDT-style publish/search convention)
 //   <root>/WIMs/<name>.wim
 //   <root>/.incoming/<guid>/          (aria2 staging)
 //
@@ -116,9 +116,9 @@ export function imageDriverModelFolderName(model: string): string {
 }
 
 /**
- * Driver folder for a device: <root>/Drivers/<Make>/<Model>/ - ImageDeployer 1.10's
+ * Driver folder for a device: <root>/Drivers/<Make>/<Model>/ - the MDT-style
  * publish/search convention. Make omitted -> legacy flat <root>/Drivers/<Model>/
- * (ImageDeployer's -Recurse -Depth 1 cache search finds both).
+ * (a -Recurse -Depth 1 cache search finds both).
  */
 export async function getImageDriverModelDir(model: string, make?: string): Promise<string | null> {
   const paths = await getImageLibraryPaths();

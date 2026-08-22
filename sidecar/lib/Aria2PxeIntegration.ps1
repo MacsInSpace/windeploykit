@@ -441,7 +441,7 @@ function Invoke-AppAria2PromoteJobFiles {
             }
             $srcFile = $src[0]
 
-            # Drivers/<Make>/<Model> - ImageDeployer 1.10's publish/search convention;
+            # Drivers/<Make>/<Model> - the MDT-style publish/search convention;
             # Caddy serves it at /drivers/<Make>/<Model>/ (see Write-AppPxeBootCaddyfile).
             # Vendor comes from the promote target; tolerate old job records without one.
             $vendorName = [string](Get-AppAria2JsonProp -Item $target -Name 'vendor')
@@ -479,7 +479,7 @@ function Invoke-AppAria2PromoteJobFiles {
             $src = @($files | Where-Object { $_.Extension -match '^\.wim$' } | Sort-Object Length -Descending | Select-Object -First 1)
             if ($src.Count -eq 0) { throw 'aria2: no .wim file in staging folder.' }
             # Downloaded WIMs are imageable/SOE images -> <root>/WIMs/ (served at
-            # /WIMs/, read by ImageDeployer). Boot WIMs are imported separately via
+            # /WIMs/, read by the deploy client). Boot WIMs are imported separately via
             # the Netboot panel and stay in the PXE store.
             if (-not (Get-Command Import-AppPxeBootImageableWim -ErrorAction SilentlyContinue)) {
                 throw 'aria2: imageable WIM import unavailable.'

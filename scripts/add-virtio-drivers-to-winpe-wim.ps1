@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Bake VirtIO storage drivers (vioscsi + viostor) into a WinPE boot image so it can SEE a
-    Proxmox / QEMU VirtIO disk during imaging. Works on FieldIso.wim or ImageDeployer.wim.
+    Proxmox / QEMU VirtIO disk during imaging. Works on FieldIso.wim or any imported WinPE.
 
 .DESCRIPTION
     WinPE shows "There are no fixed disks to show" on a Proxmox VirtIO disk because the boot
@@ -22,7 +22,7 @@
     boots afterwards. For a Proxmox lab you generally want both.
 
 .PARAMETER WimPath
-    Path to the WinPE WIM to service (FieldIso.wim or ImageDeployer.wim).
+    Path to the WinPE WIM to service (FieldIso.wim or any imported WinPE).
 
 .PARAMETER VirtioWinIso
     Path to a virtio-win-*.iso. It is mounted read-only and dismounted when done.
@@ -31,7 +31,7 @@
     Path to an already-mounted / extracted virtio-win root (use instead of -VirtioWinIso).
 
 .PARAMETER Index
-    WIM image index to service. Default 1 (both FieldIso.wim and ImageDeployer.wim are single-image).
+    WIM image index to service. Default 1 (most WinPE WIMs are single-image).
 
 .PARAMETER OsFlavor
     virtio-win OS subfolder. Default 'w11' (WinPE 11 / Win11). Use 'w10', '2k22', '2k25', etc.
@@ -49,7 +49,7 @@
     .\scripts\add-virtio-drivers-to-winpe-wim.ps1 -WimPath C:\pxe\FieldIso.wim -VirtioWinIso C:\iso\virtio-win-0.1.285.iso
 
 .EXAMPLE
-    .\scripts\add-virtio-drivers-to-winpe-wim.ps1 -WimPath C:\pxe\ImageDeployer.wim -VirtioWinRoot E:\ -Drivers vioscsi,viostor,NetKVM
+    .\scripts\add-virtio-drivers-to-winpe-wim.ps1 -WimPath C:\pxe\LiteTouchPE_x64.wim -VirtioWinRoot E:\ -Drivers vioscsi,viostor,NetKVM
 #>
 [CmdletBinding()]
 param(

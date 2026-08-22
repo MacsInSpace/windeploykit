@@ -1,7 +1,7 @@
 {
   "_comment": "Local wimboot kernel options per boot WIM file name (http/wim/). useBootAssets=true serves BCD/boot.sdi from http/wim-boot/<stem>/ (auto-extracted on import). extractBootmgrFromWim=true keeps bootmgfw inside the WIM (Secure Boot).",
   "recipes": {
-    "ImageDeployer.wim": { "index": 1, "gui": true, "useBootAssets": true, "extractBootmgrFromWim": true },
+    "LiteTouchPE_x64.wim": { "index": 1, "gui": true, "useBootAssets": true, "extractBootmgrFromWim": true },
     "FieldIso.wim": { "index": 1, "gui": true, "useBootAssets": true, "extractBootmgrFromWim": true },
     "Techtools10.wim": { "index": 1, "gui": true, "useBootAssets": true },
     "TechTools.wim": { "index": 1, "gui": true, "useBootAssets": true }

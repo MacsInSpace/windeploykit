@@ -18,7 +18,7 @@ set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Canonical pxe-boot store (AppPaths.ps1), same as
-# inject-fieldiso-drivers-from-imagedeployer.sh. Deliberately NOT apis/ - that is a
+# the driver inject step. Deliberately NOT apis/ - that is a
 # scratch drop-off folder that gets deleted, so nothing here may depend on it.
 if [ "$(uname)" = "Darwin" ]; then
   DEFAULT_PXE_STORE="$HOME/Library/Application Support/WinDeployKit/plugins/pxe-boot"
@@ -112,5 +112,5 @@ echo "==> Verify tools in WIM"
 
 echo ""
 echo "Done: $OUT"
-echo "Optional: ./scripts/inject-fieldiso-drivers-from-imagedeployer.sh"
+echo "Optional: add OOBD drivers with ./scripts/add-virtio-drivers-to-winpe-wim.ps1"
 echo "Publish:   pwsh -File ./scripts/publish-pxe-fieldiso.ps1 -WimPath '$OUT'"

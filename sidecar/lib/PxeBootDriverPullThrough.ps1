@@ -8,11 +8,11 @@
 #     the verified direct download. A ledger keeps one entry per make|model: a
 #     failed fetch is retried on the NEXT device / imaging session of that model,
 #     never in a loop on the one that saw it fail (Craig, 2026-08-22). The first
-#     device deploys as today (ImageDeployer's own client-side vendor download
+#     device deploys as today (the client's own vendor download
 #     fallback where the vendor has one); every later device cache-hits the store.
 #
 #   * Alias map: Drivers/aliases.json maps model names / Lenovo machine types /
-#     seed wmiPatterns to the pack folder actually on disk - the baked ImageDeployer
+#     seed wmiPatterns to the pack folder actually on disk - the deploy client
 #     consults it when its exact-name search misses (Dell packs live under systemId
 #     folders that never equal Win32 Model; Lenovo under 4-char machine types).
 #     Installed packs only, so the file stays small and every entry is actionable.
@@ -308,7 +308,7 @@ function Sync-AppPxeBootDriverPullThrough {
 function Write-AppPxeBootDriverAliasMap {
     <#
     .SYNOPSIS
-        Publish Drivers/aliases.json for the baked ImageDeployer: aliases (model
+        Publish Drivers/aliases.json for the deploy client: aliases (model
         names, Lenovo machine types, seed wmiPatterns - wildcards allowed) -> the
         vendor/folder of a pack ACTUALLY on disk. Regenerated only when the set of
         installed pack folders changes, so the store-sync poll stays cheap.
