@@ -146,7 +146,36 @@ Test-Case 'A future release is carried as a probe row' {
 }
 
 Write-Host ''
-Write-Host 'Download all (sequential queue):'
+Write-Host 'Never blank:'
+Test-Case 'A refresh that finds nothing keeps the cached downloads' {
+    # Microsoft unreachable, or the markup changed under us: the panel must not lose the
+    # downloads it was offering a minute ago. Same policy as the driver catalogs.
+    $tmpHome = Join-Path ([IO.Path]::GetTempPath()) ("eval-nb-" + [guid]::NewGuid().ToString('n'))
+    New-Item -ItemType Directory -Path $tmpHome -Force | Out-Null
+    try {
+        function Get-AppEvalIsoCachePath { Join-Path $tmpHome 'eval-iso-catalog.json' }
+        $seed = [ordered]@{
+            schema    = 1
+            fetchedAt = '2026-08-01T00:00:00Z'
+            products  = @([ordered]@{ id = 'srv2025'; name = 'Windows Server 2025'; kind = 'server'; probe = $false; page = 'https://example.invalid'; status = 'ok'; message = ''; count = 1 })
+            entries   = @([ordered]@{ id = 'srv2025'; productId = 'srv2025'; productName = 'Windows Server 2025'; title = 'Windows Server 2025'; edition = 'Standard'; media = 'ISO'; arch = 'x64'; culture = 'en-US'; url = 'https://example.invalid/x'; resolvedUrl = ''; fileName = 'server2025.iso'; sizeBytes = 8GB; build = '26100'; release = ''; page = 'https://example.invalid' })
+        }
+        $null = Write-AppEvalIsoCache -Payload $seed
+        function Invoke-WebRequest { param([Parameter(ValueFromRemainingArguments = $true)]$Rest) throw 'simulated: network down' }
+        $null = Update-AppEvalIsoCatalogCache
+        $after = Read-AppEvalIsoCache
+        $kept = @(@($after.entries) | Where-Object { [string]$_.productId -eq 'srv2025' })
+        Assert-True ($kept.Count -eq 1) "expected the cached row to survive, got $($kept.Count)"
+        Assert-True ([string]$kept[0].fileName -eq 'server2025.iso') "file name was '$($kept[0].fileName)'"
+        $product = @(@($after.products) | Where-Object { [string]$_.id -eq 'srv2025' })[0]
+        Assert-True ([string]$product.status -eq 'kept') "status was '$($product.status)'"
+    } finally {
+        Remove-Item -LiteralPath $tmpHome -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Write-Host ''
+Write-Host 'Download all (sequential queue):' 
 # Stubs from here down - these override the real catalog/download rail on purpose, so
 # keep this section last.
 $script:fakeRows = @(

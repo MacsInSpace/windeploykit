@@ -325,6 +325,21 @@ function Update-AppEvalIsoCatalogCache {
                 }
             }
         }
+        # NEVER BLANK (same policy as the driver catalogs): a page that fails to fetch, or
+        # whose markup changed under us, must not delete downloads the panel was offering
+        # a minute ago. Keep the previous rows and let staleness show instead of absence.
+        # A product that genuinely has nothing (Windows 10, the probe rows) had nothing
+        # cached either, so this only ever preserves real entries.
+        if ($rows.Count -eq 0 -and $previous) {
+            $kept = @(@(Get-AppEvalIsoProp -Item $previous -Name 'entries') |
+                Where-Object { [string](Get-AppEvalIsoProp -Item $_ -Name 'productId') -eq $productId })
+            if (@($kept).Count -gt 0) {
+                foreach ($keptRow in $kept) { [void]$entries.Add((ConvertTo-AppEvalIsoHashtable -Item $keptRow)) }
+                $status = 'kept'
+                $message = "kept $(@($kept).Count) cached download(s) - this refresh found none ($message)"
+                Write-SidecarLog "eval ISO: $($product.name) - keeping $(@($kept).Count) cached download(s); this refresh found none"
+            }
+        }
         foreach ($row in $rows) {
             $resolved = Resolve-AppEvalIsoDownload -Uri ([string]$row.url)
             $fileName = ''
@@ -364,7 +379,10 @@ function Update-AppEvalIsoCatalogCache {
             message = $message
             count   = $rows.Count
         })
-        Write-SidecarLog "eval ISO: $($product.name) - $status ($($rows.Count) download(s))"
+        $reported = if ($status -eq 'kept') {
+            @($entries | Where-Object { [string]$_['productId'] -eq $productId }).Count
+        } else { $rows.Count }
+        Write-SidecarLog "eval ISO: $($product.name) - $status ($reported download(s))"
     }
 
     $payload = [ordered]@{

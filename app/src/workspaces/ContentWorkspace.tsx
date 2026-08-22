@@ -24,7 +24,8 @@ import type {
   Aria2TrackerCatalog,
   Aria2TrackerDriverRow,
   Aria2TrackerOemIsoRow,
-  Aria2TrackerTorrentRow,
+  PxeBootIsoEntry,
+  PxeBootPluginStatus,
   EvalIsoCatalogResponse,
   EvalIsoDownloadAllResponse,
   EvalIsoEntry,
@@ -37,7 +38,6 @@ const POLL_MS = 2000;
 
 type TabId = "images" | "drivers" | "add" | "settings";
 type AssetKind = "auto" | "iso" | "wim" | "driver" | "other";
-type ImagesView = "soe" | "oem";
 type DriversView = "acer" | "lenovo" | "dell" | "hp" | "microsoft";
 
 function acerCatalogFamilyLabel(family?: string | null): string {
@@ -202,7 +202,6 @@ export function ContentWorkspace({
   const [extensionRoutes, setExtensionRoutes] = useState<Aria2ExtensionRoute[]>([]);
   const [imagesFilter, setImagesFilter] = useState("");
   const [driversFilter, setDriversFilter] = useState("");
-  const [imagesView, setImagesView] = useState<ImagesView>("soe");
   const [driversView, setDriversView] = useState<DriversView>("acer");
   const [loadingConfig, setLoadingConfig] = useState(false);
   const [daemonBusy, setDaemonBusy] = useState(false);
@@ -222,6 +221,10 @@ export function ContentWorkspace({
   // scrapes on the dispatch thread, so this is just a read of the cache plus disk state.
   const [evalIso, setEvalIso] = useState<EvalIsoCatalogResponse | null>(null);
   const [evalIsoBusy, setEvalIsoBusy] = useState(false);
+  // What is actually in the ISO store: downloaded evaluation media and anything imported
+  // by hand. This is the list that answers "where did my ISO go".
+  const [storeIsos, setStoreIsos] = useState<PxeBootIsoEntry[]>([]);
+  const [isoBusy, setIsoBusy] = useState(false);
   const [imageRootPreview, setImageRootPreview] = useState("");
   const [imageFreeBytes, setImageFreeBytes] = useState<number | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -281,6 +284,51 @@ export function ContentWorkspace({
       toast.error("Windows media", e instanceof Error ? e.message : String(e));
     }
   }, []);
+
+  const loadStoreIsos = useCallback(async () => {
+    try {
+      const status = await sidecar.invoke<PxeBootPluginStatus>("GetPxeBootPluginStatus");
+      setStoreIsos(status?.isos ?? []);
+    } catch {
+      /* Netboot plug-in may be off - the section just stays empty */
+    }
+  }, []);
+
+  const importIso = useCallback(async () => {
+    const picked = await open({
+      multiple: false,
+      filters: [{ name: "Disc image", extensions: ["iso"] }],
+    });
+    if (!picked || typeof picked !== "string") return;
+    setIsoBusy(true);
+    try {
+      await sidecar.invoke("ImportPxeBootIso", { sourcePath: picked, replaceExisting: true });
+      toast.success("ISO library", `${picked.split(/[/\\]/).pop()} imported.`);
+      await loadStoreIsos();
+      void loadEvalIso();
+    } catch (e) {
+      toast.error("ISO library", e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsoBusy(false);
+    }
+  }, [loadStoreIsos]);
+
+  const removeIso = useCallback(
+    async (row: PxeBootIsoEntry) => {
+      setIsoBusy(true);
+      try {
+        await sidecar.invoke("RemovePxeBootIso", { fileName: row.fileName });
+        toast.info("ISO library", `${row.fileName} removed.`);
+        await loadStoreIsos();
+        void loadEvalIso();
+      } catch (e) {
+        toast.error("ISO library", e instanceof Error ? e.message : String(e));
+      } finally {
+        setIsoBusy(false);
+      }
+    },
+    [loadStoreIsos],
+  );
 
   const refreshEvalIso = useCallback(async () => {
     setEvalIsoBusy(true);
@@ -457,8 +505,9 @@ export function ContentWorkspace({
     void loadConfig();
     void loadTracker();
     void loadEvalIso();
+    void loadStoreIsos();
     void refreshImageDestination();
-  }, [loadConfig, loadEvalIso, loadTracker, refreshImageDestination]);
+  }, [loadConfig, loadEvalIso, loadStoreIsos, loadTracker, refreshImageDestination]);
 
   const ensureBinary = useCallback(async () => {
     setInstallBusy(true);
@@ -577,6 +626,8 @@ export function ContentWorkspace({
           }
           void refreshDownloads();
           void loadTracker();
+          void loadEvalIso();
+          void loadStoreIsos();
           void refreshImageDestination();
         } else if (data?.message) {
           toast.error("aria2 promote", data.message);
@@ -586,7 +637,7 @@ export function ContentWorkspace({
     return () => {
       void unsub.then((fn) => fn());
     };
-  }, [loadConfig, loadEvalIso, loadTracker, refreshDownloads, refreshImageDestination, finishVendorCatalogRefresh]);
+  }, [loadConfig, loadEvalIso, loadStoreIsos, loadTracker, refreshDownloads, refreshImageDestination, finishVendorCatalogRefresh]);
 
   useEffect(() => {
     if (!config?.daemonRunning) {
@@ -803,12 +854,6 @@ export function ContentWorkspace({
     [queueDownload],
   );
 
-  const downloadTorrentRow = useCallback(
-    async (row: Aria2TrackerTorrentRow) => {
-      await queueDownload({ torrentId: row.id });
-    },
-    [queueDownload],
-  );
 
   const downloadTrackerRow = useCallback(
     async (row: Aria2TrackerDriverRow) => {
@@ -932,13 +977,6 @@ export function ContentWorkspace({
     ],
     [controlDownload],
   );
-
-  const soeRows = useMemo(() => {
-    const rows = tracker?.torrents ?? [];
-    const q = imagesFilter.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => [r.name, r.id, r.assetKind].join(" ").toLowerCase().includes(q));
-  }, [tracker, imagesFilter]);
 
   const oemRows = useMemo(() => {
     const rows = tracker?.oemIsos ?? [];
@@ -1082,83 +1120,6 @@ export function ContentWorkspace({
     [imageTransfers],
   );
 
-  const torrentColumns: DataTableColumn<Aria2TrackerTorrentRow>[] = useMemo(
-    () => [
-      {
-        key: "name",
-        label: "Image",
-        sortValue: (r) => r.name,
-        render: (r) => r.name,
-      },
-      {
-        key: "kind",
-        label: "Kind",
-        width: 60,
-        sortValue: (r) => r.assetKind,
-        render: (r) => r.assetKind,
-      },
-      {
-        key: "size",
-        label: "Size",
-        width: 90,
-        // contentSizeBytes is the image; sizeBytes is only the .torrent file.
-        sortValue: (r) => r.contentSizeBytes || 0,
-        render: (r) => (r.contentSizeBytes ? formatBytes(r.contentSizeBytes) : "-"),
-      },
-      {
-        key: "seeders",
-        label: "S",
-        width: 44,
-        sortValue: (r) => r.seeders ?? -1,
-        render: (r) => formatPeerCount(r.seeders),
-      },
-      {
-        key: "leechers",
-        label: "L",
-        width: 44,
-        sortValue: (r) => r.leechers ?? -1,
-        render: (r) => formatPeerCount(r.leechers),
-      },
-      {
-        key: "actions",
-        label: "",
-        sortValue: () => "",
-        render: (r) => {
-          const live = findImageTransfer(r.id);
-          if (live) {
-            const pct = Math.min(100, Math.floor(live.percent));
-            return (
-              <span
-                className="inline-flex items-center gap-1.5"
-                title={`${formatBytes(live.completedLength)} of ${formatBytes(live.totalLength)} | ${formatSpeed(live.downloadSpeed)}`}
-              >
-                <span
-                  aria-hidden
-                  style={{ width: 44, height: 4, borderRadius: 2, background: "var(--surface3)", overflow: "hidden", display: "inline-block" }}
-                >
-                  <span
-                    style={{ display: "block", width: `${pct}%`, height: "100%", background: "var(--accent)", transition: "width 0.3s linear" }}
-                  />
-                </span>
-                {pct}%
-              </span>
-            );
-          }
-          return (
-            <button
-              type="button"
-              className="table-action"
-              disabled={!config?.daemonRunning || adding || !r.downloadable}
-              onClick={() => void downloadTorrentRow(r)}
-            >
-              Download
-            </button>
-          );
-        },
-      },
-    ],
-    [adding, config?.daemonRunning, downloadTorrentRow, findImageTransfer],
-  );
 
   // "checked 3h ago" / "never checked" - the catalog is a two-week cache, so say so.
   const evalIsoStatusText = useMemo(() => {
@@ -1179,17 +1140,52 @@ export function ContentWorkspace({
     };
   }, [evalIso]);
 
-  // Releases that are retired or not published yet: a one-line footnote, not table rows.
-  const evalIsoNotes = useMemo(() => {
-    const products = evalIso?.products ?? [];
-    return products
-      .filter((p) => p.status && p.status !== "ok")
-      .map((p) => {
-        if (p.status === "not-published") return `${p.name}: not published yet`;
-        if (p.status === "unavailable") return `${p.name}: evaluation retired - import an ISO instead`;
-        return `${p.name}: ${p.message || p.status}`;
-      });
-  }, [evalIso]);
+  const isoRows = useMemo(() => {
+    const needle = imagesFilter.trim().toLowerCase();
+    const rows = needle
+      ? storeIsos.filter((r) => r.fileName.toLowerCase().includes(needle))
+      : storeIsos;
+    return [...rows].sort((a, b) => a.fileName.localeCompare(b.fileName));
+  }, [storeIsos, imagesFilter]);
+
+  const isoColumns: DataTableColumn<PxeBootIsoEntry>[] = useMemo(
+    () => [
+      {
+        key: "fileName",
+        label: "ISO",
+        sortValue: (r) => r.fileName,
+        render: (r) => (
+          <span className="flex flex-col">
+            <span>{r.label || r.fileName}</span>
+            {r.label ? (
+              <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                {r.fileName}
+              </span>
+            ) : null}
+          </span>
+        ),
+      },
+      {
+        key: "size",
+        label: "Size",
+        width: 80,
+        sortValue: (r) => r.sizeBytes,
+        render: (r) => formatBytes(r.sizeBytes),
+      },
+      {
+        key: "actions",
+        label: "",
+        width: 80,
+        sortValue: () => "",
+        render: (r) => (
+          <button type="button" className="table-action" disabled={isoBusy} onClick={() => void removeIso(r)}>
+            Remove
+          </button>
+        ),
+      },
+    ],
+    [isoBusy, removeIso],
+  );
 
   // Microsoft Evaluation Center rows. Progress rides the same driver-download-progress
   // channel as driver packs (key "eval|<id>"), so the bar here is the shared one.
@@ -1760,55 +1756,31 @@ export function ContentWorkspace({
                       : "Not checked yet - use Check for updates to list current Microsoft evaluation ISOs."}
                   </p>
                 )}
-                {evalIsoNotes.length > 0 && (
-                  <p className="text-[10px]" style={{ color: "var(--text3)" }}>
-                    {evalIsoNotes.join("  |  ")}
-                  </p>
-                )}
-                {(evalIso?.manualSources?.length ?? 0) > 0 && (
-                  <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]" style={{ color: "var(--text3)" }}>
-                    <span>Not published as evaluation media - download and import:</span>
-                    {(evalIso?.manualSources ?? []).map((m) => (
-                      <a key={m.id} href={m.url} target="_blank" rel="noreferrer" title={m.reason} style={{ color: "var(--text2)" }}>
-                        {m.name} &gt;
-                      </a>
-                    ))}
-                  </p>
-                )}
               </div>
-              <div className="flex gap-2 border-b flex-wrap" style={{ borderColor: "var(--border)" }}>
-                <button type="button" style={tabBtn(imagesView === "soe")} onClick={() => setImagesView("soe")}>
-                  Catalog ({tracker?.torrents?.length ?? 0})
-                </button>
-                <button type="button" style={tabBtn(imagesView === "oem")} onClick={() => setImagesView("oem")}>
-                  OEM OS ({tracker?.oemIsos?.length ?? 0})
-                </button>
-                {(tracker?.statsUrl || tracker?.siteStatsUrl) && (
-                  <span className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 self-center">
-                    {tracker.statsUrl && (
-                      <a
-                        href={tracker.statsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[11px]"
-                        style={{ color: "var(--text2)" }}
-                      >
-                        Tracker &gt;
-                      </a>
-                    )}
-                    {tracker.siteStatsUrl && (
-                      <a
-                        href={tracker.siteStatsUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[11px]"
-                        style={{ color: "var(--text2)" }}
-                      >
-                        Site tracker &gt;
-                      </a>
-                    )}
-                  </span>
-                )}
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="mono text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                  ISO library ({storeIsos.length})
+                </h3>
+                <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                  served by Netboot - mounted, never extracted
+                </span>
+                <span className="ml-auto flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn py-0.5 text-[10px]"
+                    disabled={isoBusy}
+                    onClick={() => void importIso()}
+                  >
+                    Import ISO...
+                  </button>
+                  <button
+                    type="button"
+                    className="btn py-0.5 text-[10px]"
+                    onClick={() => void sidecar.invoke("OpenPxeBootIsoFolder")}
+                  >
+                    Open folder
+                  </button>
+                </span>
               </div>
               <div className="input-box max-w-[20rem]">
                 <input
@@ -1818,14 +1790,22 @@ export function ContentWorkspace({
                   placeholder="Filter image name..."
                 />
               </div>
-              {imagesView === "soe" ? (
-                <DataTable columns={torrentColumns} rows={soeRows} rowKey={(r) => r.id} />
-              ) : oemRows.length === 0 ? (
-                <p style={{ color: "var(--text2)" }}>
-                  No OEM ISO entries yet - add to <code>oemIsos</code> in the tracker manifest.
+              {isoRows.length === 0 ? (
+                <p className="text-[11px]" style={{ color: "var(--text2)" }}>
+                  {storeIsos.length === 0
+                    ? "No ISOs yet - download evaluation media above, or Import ISO... for media you already have."
+                    : "No ISO matches that filter."}
                 </p>
               ) : (
-                <DataTable columns={oemColumns} rows={oemRows} rowKey={(r) => r.id} />
+                <DataTable columns={isoColumns} rows={isoRows} rowKey={(r) => r.fileName} />
+              )}
+              {oemRows.length > 0 && (
+                <div className="mt-2">
+                  <h3 className="mono mb-2 text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                    OEM OS ({oemRows.length})
+                  </h3>
+                  <DataTable columns={oemColumns} rows={oemRows} rowKey={(r) => r.id} />
+                </div>
               )}
               {imageTransfers.length > 0 && (
                 <div className="mt-2">

@@ -1035,3 +1035,26 @@ evaluation client ISOs are for lab and imaging tests.
 `scripts/test-server-eval-conversion.ps1` (14 checks) - every case is a mistake the original
 actually made. USM mirrors them in `sidecar/tests/ServerEvalConversion.Tests.ps1`.
 
+### Operating Systems tab, corrected after first field use (2026-08-22)
+
+Four things Craig hit, all fixed:
+
+1. **Footnotes removed.** The "not published yet / evaluation retired / download and import"
+   lines were noise on a corporate product. The data still exists (`products[].status`,
+   `manualSources`) - it is simply not rendered.
+2. **Never blank.** A refresh that found nothing used to wipe the offered downloads. A
+   product with no rows now keeps its cached entries and reports `status = 'kept'`; only a
+   genuinely empty product (Windows 10, probe rows) shows nothing, because it had nothing
+   cached either. Proven by simulating a total network failure - all six entries survived.
+   The 14-day TTL means the panel reads from cache for two weeks unless refreshed by hand.
+3. **The row now updates when a download promotes.** It used to keep offering Download until
+   the panel remounted ("it showed up after clicking away and back") because nothing reloaded
+   the catalog on `aria2-promote`. Same bug fixed in USM.
+4. **The torrent Catalog tab is gone; there is an ISO library instead.** WDK does not use
+   torrents and had nowhere to see or import media, so a downloaded ISO was invisible even
+   though it had landed correctly in the store. The images tab is now: Windows evaluation
+   media -> **ISO library** (what is actually in `<image library>/iso`, with Import ISO...,
+   Open folder and Remove) -> OEM OS (only when the manifest has entries) -> Transfers.
+   The dead torrent UI (`imagesView`, `soeRows`, `torrentColumns`, `downloadTorrentRow`) is
+   deleted; the sidecar keeps its torrent support for USM.
+
