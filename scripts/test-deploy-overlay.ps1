@@ -210,7 +210,9 @@ try {
             $text = [System.IO.File]::ReadAllText($served)
             if ($text -match "(?<!`r)`n") { throw 'published startnet.cmd has LF-only line endings' }
             # The client must do each stage of the deployment, in this order.
-            $stages = @('wpeinit', 'net use Z:', 'TaskSequences\_default.txt', '.env', ':find_drivers', 'drvload', 'diskpart', 'dism /Apply-Image', '/Add-Driver', 'bcdboot', 'Panther\unattend.xml', 'wpeutil reboot')
+            # Walked in order through the MAIN flow: subroutine bodies sit after it, so
+            # each stage must appear on the line that calls it (hence :drvload_storage).
+            $stages = @('wpeinit', 'net use Z:', 'TaskSequences\_default.txt', '.env', 'call :find_drivers', 'call :drvload_storage', 'diskpart', 'dism /Apply-Image', '/Add-Driver', 'bcdboot', 'Panther\unattend.xml', 'wpeutil reboot')
             $pos = -1
             foreach ($s in $stages) {
                 $next = $text.IndexOf($s, [Math]::Max(0, $pos), [StringComparison]::OrdinalIgnoreCase)

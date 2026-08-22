@@ -148,7 +148,7 @@ call :find_drivers
 if defined DRIVERDIR (
     call :log "Driver pack: %DRIVERDIR%"
     call :stage_drivers
-    if defined DRIVERSTAGE call :load_storage_drivers
+    if defined DRIVERSTAGE call :drvload_storage
 ) else (
     call :log "No driver pack for this machine on the share (Z:\Drivers\%MAKE%\%MODEL%) - continuing without."
 )
@@ -294,7 +294,7 @@ if exist "Z:\Drivers\_default\" (
 )
 goto :eof
 
-:load_storage_drivers
+:drvload_storage
 rem drvload the storage INFs from the staged tree into THIS WinPE so diskpart can
 rem see a VirtIO disk. The virtio-win tree ships w10/w11/2k25 and ARM64 variants
 rem side by side; WinPE here is x64, so only paths under an amd64 folder are used.
