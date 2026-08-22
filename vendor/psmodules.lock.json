@@ -1,6 +1,6 @@
 {
   "note": "Pinned by scripts/sync-secret-vault-modules.ps1. See docs/handover/SHARED_SECRET_VAULT_CONTRACT.md section 5.",
-  "license": "MIT (Microsoft). Redistributed unmodified.",
+  "license": "MIT. Microsoft.PowerShell.SecretManagement (Microsoft) and SecretManagement.LocalVault (Craig Hair), redistributed unmodified.",
   "modules": {
     "Microsoft.PowerShell.SecretManagement": {
       "version": "1.1.2",
@@ -19,6 +19,18 @@
         "Microsoft.PowerShell.SecretManagement.psd1": "B0BF72A38245FB98186785F857B7CE797FA95BBB63025391A238A66EE7F46A90",
         "System.Runtime.InteropServices.RuntimeInformation.dll": "A0207CF97A06E9CC99BE1ED85EF31BA0963685C90BC30A0114157091A90081C3",
         "ThirdPartyNotices.txt": "296FF3E4A93BC8C20CA5C20D0E1A70B8C4622FADF0351A37845A63ED52585279"
+      }
+    },
+    "SecretManagement.LocalVault": {
+      "version": "1.0.2",
+      "source": "https://github.com/MacsInSpace/SecretManagement.LocalVault.git#v1.0.2",
+      "commit": "8558bb50fc0fd4e865b239fee3e10e1254de7ce0",
+      "files": {
+        "LocalVault.Core.ps1": "13CB14FD6644486BB806D3537D0A4BD7519068026B5D7CC3371676536F6688B3",
+        "SecretManagement.LocalVault.Extension/SecretManagement.LocalVault.Extension.psd1": "06BE578EF2E0764AFCFB986847B5C49DD957B1688DEE6B592F37FA0DAA90FE63",
+        "SecretManagement.LocalVault.Extension/SecretManagement.LocalVault.Extension.psm1": "B243C18BE23C1A8B3E1EF5DD01C5BC521E35D4BFBDBB6C8B3D20D478B8748570",
+        "SecretManagement.LocalVault.psd1": "4430ED40834D1437AC4EFD33E8E958BB60E9F6236A9809C26797EFAAE1E5A482",
+        "SecretManagement.LocalVault.psm1": "71C288222D165836A8FC6415C615E40AFA62F0BF40C6DDE72D8A854AFD5EE083"
       }
     }
   }

@@ -12,7 +12,7 @@ WinDeployKit invokes the following as **separate processes**; it does not link t
 | [p7zip](https://p7zip.sourceforge.net/) | LGPL | Downloaded at runtime (macOS) |
 | [Tftpd64](https://pjo2.github.io/tftpd64/) | GPLv2 | Downloaded at runtime (Windows) |
 | [Microsoft.PowerShell.SecretManagement](https://github.com/PowerShell/SecretManagement) | MIT | Vendored unmodified (`vendor/psmodules/`), pinned in `vendor/psmodules.lock.json` |
-| [Microsoft.PowerShell.SecretStore](https://github.com/PowerShell/SecretStore) | MIT | Vendored unmodified (`vendor/psmodules/`), pinned in `vendor/psmodules.lock.json` |
+| [SecretManagement.LocalVault](https://github.com/MacsInSpace/SecretManagement.LocalVault) | MIT | Vendored unmodified from the tagged release (`vendor/psmodules/`), pinned by tag, commit and SHA-256 in `vendor/psmodules.lock.json` |
 
 The two PowerShell modules are vendored rather than installed at runtime because
 PSGallery is not reachable in every deployment environment. They are redistributed

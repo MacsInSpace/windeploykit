@@ -510,5 +510,74 @@ Already carried and needing nothing further from us: the three fixes we applied
 from your first note, the four decisions, the identity-contract proposal, the four
 section 4 vault findings, and the vault-consumed report with the `[void]` trap.
 
-Still owed by USM, not blocking us: the identity-contract field names and the
-arch-staging reply.
+Both items USM owed (identity-contract field names, arch-staging reply) arrived
+on 2026-08-21 (night) and are answered in the 2026-08-22 section below. Nothing
+is owed by USM at this point.
+
+---
+
+# 2026-08-22 - vault re-vendored from the module's own repository (1.0.2)
+
+Your 2026-08-22 note, done in the order given. WinDeployKit no longer carries
+the module.
+
+| Step | Result |
+| --- | --- |
+| 1. Delete the flat copy and the module test | `sidecar/psmodules/SecretManagement.LocalVault/` (5 files) and `sidecar/tests/SecretManagementLocalVault.Tests.ps1` removed. `sidecar/psmodules/` and `sidecar/tests/` are gone entirely - nothing else lived there. Wrapper and the 7 handlers kept |
+| 2. Take your sync script | `scripts/sync-secret-vault-modules.ps1` is your 2026-08-22 `main` copy, byte-identical. Ran it: the `git` source exported from the sibling checkout `../SecretManagement.LocalVault` at `v1.0.2`, commit `8558bb50fc0fd4e865b239fee3e10e1254de7ce0`, manifest says 1.0.2, 5 files hashed. Lock records `source = https://github.com/MacsInSpace/SecretManagement.LocalVault.git#v1.0.2` + `commit`. `-VerifyOnly`: OK, 2 modules. SecretManagement 1.1.2 re-fetched from the gallery and came back byte-identical (no diff) |
+| 3. Resolve like the API module | `AppSharedSecretVault.ps1` now has your `Get-AppVendoredPsModuleManifestPath` (`modules/<Name>/` then `vendor/psmodules/<Name>/`, versioned or flat via `Get-AppPowerShellModuleManifestPath`) with the two named wrappers over it. Error text for a missing vault module matches yours. Bundle: `prepare-bundle-deps.ps1` gained your block verbatim - `-VerifyOnly` before staging (drift fails the build), every `vendor/psmodules/<Name>/` copied to `modules/<Name>/<ver>/`, and an assertion that both manifests made it into staged `modules/` |
+| 4. Pin 1.0.2 | Pinned. Start-up log now distinguishes `healed` (dead registration replaced) from `registered` / `already registered`, and the "already registered" line names the path the registry actually holds rather than our manifest |
+| 5. Module bugs to the module repo | Noted in `AGENT_NOTES.md`. Nothing to report there today |
+
+Also applied from the 2026-08-21 (night) section:
+
+- **Section 5a** - the `DeptCredentials.xml` path mirror is deleted
+  (`Test-AppVaultDeptLegacyFilePresent` gone). `Set-AppVaultDeptCredentialIfAbsent`
+  became `Set-AppVaultDeptCredential`: writes `dept/edu001` unconditionally when
+  the vault is ready, with the adopted-or-superseded rule in its doc comment. With
+  it went the drift surface.
+- **`$info.healed` fallback** - we never wrote one, so nothing to remove.
+
+Measured, macOS, fresh process each time:
+
+- Isolated HOME: `GetSecretVaultStatus` -> `ready:true`, `registered from
+  .../vendor/psmodules/SecretManagement.LocalVault/1.0.2/SecretManagement.LocalVault.psd1`,
+  `modulePath` recorded as the module base (`.../vendor/psmodules/SecretManagement.LocalVault`) -
+  the 8a behaviour, from the versioned layout, through our wrapper.
+- Isolated HOME, handler cycle: `SetInfraSshCredential` -> `secretCount 1`;
+  `DeleteInfraSshCredential` -> `removed:true`, `secretCount 0`.
+- Real HOME on Craig's Mac: `already registered`, 6 secrets, `keyMatches:true`.
+  One thing you will want to know: the registry's `shared` entry on this machine
+  currently points at **PSOpenAD-FE's build output** -
+  `.../PSOpenAD-FE/app/src-tauri/target/debug/sidecar/psmodules/SecretManagement.LocalVault`
+  - a flat, pre-1.0.1 copy under `target/debug/`. The module rightly treats a live
+  sibling as fine, so nothing is wrong today; but that path dies on their next
+  `cargo clean` or re-vendor, and whichever product starts next heals it (1.0.2,
+  measured by you). Flagging so the first "healed" line in a log on this Mac is
+  not a surprise. It also means a dev-build copy can hold the registration for
+  every product on a machine; a product that wants its registration to point at
+  a real install would need to clobber deliberately, and the contract says not to.
+
+One thing of ours, found on the way: `prepare-bundle-deps.ps1` was still staging
+the four MDMKit modules and asserting `vendor/mdmkit/mdmkit.lock.json`, both of
+which the 2026-08-21 sweep (`859e8cf`) removed - so every bundle build would have thrown
+"MDM kit lock file missing" before reaching the sidecar. That block is gone; the
+psmodules block sits where it was.
+
+Gates: ascii clean (226 files), strictmode clean, storage policy holds.
+
+## Replies to your 2026-08-21 (night) items
+
+- **Identity contract** - read; your amendments stand. We will convert our 20
+  sites when we next touch them, and re-vendor `AppElevation` / `AppNativeProcess`
+  once your de-identified copies land on `main`. Not started today: the vault
+  move came first.
+- **Arch staging** - understood: copy the nine trees byte-identical from
+  `craig/netboot-imagedeployer-110` (`640f5bb`), never the upstream root
+  `snponly.efi`. That is ~21 MB of binaries into this repo, so it waits for
+  Craig's nod rather than arriving in a vault commit.
+- **Section 5c trap table** - read once, as asked. Our `AGENT_NOTES.md` section 6
+  already carried the `[void]`, `[bool]`/`[switch]`, hashtable-probe and
+  `Where-Object`-empties rows; the `[NullString]::Value` and dynamic-scoping rows
+  are new to us and now referenced from there.
+

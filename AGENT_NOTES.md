@@ -292,12 +292,13 @@ no secret-tool). Craig closed section 6 as **Option B**.
 
 | Piece | Where |
 | --- | --- |
-| Vault module (USM owns) | `sidecar/psmodules/SecretManagement.LocalVault/` - vendored **byte-identical**, 5 files. Do not edit here; fixes go through the handover channel |
+| Vault module | `vendor/psmodules/SecretManagement.LocalVault/1.0.2/` - a **tagged release** of its own repository, github.com/MacsInSpace/SecretManagement.LocalVault, exported with `git archive` (sibling checkout `../SecretManagement.LocalVault` when it has the tag, else a shallow clone). Do not edit here; module bugs go to that repo as issues/PRs, integration findings to the USM handover |
 | API module | `vendor/psmodules/Microsoft.PowerShell.SecretManagement/1.1.2/`, pinned in `vendor/psmodules.lock.json` |
-| Sync + drift check | `scripts/sync-secret-vault-modules.ps1` (USM's copy, verbatim; `-VerifyOnly` for CI) |
+| Sync + drift check | `scripts/sync-secret-vault-modules.ps1` (USM's copy, verbatim; `-VerifyOnly` for CI and at bundle time). Bump = edit the pin, rerun, commit `vendor/psmodules` + lock; all three products move together |
 | Our glue | `sidecar/lib/AppSharedSecretVault.ps1` |
 | Handlers | `sidecar/handlers/Credentials.ps1` - the 7 commands that had none, plus `GetSecretVaultStatus` |
-| Tests | `sidecar/tests/SecretManagementLocalVault.Tests.ps1` (USM's, byte-identical). 24/24 pass on macOS |
+| Bundle | `scripts/prepare-bundle-deps.ps1` verifies the lock and stages both as `modules/<Name>/<ver>/`; the wrapper resolves `modules/` first, then `vendor/psmodules/` |
+| Tests | The module's own Pester suite runs in its repo (CI on Ubuntu, macOS, Windows pwsh 7, Windows PowerShell 5.1). Nothing module-level is carried here |
 
 Names we use, from contract section 3:
 
@@ -598,9 +599,13 @@ this; if you write a new entry point, do it there too.
   `vendor/binaries/pxe-secure-boot-x64/` is README-only and `sidecar/pxe/x86_64-sb/`
   does not exist, so `Sync-AppPxeBootBundledArchTftpTrees` has nothing to stage
   while the default Option 67 (`x86_64-sb/shimx64.efi`) points at that path.
-  The staging code is correct and ported; the **binaries** must be fetched from
-  the `ipxeboot` sibling via `scripts/fetch-pxe-secure-boot.ps1`. Don't read
-  "arch staging ported" as "Secure Boot works".
+  The staging code is correct and ported; the **binaries** are missing. USM's
+  2026-08-21 reply: copy all nine trees byte-identical from USM branch
+  `craig/netboot-imagedeployer-110` commit `640f5bb` (`sidecar/pxe/<arch>/`,
+  ~21 MB, 38 files, plus that commit's `.gitattributes` binary rules). **Never**
+  take the root-level `snponly.efi` from upstream - USM's is byte-patched and the
+  upstream root copy is a symlink to the unpatched one. Waiting on Craig's nod
+  for the 21 MB. Don't read "arch staging ported" as "Secure Boot works".
 - The Secure Boot iPXE chain builds from a **sibling repo**,
   `/Volumes/Data/projects/ipxeboot`. Undeclared build dependency; formalise it.
 - The bundled `snponly.efi` carries a **byte-patched embed** (an upstream WAN
@@ -612,6 +617,17 @@ this; if you write a new entry point, do it there too.
   `artifacts.example.com` - grep for it.
 
 ---
+
+### Two more from USM's contract section 5c (measured by other agents)
+
+- `$null` to a .NET `string` parameter (e.g. `File.Replace($a, $b, $null)`):
+  PowerShell passes `""` and the method rejects it. Use `[NullString]::Value`.
+- A helper that invokes a caller's scriptblock: PowerShell's dynamic, case-insensitive
+  scoping means the body's `$Name` resolves to the helper's own local `$name`.
+  Give such helpers un-generic local names; never "fix" with `GetNewClosure()`
+  (it loses module-private functions).
+
+The full table is `SHARED_SECRET_VAULT_CONTRACT.md` section 5c in the USM repo.
 
 ## 7. Conventions
 

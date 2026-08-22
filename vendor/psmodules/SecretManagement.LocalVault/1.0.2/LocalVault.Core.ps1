@@ -4,10 +4,10 @@
 # exposes Register-LocalVault / Get-LocalVaultInfo) and the extension module
 # (SecretManagement.LocalVault.Extension, which SecretManagement loads on its own
 # and which must therefore be self-contained). Keep everything here free of any
-# product identity - PSOpenAD-FE carries this module into the public PSOpenAD
-# project, so there is no USM, no school, no DE anywhere in it.
+# product identity: this module is published on its own and vendored by several
+# products, none of which should be named here.
 #
-# Design (docs/handover/SHARED_SECRET_VAULT_CONTRACT.md section 7):
+# Design (DESIGN.md in this repository):
 #   * One store per user, shared by every product that registers this module.
 #   * File-based: index.json (names, types, metadata - never secret material) plus
 #     one encrypted blob per secret, so a write never rewrites the whole store and
@@ -24,6 +24,14 @@
 # the non-Windows branch (type literals resolve at run time, so the parse is fine).
 
 Set-StrictMode -Version Latest
+
+# Windows PowerShell 5.1 does not load System.Security.dll by default, and that is
+# where ProtectedData (DPAPI) lives. PowerShell 7 has it already; the call is a
+# no-op there. Measured on the 5.1 CI leg: without this every Set-Secret fails with
+# "Unable to find type [System.Security.Cryptography.ProtectedData]".
+if ($env:OS -eq 'Windows_NT') {
+    Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+}
 
 $script:LocalVaultSchema       = 1
 $script:LocalVaultDirName      = 'SecretManagement.LocalVault'
@@ -50,13 +58,15 @@ function Get-LocalVaultDefaultStoreRoot {
     if (Test-LocalVaultIsWindows) {
         return (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) $script:LocalVaultDirName)
     }
-    $home = [Environment]::GetFolderPath('UserProfile')
-    if ([string]::IsNullOrWhiteSpace($home)) { $home = $env:HOME }
+    # Not the automatic variable HOME (read-only): module scope happens to shadow
+    # it, but dot-sourcing this file at script scope would throw on assignment.
+    $userHome = [Environment]::GetFolderPath('UserProfile')
+    if ([string]::IsNullOrWhiteSpace($userHome)) { $userHome = $env:HOME }
     if ($PSVersionTable.PSVersion.Major -ge 6 -and (Test-Path variable:IsMacOS) -and $IsMacOS) {
-        return (Join-Path $home "Library/Application Support/$($script:LocalVaultDirName)")
+        return (Join-Path $userHome "Library/Application Support/$($script:LocalVaultDirName)")
     }
     $xdg = $env:XDG_DATA_HOME
-    if ([string]::IsNullOrWhiteSpace($xdg)) { $xdg = Join-Path $home '.local/share' }
+    if ([string]::IsNullOrWhiteSpace($xdg)) { $xdg = Join-Path $userHome '.local/share' }
     return (Join-Path $xdg $script:LocalVaultDirName)
 }
 
@@ -74,7 +84,7 @@ function Get-LocalVaultMachineId {
     <#
     .SYNOPSIS
         A stable, non-secret identifier for THIS machine. Binding, not secrecy - see
-        the contract. Read-only, no prompts, no entitlements.
+        DESIGN.md. Read-only, no prompts, no entitlements.
     #>
     if (Test-LocalVaultIsWindows) {
         # Diagnostic only on Windows (DPAPI does the binding). MachineGuid is the
@@ -192,6 +202,10 @@ function Invoke-LocalVaultLocked {
         serialise here; a named mutex works on Windows and on Unix (.NET Core).
     #>
     param([Parameter(Mandatory)][string]$StoreRoot, [Parameter(Mandatory)][scriptblock]$Body)
+    # PSScriptAnalyzer reports the callers' parameters ($Name, $Metadata, ...) as
+    # unused because they are only referenced inside the -Body scriptblock, which
+    # the analyzer cannot see into. False positives; the metadata tests prove the
+    # values arrive. Do not "fix" by removing them.
     # Locals here are deliberately un-generic: the body runs in a child of THIS scope
     # and PowerShell resolves variables dynamically and case-insensitively, so a local
     # called $name would silently shadow the caller's $Name inside the body. (Do not
@@ -296,6 +310,29 @@ function Open-LocalVaultIndex {
 
 # --- keys (non-Windows) -------------------------------------------------------
 
+function Invoke-LocalVaultPbkdf2Sha256 {
+    <#
+    .SYNOPSIS
+        PBKDF2-HMAC-SHA256. The static Rfc2898DeriveBytes.Pbkdf2 exists on .NET 6+
+        only; Windows PowerShell 5.1 (.NET Framework) has the instance form with a
+        HashAlgorithmName from 4.7.2. Same algorithm, same bytes, either way.
+    #>
+    param(
+        [Parameter(Mandatory)][byte[]]$Ikm,
+        [Parameter(Mandatory)][byte[]]$Salt,
+        [Parameter(Mandatory)][int]$Iterations,
+        [Parameter(Mandatory)][int]$Length
+    )
+    $sha256 = [System.Security.Cryptography.HashAlgorithmName]::SHA256
+    $t = [System.Security.Cryptography.Rfc2898DeriveBytes]
+    $static = $t.GetMethod('Pbkdf2', [type[]]@([byte[]], [byte[]], [int], [System.Security.Cryptography.HashAlgorithmName], [int]))
+    if ($static) {
+        return $t::Pbkdf2($Ikm, $Salt, $Iterations, $sha256, $Length)
+    }
+    $kdf = New-Object System.Security.Cryptography.Rfc2898DeriveBytes($Ikm, $Salt, $Iterations, $sha256)
+    try { return $kdf.GetBytes($Length) } finally { $kdf.Dispose() }
+}
+
 function Get-LocalVaultDerivedKek {
     <#
     .SYNOPSIS
@@ -307,8 +344,7 @@ function Get-LocalVaultDerivedKek {
     if (-not $UserId)    { $UserId    = Get-LocalVaultUserId }
     $ikm  = [System.Text.Encoding]::UTF8.GetBytes("$MachineId|$UserId")
     $salt = [System.Text.Encoding]::UTF8.GetBytes($script:LocalVaultKdfSalt)
-    return [System.Security.Cryptography.Rfc2898DeriveBytes]::Pbkdf2(
-        $ikm, $salt, $script:LocalVaultKdfIter, [System.Security.Cryptography.HashAlgorithmName]::SHA256, 32)
+    return Invoke-LocalVaultPbkdf2Sha256 -Ikm $ikm -Salt $salt -Iterations $script:LocalVaultKdfIter -Length 32
 }
 
 function Protect-LocalVaultAesGcm {

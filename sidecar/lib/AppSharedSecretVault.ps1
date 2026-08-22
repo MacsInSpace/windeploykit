@@ -3,19 +3,24 @@
 # docs/handover/SHARED_SECRET_VAULT_CONTRACT.md: one per-user store shared by every
 # product (USM, WinDeployKit, PSOpenAD-FE), the SecretManagement API in front of it,
 # and no OS credential UI behind it. This file is the WinDeployKit glue only: find
-# the vendored API module, import the first-party vault, register it under the
-# contract's single vault name. The vault module itself is product-neutral and is
-# vendored byte-identical from USM at sidecar/psmodules/SecretManagement.LocalVault.
+# the two vendored modules, import them, register the vault under the contract's
+# single vault name. The vault module is product-neutral and lives in its own
+# repository (github.com/MacsInSpace/SecretManagement.LocalVault); every product
+# vendors a tagged release of it, pinned by scripts/sync-secret-vault-modules.ps1.
 #
-# Layout the resolvers expect:
-#   bundle : <ProjectRoot>/modules/Microsoft.PowerShell.SecretManagement/<ver>/
-#   dev    : <ProjectRoot>/vendor/psmodules/Microsoft.PowerShell.SecretManagement/<ver>/
-#   both   : <ProjectRoot>/sidecar/psmodules/SecretManagement.LocalVault/
+# Layout the resolver expects, for BOTH modules (contract section 8):
+#   bundle : <ProjectRoot>/modules/<Name>/<ver>/           (prepare-bundle-deps.ps1)
+#   dev    : <ProjectRoot>/vendor/psmodules/<Name>/<ver>/  (sync-secret-vault-modules.ps1)
 #
 # Startup must NEVER fail on this. If the vault cannot be registered, credential
 # features degrade and the status handler says why. Nothing here prompts, nothing
 # here resets - there is no reset concept in this vault (contract section 4a
 # withdrew the SecretStore bootstrap that had one).
+#
+# Register at EVERY start-up (contract section 8b): SecretManagement's in-process
+# registry cache only refreshes on a file-watcher event, so a running process may
+# never see a sibling product's registration change. Register-LocalVault is
+# idempotent and self-heals a dead registration left by an uninstalled product.
 
 $script:AppSharedSecretVaultName = 'shared'
 $script:AppSharedSecretVaultState = @{ ready = $false; error = $null; info = $null }
@@ -49,24 +54,30 @@ function Get-AppPowerShellModuleManifestPath {
     return $null
 }
 
-function Get-AppSecretManagementManifestPath {
-    param([Parameter(Mandatory)][string]$ProjectRoot)
-    $name = 'Microsoft.PowerShell.SecretManagement'
+function Get-AppVendoredPsModuleManifestPath {
+    <# modules/<Name>/<ver>/ (bundle) first, then vendor/psmodules/<Name>/<ver>/ (dev). #>
+    param(
+        [Parameter(Mandatory)][string]$ProjectRoot,
+        [Parameter(Mandatory)][string]$Name
+    )
     foreach ($root in @(
-        (Join-Path $ProjectRoot "modules/$name"),
-        (Join-Path $ProjectRoot "vendor/psmodules/$name")
+        (Join-Path $ProjectRoot "modules/$Name"),
+        (Join-Path $ProjectRoot "vendor/psmodules/$Name")
     )) {
-        $manifest = Get-AppPowerShellModuleManifestPath -ModuleRoot $root -ModuleName $name
+        $manifest = Get-AppPowerShellModuleManifestPath -ModuleRoot $root -ModuleName $Name
         if ($manifest) { return $manifest }
     }
     return $null
 }
 
+function Get-AppSecretManagementManifestPath {
+    param([Parameter(Mandatory)][string]$ProjectRoot)
+    return Get-AppVendoredPsModuleManifestPath -ProjectRoot $ProjectRoot -Name 'Microsoft.PowerShell.SecretManagement'
+}
+
 function Get-AppLocalVaultManifestPath {
     param([Parameter(Mandatory)][string]$ProjectRoot)
-    $path = Join-Path $ProjectRoot 'sidecar/psmodules/SecretManagement.LocalVault/SecretManagement.LocalVault.psd1'
-    if (Test-Path -LiteralPath $path) { return $path }
-    return $null
+    return Get-AppVendoredPsModuleManifestPath -ProjectRoot $ProjectRoot -Name 'SecretManagement.LocalVault'
 }
 
 function Initialize-AppSharedSecretVault {
@@ -90,7 +101,7 @@ function Initialize-AppSharedSecretVault {
         }
         $lvManifest = Get-AppLocalVaultManifestPath -ProjectRoot $ProjectRoot
         if (-not $lvManifest) {
-            throw 'SecretManagement.LocalVault module missing under sidecar/psmodules.'
+            throw 'SecretManagement.LocalVault is not bundled (modules/) or vendored (vendor/psmodules/). Dev: pwsh ./scripts/sync-secret-vault-modules.ps1'
         }
         if (-not (Get-Module Microsoft.PowerShell.SecretManagement)) {
             Import-Module $smManifest -ErrorAction Stop
@@ -108,9 +119,10 @@ function Initialize-AppSharedSecretVault {
             $script:AppSharedSecretVaultState.error = "vault store at $($info.storeRoot) was created on another machine or by another user (store $($info.storeKeyId), here $($info.thisKeyId)); sign in again to re-create secrets"
             Write-SidecarLog "Secret vault: WARN $($script:AppSharedSecretVaultState.error)"
         } else {
-            $what = if ($info.registered) { 'registered' } else { 'already registered' }
+            $what = if ($info['healed']) { 'registered (healed a dead registration left by another copy)' } elseif ($info.registered) { 'registered' } else { 'already registered' }
             $had = if ($info.exists) { "$($info.secretCount) secret(s)" } else { 'no store yet (created on first write)' }
-            Write-SidecarLog "Secret vault: '$($info.vault)' $what from $lvManifest; $had at $($info.storeRoot)"
+            $from = if ($info.registered) { $lvManifest } else { [string]$info['modulePath'] }
+            Write-SidecarLog "Secret vault: '$($info.vault)' $what from $from; $had at $($info.storeRoot)"
         }
     } catch {
         $msg = $_.Exception.Message
@@ -243,64 +255,25 @@ function Get-AppVaultLocalMachineAdmin {
 }
 
 function Get-AppVaultDeptCredential {
-    <# The DE sign-in. Read-only from here - see Set-AppVaultDeptCredentialIfAbsent. #>
+    <# The DE sign-in (contract section 3: dept/edu001). #>
     return (Get-AppVaultCredential -Name $script:AppVaultNameDeptEdu001)
 }
 
-function Set-AppVaultDeptCredentialIfAbsent {
+function Set-AppVaultDeptCredential {
     <#
     .SYNOPSIS
-        Write dept/edu001 ONLY when USM holds no legacy DeptCredentials.xml.
+        Write dept/edu001 from a sign-in in this product.
     .DESCRIPTION
-        USM's evening note: the legacy file is the source of truth while
-        Set-DeptCreds-era tools exist, and USM refreshes the vault from it. Writing
-        over that would be pointless - USM's copy wins on its next read. But when no
-        file exists, a sign-in here IS adopted and promoted to the file by USM, so a
-        sign-in in this product does reach USM.
+        Contract section 5a (2026-08-21, night): any kit may write dept/edu001 at any
+        time, with no knowledge of USM's paths. USM treats its DeptCredentials.xml as
+        authoritative WHEN PRESENT and refreshes the vault from it on its next read,
+        so this write is either adopted (USM has no file - promoted to the file for
+        every downstream tool) or superseded (the file wins). Neither is harmful, so
+        the old "do not write while the file exists" guard - which failed open on any
+        path it did not know - is gone.
 
-        Returns $true only when we actually wrote.
+        Returns $true when written, $false when the vault is not ready.
     #>
     param([Parameter(Mandatory)][pscredential]$Credential)
-    if (-not (Test-AppSharedSecretVaultReady)) { return $false }
-    if (Test-AppVaultDeptLegacyFilePresent) {
-        Write-SidecarLog "Secret vault: not writing '$script:AppVaultNameDeptEdu001' - USM's legacy file is the source of truth"
-        return $false
-    }
     return (Set-AppVaultSecret -Name $script:AppVaultNameDeptEdu001 -Secret $Credential -Metadata @{ label = 'DE sign-in' })
-}
-
-function Test-AppVaultDeptLegacyFilePresent {
-    <#
-    .SYNOPSIS
-        Does USM's legacy DeptCredentials.xml exist? Existence only - never read it.
-    .DESCRIPTION
-        Mirrors USM sidecar/lib/Credentials.ps1 exactly (branch craig/shared-secret-vault).
-        Getting this wrong fails OPEN: a missed path means we think USM has no file and
-        write dept/edu001 when we must not. Keep it in step with USM's resolver.
-
-          durable, Windows : %LOCALAPPDATA%\DECreds\DeptCredentials.xml
-          durable, else    : $XDG_DATA_HOME/DECreds/DeptCredentials.xml
-                             (defaults to ~/.local/share/DECreds/DeptCredentials.xml)
-          legacy, all      : <temp>/DeptCredentials/DeptCredentials.xml
-                             (the original Set-DeptCreds location; macOS reaps it)
-
-        DECreds is deliberately generic - a shared cache for any DE tool wanting the
-        same EDU001 login, not a USM-private folder.
-    #>
-    if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
-        $base = $env:LOCALAPPDATA
-        if (-not $base) { $base = Join-Path $env:USERPROFILE 'AppData/Local' }
-        $durable = Join-Path $base 'DECreds/DeptCredentials.xml'
-    } else {
-        $base = if ($env:XDG_DATA_HOME) { $env:XDG_DATA_HOME } else { Join-Path $HOME '.local/share' }
-        $durable = Join-Path $base 'DECreds/DeptCredentials.xml'
-    }
-
-    $tempDir = if ($env:TEMP) { $env:TEMP } elseif ($env:TMPDIR) { $env:TMPDIR } else { [System.IO.Path]::GetTempPath() }
-    $legacy = Join-Path $tempDir 'DeptCredentials/DeptCredentials.xml'
-
-    foreach ($p in @($durable, $legacy)) {
-        if ($p -and (Test-Path -LiteralPath $p -PathType Leaf)) { return $true }
-    }
-    return $false
 }

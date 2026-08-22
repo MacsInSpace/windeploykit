@@ -136,82 +136,6 @@ Expected: $destManifest
     Write-Step "Verified $expected DE email signature banners in staged sidecar/templates/email/banners/"
 }
 
-function Assert-AppStagedMdmKits {
-    <#
-    .SYNOPSIS
-        Fail the build when a vendored MDM kit is missing from the staged bundle, or
-        when vendor/mdmkit has drifted from mdmkit.lock.json.
-    .DESCRIPTION
-        Two failure modes this catches, both of which previously shipped silently:
-
-        1. MISSING - a kit absent from vendor/mdmkit was warn-and-skipped, so the
-           bundle shipped with an MDM panel that throws "<Kit> module not found" the
-           first time a tech opens it. Same shape as the 2026-07-23 eduHub field bug
-           (EduHubData.psm1 was never staged, so every installed build threw).
-        2. STALE - vendor/mdmkit was never re-synced after an upstream kit change, so
-           the bundle quietly ships an old module. The lock file records what the last
-           sync produced; if the staged .psd1 disagrees, someone edited or part-synced
-           the vendor tree.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][string]$Staged,
-        [Parameter(Mandatory)][string[]]$Kits
-    )
-
-    $lockPath = Join-Path $RepoRoot 'vendor/mdmkit/mdmkit.lock.json'
-    $locked = @{}
-    if (Test-Path -LiteralPath $lockPath) {
-        $lockRaw = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
-        if ($lockRaw.PSObject.Properties['kits']) {
-            foreach ($prop in $lockRaw.kits.PSObject.Properties) { $locked[$prop.Name] = [string]$prop.Value }
-        }
-    } else {
-        throw @"
-MDM kit lock file missing: $lockPath
-Run: pwsh ./scripts/sync-mdmkit-vendor.ps1
-"@
-    }
-
-    $problems = [System.Collections.Generic.List[string]]::new()
-    foreach ($kit in $Kits) {
-        $manifest = Join-Path $Staged "modules/$kit/$kit.psd1"
-        if (-not (Test-Path -LiteralPath $manifest)) {
-            [void]$problems.Add("$kit - not staged (expected $manifest)")
-            continue
-        }
-        if (-not $locked.ContainsKey($kit)) {
-            [void]$problems.Add("$kit - staged but absent from mdmkit.lock.json")
-            continue
-        }
-        # ModuleVersion + the PSData Prerelease tag together form e.g. '0.6.1-alpha'.
-        $data = Import-PowerShellDataFile -LiteralPath $manifest
-        $version = [string]$data.ModuleVersion
-        $prerelease = ''
-        if ($data.PrivateData -and $data.PrivateData.PSData -and $data.PrivateData.PSData.Prerelease) {
-            $prerelease = [string]$data.PrivateData.PSData.Prerelease
-        }
-        # NOT $staged - PowerShell variables are case-insensitive, so that would
-        # clobber the $Staged parameter (the staging path) for every later kit.
-        $stagedVersion = if ($prerelease) { "$version-$prerelease" } else { $version }
-        if ($stagedVersion -ne $locked[$kit]) {
-            [void]$problems.Add("$kit - staged $stagedVersion but lock says $($locked[$kit]) (re-sync the vendor tree)")
-        }
-    }
-
-    if ($problems.Count -gt 0) {
-        throw @"
-MDM kits failed the staged-bundle check:
-  $($problems -join "`n  ")
-
-Fix: pwsh ./scripts/sync-mdmkit-vendor.ps1   (then commit vendor/mdmkit)
-Shipping without them gives techs an MDM panel that throws on first open.
-"@
-    }
-
-    Write-Step "Verified $($Kits.Count) staged MDM kits match mdmkit.lock.json"
-}
-
 function Stage-AppPxeVendorBinaries {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
@@ -627,25 +551,34 @@ if (Test-Path -LiteralPath $monolith) {
     Remove-Item -LiteralPath $monolith -Force
 }
 
-# MDMKit modules (Jamf Pro / Jamf School / Mosyle / Mosyle Free panels) - committed
-# under vendor/mdmkit via scripts/sync-mdmkit-vendor.ps1. Optional: warn-and-skip when
-# absent so non-MDM builds still work, but a normal checkout always has them.
-$MdmKitVendorRoot = Join-Path $RepoRoot 'vendor/mdmkit'
-$MdmKits = @('JamfProKit', 'JamfSchoolKit', 'MosyleKit', 'MosyleFreeKit')
-foreach ($kit in $MdmKits) {
-    $kitSrc = Join-Path $MdmKitVendorRoot $kit
-    if (-not (Test-Path -LiteralPath (Join-Path $kitSrc "$kit.psd1"))) {
-        # Not fatal here - Assert-AppStagedMdmKits below turns it into a build failure
-        # with the full list, so one run reports every missing kit rather than the first.
-        Write-Step "WARN vendor/mdmkit/$kit missing - MDM panel for $kit will not work in this bundle (run scripts/sync-mdmkit-vendor.ps1)"
-        continue
-    }
-    $kitDest = Join-Path $Staged "modules/$kit"
-    if (Test-Path -LiteralPath $kitDest) { Remove-Item -LiteralPath $kitDest -Recurse -Force }
-    Copy-Item -LiteralPath $kitSrc -Destination $kitDest -Recurse -Force
-    Write-Step "Staging $kit from vendor/mdmkit"
+# Shared secret vault - Microsoft.PowerShell.SecretManagement (the API) and
+# SecretManagement.LocalVault (the vault, a tagged release of its own repository),
+# both vendored under vendor/psmodules by scripts/sync-secret-vault-modules.ps1 and
+# pinned by SHA-256. Staged as modules/<Name>/<Version>/ so PowerShell's
+# versioned-folder discovery finds them on the bundled PSModulePath.
+# Drift from the lockfile fails the build: a tampered or half-synced module must
+# not ship in front of every credential the app holds.
+Write-Step 'Verifying vendor/psmodules against psmodules.lock.json'
+$psmodVerify = Join-Path $RepoRoot 'scripts/sync-secret-vault-modules.ps1'
+& pwsh -NoProfile -File $psmodVerify -VerifyOnly
+if ($LASTEXITCODE -ne 0) {
+    throw "vendor/psmodules drifted from vendor/psmodules.lock.json (see DRIFT lines above). Fix: pwsh ./scripts/sync-secret-vault-modules.ps1  (then commit vendor/psmodules)"
 }
-Assert-AppStagedMdmKits -RepoRoot $RepoRoot -Staged $Staged -Kits $MdmKits
+$PsModulesVendorRoot = Join-Path $RepoRoot 'vendor/psmodules'
+foreach ($modDir in Get-ChildItem -LiteralPath $PsModulesVendorRoot -Directory) {
+    $modDest = Join-Path $Staged "modules/$($modDir.Name)"
+    if (Test-Path -LiteralPath $modDest) { Remove-Item -LiteralPath $modDest -Recurse -Force }
+    Copy-Item -LiteralPath $modDir.FullName -Destination $modDest -Recurse -Force
+    $versions = (Get-ChildItem -LiteralPath $modDest -Directory | ForEach-Object Name) -join ', '
+    Write-Step "Staging $($modDir.Name) ($versions) from vendor/psmodules"
+}
+foreach ($required in @('Microsoft.PowerShell.SecretManagement', 'SecretManagement.LocalVault')) {
+    $stagedManifest = Get-ChildItem -LiteralPath (Join-Path $Staged "modules/$required") -Filter "$required.psd1" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $stagedManifest) {
+        throw "$required did not make it into the staged modules/ (run scripts/sync-secret-vault-modules.ps1 and commit vendor/psmodules)"
+    }
+}
+Write-Step 'Verified SecretManagement + SecretManagement.LocalVault in staged modules/'
 
 $VendorPoshSsh = Ensure-AppVendoredPoshSsh -RepoRoot $RepoRoot
 
