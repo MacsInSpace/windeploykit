@@ -148,14 +148,7 @@ call :find_drivers
 if defined DRIVERDIR (
     call :log "Driver pack: %DRIVERDIR%"
     call :stage_drivers
-    if defined DRIVERSTAGE (
-        for /r "!DRIVERSTAGE!" %%I in (vioscsi.inf viostor.inf) do (
-            if exist "%%~fI" (
-                call :log "drvload %%~nxI (WinPE storage)"
-                drvload "%%~fI" >> "%LOG%" 2>&1
-            )
-        )
-    )
+    if defined DRIVERSTAGE call :load_storage_drivers
 ) else (
     call :log "No driver pack for this machine on the share (Z:\Drivers\%MAKE%\%MODEL%) - continuing without."
 )
@@ -301,12 +294,36 @@ if exist "Z:\Drivers\_default\" (
 )
 goto :eof
 
+:load_storage_drivers
+rem drvload the storage INFs from the staged tree into THIS WinPE so diskpart can
+rem see a VirtIO disk. The virtio-win tree ships w10/w11/2k25 and ARM64 variants
+rem side by side; WinPE here is x64, so only paths under an amd64 folder are used.
+rem Loading the same driver twice is harmless; a wrong one just fails quietly.
+for /r "%DRIVERSTAGE%" %%I in (vioscsi.inf viostor.inf) do (
+    if exist "%%~fI" (
+        set "P=%%~fI"
+        if /i not "!P:\amd64\=!"=="!P!" (
+            call :log "drvload %%~nxI (WinPE storage) from %%~dpI"
+            drvload "%%~fI" >> "%LOG%" 2>&1
+        )
+    )
+)
+goto :eof
+
 :stage_drivers
 rem An INF tree is used in place. An archive is expanded to X:\Drivers: .cab with
 rem expand.exe (always there), anything else with 7z.exe (injected) - without 7z
 rem a .exe/.zip/.7z pack is reported and skipped, never half-applied.
 set "DRIVERSTAGE="
-dir /b /s "%DRIVERDIR%\*.inf" >nul 2>&1 && set "DRIVERSTAGE=%DRIVERDIR%" & goto :eof
+rem Loose INFs (a virtio-win tree dropped straight in, as in Proxmox\vm) are used
+rem in place - no pack needed. `A && B & C` would run C unconditionally, so this
+rem is an if block, not a one-liner.
+dir /b /s "%DRIVERDIR%\*.inf" >nul 2>&1
+if not errorlevel 1 (
+    set "DRIVERSTAGE=%DRIVERDIR%"
+    call :log "INF tree in place (%DRIVERDIR%)"
+    goto :eof
+)
 set "PACK="
 for %%E in (cab exe zip 7z) do (
     if not defined PACK for %%P in ("%DRIVERDIR%\*.%%E") do if not defined PACK set "PACK=%%~fP"

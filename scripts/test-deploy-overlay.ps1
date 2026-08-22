@@ -226,6 +226,14 @@ try {
             # degrades (cab-only packs, local log) rather than errors.
             if ($text -notmatch '(?i)if not defined SEVENZIP') { throw '7z use is not guarded' }
             if ($text -notmatch '(?i)if defined LOGHOST if defined CURL') { throw 'curl use is not guarded' }
+            # cmd precedence: `A && B & C` runs C whether or not A succeeded. One of these
+            # made a driver folder holding only an archive return before it was expanded.
+            foreach ($line in ($text -split "`r`n")) {
+                if ($line -match '&&.*[^&]&\s*goto\s') { throw "precedence trap (A && B & goto): $($line.Trim())" }
+            }
+            # A loose INF tree (Craig's Proxmox\vm) must be used in place and /Recurse-injected.
+            if ($text -notmatch '(?i)INF tree in place') { throw 'loose INF tree is not handled in place' }
+            if ($text -notmatch '(?i)for /r "%DRIVERSTAGE%"') { throw 'drvload must walk the staged tree with a plain %var% root' }
         } finally {
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
         }
