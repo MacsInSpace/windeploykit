@@ -59,6 +59,8 @@ export type SidecarCommand =
   | "GetAria2TrackerCatalog"
   | "GetEvalIsoCatalog"
   | "GetLocalMachineCredential"
+  | "GetTaskSequenceStepLibrary"
+  | "GetTaskSequenceStepFromLibrary"
   | "GetPathFreeSpace"
   | "GetPxeBootFieldIsoStatus"
   | "GetPxeBootImagingClientLog"
@@ -500,7 +502,8 @@ export interface PxeBootTaskSequenceStep {
   /** UI-only stable identity for React list keys (not persisted - the sidecar's
    * step normaliser drops unknown fields on save). */
   _key?: string;
-  type: "reg" | "cmd" | "pwsh" | string;
+  /** pwshEncoded carries a whole script as one step (base64 into -EncodedCommand). */
+  type: "reg" | "cmd" | "pwsh" | "pwshEncoded" | string;
   description: string;
   /** reg only */
   op?: "add" | "delete" | string;
@@ -513,6 +516,49 @@ export interface PxeBootTaskSequenceStep {
 }
 
 /** One Netboot task sequence - generates a first-boot unattend.xml on the share. */
+/** A local account created at first boot, with an optional single auto-logon. */
+export interface PxeBootTaskSequenceLocalAccount {
+  enabled: boolean;
+  name: string;
+  displayName?: string;
+  description?: string;
+  group?: "Administrators" | "Users" | string;
+  passwordSource?: "vault" | "manual" | string;
+  vaultSecret?: string;
+  /** Stored base64 (obfuscation only). Never rendered back into the panel. */
+  password?: string;
+  /** Send a newly typed password here; the sidecar encodes it at rest. */
+  passwordPlain?: string;
+  autoLogon?: boolean;
+}
+
+/** One entry in the first-boot settings library. */
+export interface TaskSequenceLibraryEntry {
+  id: string;
+  name: string;
+  category: string;
+  applies: "client" | "server" | "both" | string;
+  risk: "safe" | "caution" | string;
+  description: string;
+  source: string;
+  stepType: string;
+  parameter?: {
+    name: string;
+    label: string;
+    type: "text" | "choice" | string;
+    default: string;
+    choices?: string[];
+  };
+}
+
+export interface TaskSequenceLibraryLists {
+  version: number;
+  categories: string[];
+  client: TaskSequenceLibraryEntry[];
+  server: TaskSequenceLibraryEntry[];
+  counts: { client: number; server: number; total: number };
+}
+
 export interface PxeBootTaskSequence {
   id: string;
   name: string;
@@ -524,6 +570,8 @@ export interface PxeBootTaskSequence {
   adminGroups?: string[];
   /** Ordered, editable first-boot steps. */
   steps?: PxeBootTaskSequenceStep[];
+  /** Local account created at first boot (optional). */
+  localAccount?: PxeBootTaskSequenceLocalAccount;
 }
 
 export interface PxeBootTaskSequencesPayload {

@@ -136,6 +136,44 @@ Test-Case 'Groups alone (no local account, no token) still produce a valid block
 }
 
 Write-Host ''
+Write-Host 'Saving a sequence:'
+Test-Case 'A typed password is stored base64, and re-saving does not double-encode it' {
+    $seq = [ordered]@{
+        id = 'client-1'; name = 'Client'; kind = 'client'; enabled = $true; fields = [ordered]@{}
+        localAccount = [ordered]@{ enabled = $true; name = 'deployadmin'; group = 'Administrators'; passwordSource = 'manual'; passwordPlain = 'Hunter2!'; autoLogon = $true }
+    }
+    $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq
+    Assert-True ($null -ne $rec.localAccount) 'the local account was dropped on save'
+    Assert-True ([string]$rec.localAccount.password -ne 'Hunter2!') 'the password was stored in clear'
+    $decoded = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([string]$rec.localAccount.password))
+    Assert-True ($decoded -eq 'Hunter2!') "stored value decoded to '$decoded'"
+    # Re-save the record as the panel would (no passwordPlain this time).
+    $again = ConvertTo-AppPxeBootTaskSequenceRecord -Item $rec
+    Assert-True ([string]$again.localAccount.password -eq [string]$rec.localAccount.password) 'the stored password changed on re-save'
+    Assert-True ((Resolve-AppPxeBootTsLocalAccountPassword -Account (Get-AppPxeBootTsLocalAccountConfig -Sequence $again)) -eq 'Hunter2!') 'the password no longer resolves after a re-save'
+}
+Test-Case 'A sequence with no account block saves without inventing one' {
+    $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([ordered]@{ id = 'x'; name = 'x'; kind = 'client'; enabled = $true; fields = [ordered]@{} })
+    Assert-True (-not $rec.Contains('localAccount')) 'an empty local account was invented'
+}
+Test-Case 'A pwshEncoded step survives a save' {
+    # The Server evaluation conversion is one of these; it used to be silently dropped.
+    $seq = [ordered]@{
+        id = 'server-1'; name = 'Server'; kind = 'server'; enabled = $true; fields = [ordered]@{}
+        steps = @([ordered]@{ type = 'pwshEncoded'; description = 'Convert evaluation'; command = 'Write-Host hello' })
+    }
+    $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq
+    Assert-True (@($rec.steps).Count -eq 1) "expected the step to survive, got $(@($rec.steps).Count)"
+    Assert-True ([string]$rec.steps[0].type -eq 'pwshEncoded') "type came back as '$($rec.steps[0].type)'"
+    Assert-True ([string]$rec.steps[0].command -eq 'Write-Host hello') 'the script body was lost'
+}
+Test-Case 'The seeded Server sequence keeps its conversion step through a save' {
+    $server = @(@(Get-AppPxeBootTaskSequenceDefaults) | Where-Object { $_.kind -eq 'server' })[0]
+    $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $server
+    Assert-True (@(@($rec.steps) | Where-Object { [string]$_.type -eq 'pwshEncoded' }).Count -eq 1) 'the evaluation conversion step was dropped on save'
+}
+
+Write-Host ''
 if ($failures -gt 0) {
     Write-Host "task sequence accounts: $failures failure(s)"
     exit 1

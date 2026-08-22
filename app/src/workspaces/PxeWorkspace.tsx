@@ -34,6 +34,8 @@ import type {
   PxeBootTaskSequence,
   PxeBootTaskSequenceStep,
   PxeBootTaskSequencesPayload,
+  TaskSequenceLibraryEntry,
+  TaskSequenceLibraryLists,
   PxeBootWimEntry,
   PxeBootWimLibraryResponse,
   SessionState,
@@ -284,6 +286,21 @@ export function PxeWorkspace({
   // time and reads as permanently stuck (field, 2026-08-22) - especially on a screen with
   // nothing in it yet. The cached data stays on screen and updates silently instead.
 
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const lists = await sidecar.invoke<TaskSequenceLibraryLists>("GetTaskSequenceStepLibrary");
+        if (alive) setStepLibrary(lists);
+      } catch {
+        /* library is a convenience - the manual Reg/Command/PowerShell buttons still work */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const [busy, setBusy] = useState(false);
   const [menuRebuildMessage, setMenuRebuildMessage] = useState<string | null>(null);
   const [httpPort, setHttpPort] = useState("8080");
@@ -319,8 +336,51 @@ export function PxeWorkspace({
   const [imagingLoading, setImagingLoading] = useState(false);
   const [tsExpanded, setTsExpanded] = useState(true);
   const [tsPayload, setTsPayload] = useState<PxeBootTaskSequencesPayload | null>(null);
+  // Static settings catalog, split client/server. Fetched once and cached against its
+  // version - it only changes when the product ships new entries.
+  const [stepLibrary, setStepLibrary] = useState<TaskSequenceLibraryLists | null>(null);
+  // Per-sequence pick in the "add from library" row: { entryId, value }.
+  const [libraryPick, setLibraryPick] = useState<Record<string, { entryId: string; value: string }>>({});
+  const [libraryBusy, setLibraryBusy] = useState(false);
   // Editable working copy - Save publishes the whole set.
   const [tsEdit, setTsEdit] = useState<PxeBootTaskSequence[] | null>(null);
+
+  /** The library list that applies to a sequence: client sequences get the client list. */
+  const libraryFor = useCallback(
+    (kind: string): TaskSequenceLibraryEntry[] =>
+      kind === "server" ? (stepLibrary?.server ?? []) : (stepLibrary?.client ?? []),
+    [stepLibrary],
+  );
+
+  const addStepFromLibrary = useCallback(
+    async (seqId: string, kind: string) => {
+      const pick = libraryPick[seqId];
+      if (!pick?.entryId) return;
+      const entry = libraryFor(kind).find((e) => e.id === pick.entryId);
+      setLibraryBusy(true);
+      try {
+        // The sidecar builds the step: substitution and validation stay server-side.
+        const step = await sidecar.invoke<PxeBootTaskSequenceStep>("GetTaskSequenceStepFromLibrary", {
+          entryId: pick.entryId,
+          value: pick.value ?? "",
+        });
+        setTsEdit((prev) =>
+          (prev ?? []).map((s) =>
+            s.id === seqId
+              ? { ...s, steps: [...(s.steps ?? []), { ...step, _key: `s${tsStepKeyCounter++}` }] }
+              : s,
+          ),
+        );
+        setLibraryPick((prev) => ({ ...prev, [seqId]: { entryId: "", value: "" } }));
+        toast.success("Task sequences", `Added "${entry?.name ?? pick.entryId}" - remember to Save.`);
+      } catch (e) {
+        toast.error("Task sequences", e instanceof Error ? e.message : String(e));
+      } finally {
+        setLibraryBusy(false);
+      }
+    },
+    [libraryFor, libraryPick],
+  );
   const [tsSelectedId, setTsSelectedId] = useState<string | null>(null);
   const [tsSaving, setTsSaving] = useState(false);
   const [tsNewName, setTsNewName] = useState("");
@@ -2554,6 +2614,108 @@ export function PxeWorkspace({
                             </div>
                           ) : null}
                           {selected ? (
+                            (() => {
+                              const account = seq.localAccount ?? {
+                                enabled: false,
+                                name: "localadmin",
+                                displayName: "Local Admin",
+                                group: "Administrators",
+                                passwordSource: "manual",
+                                vaultSecret: "",
+                                autoLogon: false,
+                              };
+                              const patchAccount = (patch: Partial<typeof account>) =>
+                                setTsEdit((prev) =>
+                                  (prev ?? []).map((s) =>
+                                    s.id === seq.id ? { ...s, localAccount: { ...account, ...patch } } : s,
+                                  ),
+                                );
+                              const hasStoredPassword = Boolean(seq.localAccount?.password);
+                              return (
+                                <div className="border-t px-3 py-2" style={{ borderColor: "var(--border)" }}>
+                                  <label className="flex items-center gap-1.5 text-[11px]">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(account.enabled)}
+                                      onChange={(e) => patchAccount({ enabled: e.target.checked })}
+                                    />
+                                    <span className="mono text-[10px] uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                                      Local account
+                                    </span>
+                                    <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                      created at first boot
+                                    </span>
+                                  </label>
+                                  {account.enabled ? (
+                                    <div className="mt-1.5 flex flex-col gap-1.5">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <input
+                                          className="input-box h-[24px] w-[9rem] text-[11px]"
+                                          placeholder="User name"
+                                          value={account.name ?? ""}
+                                          onChange={(e) => patchAccount({ name: e.target.value })}
+                                        />
+                                        <input
+                                          className="input-box h-[24px] w-[10rem] text-[11px]"
+                                          placeholder="Display name"
+                                          value={account.displayName ?? ""}
+                                          onChange={(e) => patchAccount({ displayName: e.target.value })}
+                                        />
+                                        <select
+                                          className="input-box h-[24px] text-[11px]"
+                                          value={account.group ?? "Administrators"}
+                                          onChange={(e) => patchAccount({ group: e.target.value })}
+                                        >
+                                          <option value="Administrators">Administrators</option>
+                                          <option value="Users">Users</option>
+                                        </select>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <select
+                                          className="input-box h-[24px] text-[11px]"
+                                          value={account.passwordSource ?? "manual"}
+                                          onChange={(e) => patchAccount({ passwordSource: e.target.value })}
+                                        >
+                                          <option value="manual">Password: typed here</option>
+                                          <option value="vault">Password: from the vault</option>
+                                        </select>
+                                        {account.passwordSource === "vault" ? (
+                                          <input
+                                            className="input-box h-[24px] min-w-[14rem] text-[11px]"
+                                            placeholder="Vault secret name"
+                                            value={account.vaultSecret ?? ""}
+                                            onChange={(e) => patchAccount({ vaultSecret: e.target.value })}
+                                          />
+                                        ) : (
+                                          <input
+                                            type="password"
+                                            className="input-box h-[24px] min-w-[12rem] text-[11px]"
+                                            placeholder={hasStoredPassword ? "Stored - type to replace" : "Password"}
+                                            value={account.passwordPlain ?? ""}
+                                            onChange={(e) => patchAccount({ passwordPlain: e.target.value })}
+                                          />
+                                        )}
+                                      </div>
+                                      <label className="flex items-center gap-1.5 text-[11px]">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(account.autoLogon)}
+                                          onChange={(e) => patchAccount({ autoLogon: e.target.checked })}
+                                        />
+                                        Sign in as this user once after imaging
+                                      </label>
+                                      <p className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                        {account.passwordSource === "vault"
+                                          ? "Read from the vault when the sequence is published; it never sits in the sequence store."
+                                          : "Stored obfuscated, and written to the unattend with Windows' own base64 scheme - not encryption. Fine where LAPS rotates the account."}
+                                      </p>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })()
+                          ) : null}
+                          {selected ? (
                             <div className="border-t px-3 py-2" style={{ borderColor: "var(--border)" }}>
                               <div className="mb-1.5 flex items-center gap-2">
                                 <span className="mono text-[10px] uppercase tracking-wider" style={{ color: "var(--text3)" }}>
@@ -2595,6 +2757,103 @@ export function PxeWorkspace({
                                   ))}
                                 </span>
                               </div>
+                              {stepLibrary ? (
+                                (() => {
+                                  const pick = libraryPick[seq.id] ?? { entryId: "", value: "" };
+                                  const entries = libraryFor(seq.kind);
+                                  const entry = entries.find((e) => e.id === pick.entryId);
+                                  const categories = Array.from(new Set(entries.map((e) => e.category)));
+                                  return (
+                                    <div className="mb-1.5 flex flex-col gap-1">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                          Add a common setting
+                                        </span>
+                                        <select
+                                          className="input-box h-[24px] max-w-[16rem] text-[11px]"
+                                          value={pick.entryId}
+                                          onChange={(e) =>
+                                            setLibraryPick((prev) => ({
+                                              ...prev,
+                                              [seq.id]: { entryId: e.target.value, value: "" },
+                                            }))
+                                          }
+                                        >
+                                          <option value="">Choose...</option>
+                                          {categories.map((cat) => (
+                                            <optgroup key={cat} label={cat}>
+                                              {entries
+                                                .filter((e) => e.category === cat)
+                                                .map((e) => (
+                                                  <option key={e.id} value={e.id}>
+                                                    {e.name}
+                                                    {e.risk === "caution" ? " (caution)" : ""}
+                                                  </option>
+                                                ))}
+                                            </optgroup>
+                                          ))}
+                                        </select>
+                                        {entry?.parameter ? (
+                                          entry.parameter.type === "choice" ? (
+                                            <select
+                                              className="input-box h-[24px] text-[11px]"
+                                              value={pick.value || entry.parameter.default}
+                                              onChange={(e) =>
+                                                setLibraryPick((prev) => ({
+                                                  ...prev,
+                                                  [seq.id]: { entryId: pick.entryId, value: e.target.value },
+                                                }))
+                                              }
+                                            >
+                                              {(entry.parameter.choices ?? []).map((c) => (
+                                                <option key={c} value={c}>
+                                                  {c}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          ) : (
+                                            <input
+                                              className="input-box h-[24px] min-w-[14rem] text-[11px]"
+                                              placeholder={entry.parameter.label}
+                                              value={pick.value || entry.parameter.default}
+                                              onChange={(e) =>
+                                                setLibraryPick((prev) => ({
+                                                  ...prev,
+                                                  [seq.id]: { entryId: pick.entryId, value: e.target.value },
+                                                }))
+                                              }
+                                            />
+                                          )
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          className="btn px-1.5 py-0 text-[10px]"
+                                          disabled={!pick.entryId || libraryBusy || (seq.steps?.length ?? 0) >= 32}
+                                          onClick={() => void addStepFromLibrary(seq.id, seq.kind)}
+                                        >
+                                          + Add
+                                        </button>
+                                        {entry ? (
+                                          <a
+                                            href={entry.source}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-[10px]"
+                                            style={{ color: "var(--text2)" }}
+                                          >
+                                            docs &gt;
+                                          </a>
+                                        ) : null}
+                                      </div>
+                                      {entry ? (
+                                        <p className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                          {entry.description}
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })()
+                              ) : null}
                               {(seq.steps ?? []).length === 0 ? (
                                 <p className="text-[11px]" style={{ color: "var(--text3)" }}>
                                   None - nothing runs at first boot beyond Windows setup itself.

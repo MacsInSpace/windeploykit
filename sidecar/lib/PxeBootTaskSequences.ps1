@@ -190,9 +190,12 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
     foreach ($stepIn in @(Get-AppPxeBootTsProp -Item $Item -Name 'steps')) {
         if ($null -eq $stepIn) { continue }
         $type = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'type')).Trim().ToLowerInvariant()
-        if ($type -notin @('reg', 'cmd', 'pwsh')) { continue }
+        # pwshEncoded carries a whole script as one step (the Server evaluation
+        # conversion is one). Leaving it off this list silently deleted that step on
+        # the first save - caught 2026-08-22.
+        if ($type -notin @('reg', 'cmd', 'pwsh', 'pwshencoded')) { continue }
         $step = [ordered]@{
-            type        = $type
+            type        = if ($type -eq 'pwshencoded') { 'pwshEncoded' } else { $type }
             description = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'description')).Trim()
         }
         if ($type -eq 'reg') {
@@ -217,8 +220,37 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         if ($gv -and $adminGroups -notcontains $gv) { $adminGroups += $gv }
         if ($adminGroups.Count -ge 8) { break }
     }
+    # Local account. A password typed in the panel arrives in clear and is stored
+    # base64 - obfuscation so the store is not readable over a shoulder, nothing more
+    # (LAPS rotates the account). An already-stored value is left alone, so re-saving
+    # a sequence never double-encodes or wipes the password.
+    $accountIn = Get-AppPxeBootTsProp -Item $Item -Name 'localAccount'
+    $localAccount = $null
+    if ($accountIn) {
+        $accountName = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'name')).Trim()
+        $source = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'passwordSource')).Trim().ToLowerInvariant()
+        if ($source -ne 'vault') { $source = 'manual' }
+        $group = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'group')).Trim()
+        if ($group -notin @('Administrators', 'Users')) { $group = 'Administrators' }
+        $stored = [string](Get-AppPxeBootTsProp -Item $accountIn -Name 'password')
+        $typed = [string](Get-AppPxeBootTsProp -Item $accountIn -Name 'passwordPlain')
+        if (-not [string]::IsNullOrEmpty($typed)) {
+            $stored = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($typed))
+        }
+        $localAccount = [ordered]@{
+            enabled        = [bool](Get-AppPxeBootTsProp -Item $accountIn -Name 'enabled')
+            name           = if ($accountName) { $accountName } else { 'localadmin' }
+            displayName    = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'displayName')).Trim()
+            description    = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'description')).Trim()
+            group          = $group
+            passwordSource = $source
+            vaultSecret    = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'vaultSecret')).Trim()
+            password       = $stored
+            autoLogon      = [bool](Get-AppPxeBootTsProp -Item $accountIn -Name 'autoLogon')
+        }
+    }
     $nameVal = [string](Get-AppPxeBootTsProp -Item $Item -Name 'name')
-    [ordered]@{
+    $record = [ordered]@{
         id          = $id
         name        = if ([string]::IsNullOrWhiteSpace($nameVal)) { $id } else { $nameVal.Trim() }
         kind        = $kind
@@ -227,6 +259,8 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         adminGroups = $adminGroups
         steps       = $steps
     }
+    if ($localAccount) { $record['localAccount'] = $localAccount }
+    $record
 }
 
 function Save-AppPxeBootTaskSequences {
