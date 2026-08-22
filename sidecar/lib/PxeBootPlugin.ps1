@@ -1885,11 +1885,28 @@ function Sync-AppPxeBootFieldIsoDriverStore {
                 if (-not (Test-Path -LiteralPath $hintPath)) {
                     @(
                         "Drop the Win11 x64 OOBD driver pack here (.cab, .exe, .7z, or .zip)."
-                        "FieldIso WinPE extracts with 7z at boot - no repack needed."
+                        "The deploy client expands it at boot (7z) - or drop the INF tree itself, no repack needed."
                         "Or use aria2 Tracker -> OOBD drivers (Acer/Lenovo SCCM catalogs)."
                     ) | Set-Content -LiteralPath $hintPath -Encoding UTF8
                 }
                 $folderCount++
+            }
+        }
+        # A seeded placeholder the seed no longer names (only DROP-ARCHIVE-HERE.txt in
+        # it) goes away, so a renamed seed folder does not leave an empty twin behind -
+        # Proxmox/VirtIO Q35 became Proxmox/vm on 2026-08-23. Anything with real
+        # content is never touched.
+        foreach ($vendorProp in $seed.vendors.PSObject.Properties) {
+            $vendorDir = Join-Path $osRoot ([string]$vendorProp.Name)
+            if (-not (Test-Path -LiteralPath $vendorDir)) { continue }
+            $seededFolders = @($vendorProp.Value.models | ForEach-Object { [string]$_.folder } | Where-Object { $_ })
+            foreach ($modelDir in @(Get-ChildItem -LiteralPath $vendorDir -Directory -ErrorAction SilentlyContinue)) {
+                if ($seededFolders -contains $modelDir.Name) { continue }
+                $contents = @(Get-ChildItem -LiteralPath $modelDir.FullName -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne '.DS_Store' })
+                $placeholderOnly = ($contents.Count -eq 0) -or (($contents.Count -eq 1) -and ($contents[0].Name -eq 'DROP-ARCHIVE-HERE.txt'))
+                if (-not $placeholderOnly) { continue }
+                Remove-Item -LiteralPath $modelDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                Write-SidecarLog "PXE boot: removed empty seeded driver folder '$($vendorProp.Name)/$($modelDir.Name)' (no longer in the seed)"
             }
         }
     }

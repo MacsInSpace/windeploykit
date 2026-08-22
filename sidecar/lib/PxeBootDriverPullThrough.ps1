@@ -318,7 +318,11 @@ function Write-AppPxeBootDriverAliasMap {
     $installed = [System.Collections.Generic.List[string]]::new()
     foreach ($vendorDir in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) {
         foreach ($modelDir in @(Get-ChildItem -LiteralPath $vendorDir.FullName -Directory -ErrorAction SilentlyContinue)) {
-            if (Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $modelDir.FullName) {
+            # An archive OR an INF tree counts as installed: ImageDeployer and the deploy
+            # client both use an unpacked tree in place (Proxmox/vm is one), and a
+            # folder the alias map does not list is a folder no alias can reach.
+            $hasInfTree = [bool](Get-ChildItem -LiteralPath $modelDir.FullName -Recurse -Filter '*.inf' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if ($hasInfTree -or (Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $modelDir.FullName)) {
                 [void]$installed.Add("$($vendorDir.Name)|$($modelDir.Name)")
             }
         }
