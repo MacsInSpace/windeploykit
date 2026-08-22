@@ -146,6 +146,62 @@ Test-Case 'A future release is carried as a probe row' {
 }
 
 Write-Host ''
+Write-Host 'Download all (sequential queue):'
+# Stubs from here down - these override the real catalog/download rail on purpose, so
+# keep this section last.
+$script:fakeRows = @(
+    [ordered]@{ id = 'win11'; productName = 'Windows 11 Enterprise'; edition = 'Standard'; url = 'https://example.invalid/1'; fileName = 'a.iso'; sizeBytes = 7GB; downloaded = $false }
+    [ordered]@{ id = 'srv2025'; productName = 'Windows Server 2025'; edition = 'Standard'; url = 'https://example.invalid/2'; fileName = 'b.iso'; sizeBytes = 8GB; downloaded = $false }
+    [ordered]@{ id = 'srv2022'; productName = 'Windows Server 2022'; edition = 'Standard'; url = 'https://example.invalid/3'; fileName = 'c.iso'; sizeBytes = 5GB; downloaded = $true }
+)
+function Get-AppEvalIsoCatalog { [ordered]@{ entries = @($script:fakeRows); cached = $true } }
+$script:fakeActive = @{}
+$script:fakeStarted = [System.Collections.Generic.List[string]]::new()
+function Test-AppAria2DirectDownloadActive { param([string]$Key) [bool]$script:fakeActive[$Key] }
+function Add-AppAria2DirectHttpDownload {
+    param([string[]]$Uris, [string]$AssetKind = 'auto', [string]$ModelAlias, [string]$Vendor, [string]$Folder,
+        [string]$FileNameHint, [int]$TimeoutSec = 7200, [string]$ProgressKey, [string]$ExpectedHash, [string]$ExpectedHashAlgorithm)
+    [void]$script:fakeStarted.Add($ProgressKey)
+    $script:fakeActive[$ProgressKey] = $true
+    @{ accepted = $true; key = $ProgressKey }
+}
+
+Test-Case 'Download all starts one and queues the rest, skipping what is present' {
+    Clear-AppEvalIsoPendingQueue
+    $script:fakeStarted.Clear()
+    $script:fakeActive = @{}
+    $result = Start-AppEvalIsoDownloadAll
+    Assert-True ($result.started -eq 1) "expected 1 started, got $($result.started)"
+    Assert-True ($result.queued -eq 1) "expected 1 queued, got $($result.queued)"
+    Assert-True ($result.skipped -eq 1) "expected the downloaded row to be skipped, got $($result.skipped)"
+    Assert-True ($script:fakeStarted.Count -eq 1) 'more than one download was started at once'
+    Assert-True ($script:fakeStarted[0] -eq 'eval|win11') "started '$($script:fakeStarted[0])'"
+}
+
+Test-Case 'A tick while a download runs does not start another' {
+    Sync-AppEvalIsoDownloadQueue
+    Assert-True ($script:fakeStarted.Count -eq 1) "a second download started while one was active ($($script:fakeStarted -join ', '))"
+}
+
+Test-Case 'The next ISO starts once the running one finishes' {
+    $script:fakeActive['eval|win11'] = $false
+    Sync-AppEvalIsoDownloadQueue
+    Assert-True ($script:fakeStarted.Count -eq 2) "expected 2 started, got $($script:fakeStarted.Count)"
+    Assert-True ($script:fakeStarted[1] -eq 'eval|srv2025') "started '$($script:fakeStarted[1])'"
+    Assert-True ((@(Get-AppEvalIsoPendingQueue)).Count -eq 0) 'queue should be empty'
+    Assert-True ($script:fakeStarted -notcontains 'eval|srv2022') 'an already-downloaded ISO was queued'
+}
+
+Test-Case 'Download all is a no-op when every ISO is already in the store' {
+    foreach ($row in $script:fakeRows) { $row['downloaded'] = $true }
+    $script:fakeStarted.Clear()
+    $result = Start-AppEvalIsoDownloadAll
+    Assert-True ($result.started -eq 0) "expected 0 started, got $($result.started)"
+    Assert-True ($script:fakeStarted.Count -eq 0) 'a download was started with nothing to do'
+    Assert-True ([string]$result.message -match 'already') 'expected an explanatory message'
+}
+
+Write-Host ''
 if ($failures -gt 0) {
     Write-Host "eval ISO catalog: $failures failure(s)"
     exit 1

@@ -412,6 +412,13 @@ function Handle-RefreshEvalIsoCatalog {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-StartEvalIsoDownloadAll {
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $data = Start-AppEvalIsoDownloadAll
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
 function Handle-StartEvalIsoDownload {
     param([int]$Id, $Params)
     Set-AppImageLibraryRuntimeRootFromParams -Params $Params

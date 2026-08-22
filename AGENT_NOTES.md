@@ -955,3 +955,13 @@ i.e. Microsoft's anti-bot gate. Windows 10 22H2 sits behind the same wall. So:
 Do not re-attempt the consumer connector flow without new evidence; it is bot-gated by
 design and would be a second fragile path to maintain (Craig's call).
 
+### Download all (2026-08-22)
+
+One button, and it is **sequential on purpose**: six evaluation ISOs is ~35 GB, and six
+concurrent multi-GB streams on a school link finish nothing. `Start-AppEvalIsoDownloadAll`
+starts the first and parks the rest in `$script:AppEvalIsoPendingQueue`;
+`Sync-AppEvalIsoDownloadQueue` on the housekeeping tick starts the next only when no
+`eval|*` download is active, re-checking the store each time (a row someone fetched by
+hand in the meantime is skipped). Rows already in the store never queue. The button shows
+the count and the total bytes, so nobody starts 35 GB by accident.
+

@@ -103,6 +103,7 @@ export type SidecarCommand =
   | "SetSiteProfile"
   | "StartAria2Daemon"
   | "StartEvalIsoDownload"
+  | "StartEvalIsoDownloadAll"
   | "StartPxeBootServices"
   | "StopAria2Daemon"
   | "StopPxeBootServices"
@@ -755,6 +756,15 @@ export interface EvalIsoCatalogResponse {
   stale: boolean;
   refreshing: boolean;
   isoDir: string;
+}
+
+export interface EvalIsoDownloadAllResponse {
+  accepted: boolean;
+  started: number;
+  queued: number;
+  totalBytes?: number;
+  skipped?: number;
+  message?: string;
 }
 
 export interface EvalIsoRefreshResponse {

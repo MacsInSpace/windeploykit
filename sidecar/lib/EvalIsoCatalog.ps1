@@ -570,6 +570,74 @@ function Start-AppEvalIsoCatalogRefreshIfDue {
     $null = Start-AppEvalIsoCatalogRefreshJob -Automatic
 }
 
+$script:AppEvalIsoPendingQueue = [System.Collections.Generic.List[string]]::new()
+
+function Get-AppEvalIsoPendingQueue {
+    @($script:AppEvalIsoPendingQueue)
+}
+
+function Clear-AppEvalIsoPendingQueue {
+    $script:AppEvalIsoPendingQueue.Clear()
+}
+
+function Start-AppEvalIsoDownloadAll {
+    <#
+    .SYNOPSIS
+        Queue every offered ISO that is not already in the store, ONE AT A TIME.
+    .NOTES
+        Deliberately sequential: six evaluation ISOs is ~35 GB, and six concurrent
+        multi-GB streams on a school link means none of them finish. The first one
+        starts now; Sync-AppEvalIsoDownloadQueue starts the next as each finishes.
+    #>
+    $catalog = Get-AppEvalIsoCatalog
+    $wanted = @($catalog.entries | Where-Object {
+            -not [bool]$_['downloaded'] -and -not [string]::IsNullOrWhiteSpace([string]$_['url'])
+        })
+    if (@($wanted).Count -eq 0) {
+        return [ordered]@{ accepted = $true; started = 0; queued = 0; skipped = @($catalog.entries).Count; message = 'every offered ISO is already in the store' }
+    }
+    $script:AppEvalIsoPendingQueue.Clear()
+    $first = $null
+    foreach ($row in $wanted) {
+        $id = [string]$row['id']
+        if (-not $first) { $first = $id; continue }
+        [void]$script:AppEvalIsoPendingQueue.Add($id)
+    }
+    $totalBytes = ($wanted | ForEach-Object { [long]$_['sizeBytes'] } | Measure-Object -Sum).Sum
+    Write-SidecarLog "eval ISO: download all - $(@($wanted).Count) ISO(s), $([math]::Round($totalBytes / 1GB, 1)) GB, one at a time"
+    $null = Start-AppEvalIsoDownload -Id $first
+    return [ordered]@{
+        accepted   = $true
+        started    = 1
+        queued     = $script:AppEvalIsoPendingQueue.Count
+        totalBytes = [long]$totalBytes
+        skipped    = @($catalog.entries).Count - @($wanted).Count
+    }
+}
+
+function Sync-AppEvalIsoDownloadQueue {
+    # Housekeeping tick: start the next queued ISO once no eval download is running.
+    if ($script:AppEvalIsoPendingQueue.Count -eq 0) { return }
+    if (-not (Get-Command Test-AppAria2DirectDownloadActive -ErrorAction SilentlyContinue)) { return }
+    $catalog = Get-AppEvalIsoCatalog
+    foreach ($row in @($catalog.entries)) {
+        if (Test-AppAria2DirectDownloadActive -Key ("eval|$([string]$row['id'])")) { return }
+    }
+    $next = $script:AppEvalIsoPendingQueue[0]
+    $script:AppEvalIsoPendingQueue.RemoveAt(0)
+    # Someone may have fetched it by hand in the meantime.
+    $row = @($catalog.entries | Where-Object { [string]$_['id'] -eq $next })[0]
+    if ($row -and [bool]$row['downloaded']) {
+        Write-SidecarLog "eval ISO: $next is already in the store - skipping the rest of its turn"
+        return
+    }
+    try {
+        $null = Start-AppEvalIsoDownload -Id $next
+    } catch {
+        Write-SidecarLog "eval ISO: queued download failed to start ($next) - $($_.Exception.Message)"
+    }
+}
+
 function Start-AppEvalIsoDownload {
     <#
     .SYNOPSIS

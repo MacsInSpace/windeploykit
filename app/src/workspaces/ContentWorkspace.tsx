@@ -26,6 +26,7 @@ import type {
   Aria2TrackerOemIsoRow,
   Aria2TrackerTorrentRow,
   EvalIsoCatalogResponse,
+  EvalIsoDownloadAllResponse,
   EvalIsoEntry,
   EvalIsoRefreshResponse,
   VendorSccmCatalogRefreshResponse,
@@ -317,6 +318,41 @@ export function ContentWorkspace({
     },
     [],
   );
+
+  const downloadAllEvalIso = useCallback(async () => {
+    const pending = (evalIso?.entries ?? []).filter((r) => !r.downloaded && r.url);
+    if (pending.length === 0) return;
+    setEvalIsoBusy(true);
+    try {
+      // Sequential on the sidecar side - six multi-GB streams at once finish nothing.
+      for (const row of pending) {
+        driverLabelsRef.current[`eval|${row.id}`] =
+          `${row.productName}${row.edition === "LTSC" ? " LTSC" : ""}`;
+      }
+      setDriverDownloads((prev) => ({
+        ...prev,
+        [`eval|${pending[0].id}`]: { bytesDone: 0, totalBytes: 0 },
+      }));
+      const res = await sidecar.invoke<EvalIsoDownloadAllResponse>(
+        "StartEvalIsoDownloadAll",
+        await aria2SidecarParams(),
+      );
+      if (res?.message) {
+        toast.info("Windows media", res.message);
+      } else {
+        toast.info(
+          "Windows media",
+          `Downloading ${(res?.started ?? 0) + (res?.queued ?? 0)} ISO(s) one at a time${
+            res?.totalBytes ? ` (${formatBytes(res.totalBytes)})` : ""
+          }.`,
+        );
+      }
+    } catch (e) {
+      toast.error("Windows media", e instanceof Error ? e.message : String(e));
+    } finally {
+      setEvalIsoBusy(false);
+    }
+  }, [evalIso]);
 
   const refreshDownloads = useCallback(async () => {
     try {
@@ -1133,6 +1169,16 @@ export function ContentWorkspace({
     return evalIso.stale ? `checked ${label} (stale)` : `checked ${label}`;
   }, [evalIso]);
 
+  // What "Download all" would fetch: everything offered that is not already in the store.
+  const evalIsoPending = useMemo(() => {
+    const rows = (evalIso?.entries ?? []).filter((r) => !r.downloaded && r.url);
+    return {
+      count: rows.length,
+      bytes: rows.reduce((sum, r) => sum + (r.sizeBytes || 0), 0),
+      names: rows.map((r) => `${r.productName}${r.edition === "LTSC" ? " LTSC" : ""}`).join(", "),
+    };
+  }, [evalIso]);
+
   // Releases that are retired or not published yet: a one-line footnote, not table rows.
   const evalIsoNotes = useMemo(() => {
     const products = evalIso?.products ?? [];
@@ -1683,14 +1729,27 @@ export function ContentWorkspace({
                   <span className="text-[10px]" style={{ color: "var(--text3)" }}>
                     {evalIsoStatusText}
                   </span>
-                  <button
-                    type="button"
-                    className="btn ml-auto py-0.5 text-[10px]"
-                    disabled={evalIsoBusy || (evalIso?.refreshing ?? false)}
-                    onClick={() => void refreshEvalIso()}
-                  >
-                    {evalIsoBusy || evalIso?.refreshing ? "Checking..." : "Check for updates"}
-                  </button>
+                  <span className="ml-auto flex items-center gap-2">
+                    {evalIsoPending.count > 0 && (
+                      <button
+                        type="button"
+                        className="btn py-0.5 text-[10px]"
+                        disabled={evalIsoBusy}
+                        title={`Downloads every ISO not already in the store, one at a time: ${evalIsoPending.names}`}
+                        onClick={() => void downloadAllEvalIso()}
+                      >
+                        Download all ({evalIsoPending.count} - {formatBytes(evalIsoPending.bytes)})
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn py-0.5 text-[10px]"
+                      disabled={evalIsoBusy || (evalIso?.refreshing ?? false)}
+                      onClick={() => void refreshEvalIso()}
+                    >
+                      {evalIsoBusy || evalIso?.refreshing ? "Checking..." : "Check for updates"}
+                    </button>
+                  </span>
                 </div>
                 {(evalIso?.entries?.length ?? 0) > 0 ? (
                   <DataTable columns={evalIsoColumns} rows={evalIso?.entries ?? []} rowKey={(r) => r.id} />
