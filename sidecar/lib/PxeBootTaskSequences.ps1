@@ -559,14 +559,22 @@ function Get-AppPxeBootTsIntlSpecialize {
 function Get-AppPxeBootTsShellSpecialize {
     # ProductKey lives HERE: the ADK documents Shell-Setup ProductKey for the
     # specialize pass; in oobeSystem it is ignored (moved 2026-08-20, Craig's call).
+    # Emitted ONLY when a key was actually chosen. An empty key emits no element -
+    # a GVLK that does not match the image build makes Windows Setup reject the whole
+    # answer file at specialize ("the answer file is invalid"), and it is exactly wrong
+    # on an evaluation image, where the eval-conversion step does the licensing with a
+    # build-matched key from SetupComplete (Craig, 2026-08-23: Server 2022 GVLK landed
+    # on a Server 2025 eval image). WDK does not KMS-activate anyway.
     param(
         [Parameter(Mandatory)][string]$ComputerName,
-        [Parameter(Mandatory)][string]$ProductKey
+        [AllowEmptyString()][string]$ProductKey
     )
+    $productKeyLine = if (-not [string]::IsNullOrWhiteSpace($ProductKey)) {
+        "`n			<ProductKey>$(ConvertTo-AppPxeBootTsXmlEscaped $ProductKey)</ProductKey>"
+    } else { '' }
     @"
 		<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-			<ComputerName>$ComputerName</ComputerName>
-			<ProductKey>$(ConvertTo-AppPxeBootTsXmlEscaped $ProductKey)</ProductKey>
+			<ComputerName>$ComputerName</ComputerName>$productKeyLine
 			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsOrgName))</RegisteredOrganization>
 			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsOrgName))</RegisteredOwner>
 			<TimeZone>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsTimeZone))</TimeZone>
@@ -914,7 +922,10 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     $staticIp = ((& $get 'network' 'dhcp') -eq 'static')
     $joinDomainName = & $get 'joinDomain' ''
     $joining = -not [string]::IsNullOrWhiteSpace($joinDomainName)
-    $productKey = & $get 'productKey' (Get-AppPxeBootTsProductKeyDefault -Role $role)
+    # Empty default, NOT the role GVLK: an unrequested build-mismatched key breaks the
+    # unattend, and licensing is the eval-conversion step's job. A key the user picks
+    # from the dropdown is still honoured.
+    $productKey = & $get 'productKey' ''
 
     # --- Static-IP section -------------------------------------------------------
     $dnsComponent = ''
