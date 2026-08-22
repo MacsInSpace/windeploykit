@@ -449,9 +449,7 @@ function Handle-ListPxeBootInstallImages {
     $refresh = [bool](Get-AppSidecarParam -Params $Params -Name 'refresh')
     $sourceId = ([string](Get-AppSidecarParam -Params $Params -Name 'sourceId')).Trim()
     $only = if ($sourceId) { @($sourceId) } else { $null }
-    # The catalog emits ONE array object (, $entries) so an empty library stays an
-    # empty array over IPC. @(...) around the call would nest it one level deeper.
-    $entries = Get-AppPxeBootInstallImageCatalog -Read:($refresh -or [bool]$sourceId) -OnlySourceIds $only
+    $entries = @(Get-AppPxeBootInstallImageCatalog -Read:($refresh -or [bool]$sourceId) -OnlySourceIds $only)
     $unread = @($entries | Where-Object { -not [bool]$_.imagesKnown })
     Write-SidecarResponse -Id $Id -Data @{
         images = @($entries)

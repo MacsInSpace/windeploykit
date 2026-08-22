@@ -58,7 +58,7 @@ function Get-AppPxeBootTaskSequenceDefaults {
     $defaults = @(
         [ordered]@{
             id      = 'client-domain'
-            name    = 'Client - domain join'
+            name    = 'Client'
             kind    = 'client'
             enabled = $true
             fields  = [ordered]@{
@@ -89,7 +89,7 @@ function Get-AppPxeBootTaskSequenceDefaults {
         }
         [ordered]@{
             id      = 'server-standard'
-            name    = 'Server - static IP + domain'
+            name    = 'Server'
             kind    = 'server'
             enabled = $false
             fields  = [ordered]@{
@@ -140,6 +140,15 @@ function Get-AppPxeBootTaskSequenceDefaultId {
         $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
         return ([string](Get-AppPxeBootTsProp -Item $raw -Name 'defaultSequenceId')).Trim()
     } catch { return '' }
+}
+
+$script:AppPxeBootTaskSequenceRenames = @{
+    # Craig, 2026-08-23: "The Task Sequence names should be just Server and Client.
+    # Keep it simple." Changing the seed alone would leave the old names in every
+    # store that already saved them, so the two seeded names heal on read. A name the
+    # user has since edited is left exactly as they typed it.
+    'Client - domain join'         = 'Client'
+    'Server - static IP + domain'  = 'Server'
 }
 
 function Read-AppPxeBootTaskSequences {
@@ -275,6 +284,11 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         }
     }
     $nameVal = [string](Get-AppPxeBootTsProp -Item $Item -Name 'name')
+    # Heal the two long seeded names on read (see $script:AppPxeBootTaskSequenceRenames).
+    $trimmedName = $nameVal.Trim()
+    if ($script:AppPxeBootTaskSequenceRenames.ContainsKey($trimmedName)) {
+        $nameVal = [string]$script:AppPxeBootTaskSequenceRenames[$trimmedName]
+    }
     $record = [ordered]@{
         id          = $id
         name        = if ([string]::IsNullOrWhiteSpace($nameVal)) { $id } else { $nameVal.Trim() }
@@ -1035,10 +1049,7 @@ function Sync-AppPxeBootTaskSequenceStore {
     $lanIp = ''
     try {
         if (Get-Command Get-AppPxeBootInstallImageCatalog -ErrorAction SilentlyContinue) {
-            # Assign, then wrap: the catalog emits one array object, so @(call) would
-            # nest it and every lookup below would miss.
-            $catalogRaw = Get-AppPxeBootInstallImageCatalog
-            $catalog = @($catalogRaw)
+            $catalog = @(Get-AppPxeBootInstallImageCatalog)
             $cfg = Read-AppPxeBootConfig
             $httpPort = [int]$cfg.httpPort
             $lanIp = [string](Get-AppPxeBootLanIp)
@@ -1225,8 +1236,7 @@ function Get-AppPxeBootTaskSequencesPayload {
     $installImages = @()
     try {
         if (Get-Command Get-AppPxeBootInstallImageCatalog -ErrorAction SilentlyContinue) {
-            $catalogPayload = Get-AppPxeBootInstallImageCatalog
-            $installImages = @($catalogPayload)
+            $installImages = @(Get-AppPxeBootInstallImageCatalog)
         }
     } catch {
         Write-SidecarLogVerbose "PXE boot: install image catalog unavailable - $($_.Exception.Message)"

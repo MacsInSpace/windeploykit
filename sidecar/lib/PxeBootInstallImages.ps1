@@ -17,6 +17,13 @@
 # An ISO that is already attached (Netboot's mount-and-serve) is borrowed, never
 # re-attached - macOS refuses a second attach with "Resource busy".
 
+# Return shapes, because the difference caused three bugs in one day:
+#   * the two functions callers reach for - Get-AppPxeBootInstallImageSources and
+#     Get-AppPxeBootInstallImageCatalog - emit their entries plainly, so `@(call)`
+#     does the obvious thing and an empty library is an empty array.
+#   * the image readers below emit ONE array object (`, $images`) because they must
+#     distinguish "read it, no images" from "not read yet" ($null). Assign them to a
+#     variable first; `@(call)` on those nests the array one level deeper.
 $script:AppPxeBootInstallImageCacheVersion = 1
 
 function Get-AppPxeBootInstallImageCachePath {
@@ -148,7 +155,8 @@ function Get-AppPxeBootInstallImageSources {
             sourcePath = $wim.FullName
         }
     }
-    , $sources
+    # Plain output: callers write @(Get-AppPxeBootInstallImageSources).
+    $sources
 }
 
 function Read-AppPxeBootInstallImageCache {
@@ -284,7 +292,8 @@ function Get-AppPxeBootInstallImageCatalog {
             Write-SidecarLogVerbose "PXE boot: install image cache write failed - $($_.Exception.Message)"
         }
     }
-    , $entries
+    # Plain output, same as the sources list: @(Get-AppPxeBootInstallImageCatalog).
+    $entries
 }
 
 function Get-AppPxeBootInstallImageLabel {
