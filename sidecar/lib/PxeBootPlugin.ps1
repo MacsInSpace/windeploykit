@@ -8097,6 +8097,11 @@ function Get-AppPxeBootImageLibraryShareStatus {
             if ($tccBase) {
                 $status.tccBlocked = $true
                 $status.guidance = "macOS protects '$tccBase' (TCC) - smbd cannot serve $name from here, so WinPE will fail with 'network name not found'. Move the ISO & driver root out of Downloads/Desktop/Documents (e.g. ~/Public/$(Get-AppProductDisplayName)) in Settings -> Downloads, then Start Imaging Services again."
+            } elseif (-not $status.active -and $status.enabled) {
+                # Ticked but not published: the share was torn down (services stopped, or a
+                # reboot) and nothing has re-created it. Say so - the old copy told the tech
+                # to tick a box that is already ticked.
+                $status.guidance = "$name is enabled but not published right now, so WinPE will fail with 'network path not found'. Start Imaging Services (or un-tick and re-tick this box) to re-create it - you will be asked for your administrator password."
             } elseif (-not $status.active) {
                 $status.guidance = "Tick this box and Start Imaging Services to auto-create $name (read-only, hidden) and a throwaway SMB user. ImageDeployer/WinPE then mounts $($status.unc) as WORKGROUP\<user>."
             }
@@ -8217,7 +8222,7 @@ function Start-AppPxeBootServices {
         # Elevation is needed for macOS TFTP (dnsmasq) and for the macOS Deploy$ SMB
         # auto-create. Prefetch once up front so any prompt (vault-less session only)
         # happens at the start rather than mid-sequence at SMB-ensure time.
-        $needsAdmin = $startTftp -or ($startHttp -and $cfg.smbShareEnabled -and -not $Minimal)
+        $needsAdmin = $startTftp -or (($startHttp -or $startTftp) -and $cfg.smbShareEnabled -and -not $Minimal)
         if ($IsMacOS -and $needsAdmin -and (Get-Command Start-AppMacOsAdminCredentialPrefetch -ErrorAction SilentlyContinue)) {
             $adminPrefetch = Start-AppMacOsAdminCredentialPrefetch -Purpose 'pxe'
         }
@@ -8290,7 +8295,12 @@ function Start-AppPxeBootServices {
     # to remember a separate tick). The only hard blocker is a TCC-protected root on
     # macOS - smbd can't serve it - so skip + surface guidance there instead of creating
     # a dead share. Otherwise enable it (persist the tick) and ensure the share.
-    if ($startHttp) {
+    #
+    # Gated on ANY service start, not just HTTP: a full stop tears the share down, so a
+    # later TFTP-only start (HTTP already serving from an earlier app session) used to
+    # leave Deploy$ unpublished while the panel still showed it ticked - WinPE then fails
+    # with "The network path was not found" (field, 2026-08-22).
+    if ($startHttp -or $startTftp) {
         try {
             $shareStatus = Get-AppPxeBootImageLibraryShareStatus
             if ($Minimal) {

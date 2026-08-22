@@ -858,4 +858,8 @@ Mirrored from USM the same night (converged libs, ASCII-clean, all three gates g
   last-seen and keeps the previous last line, so a client parked at its deployment window stays
   visible and the driver pull-through can start fetching early. USM's ImageDeployer sends one
   every 60 s; any client this repo bakes should do the same.
+- Also mirrored: the Deploy$ share is now published on ANY imaging-services start (HTTP or TFTP).
+  It used to be ensured only in the HTTP branch, so a TFTP-only start after a stop left the share
+  torn down while the panel still showed it ticked - WinPE then fails with "network path not
+  found". Panel guidance for "ticked but not published" rewritten to match.
 
