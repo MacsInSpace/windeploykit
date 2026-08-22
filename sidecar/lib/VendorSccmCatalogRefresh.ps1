@@ -154,9 +154,14 @@ try {
 '@
 
 function Start-AppVendorSccmCatalogRefreshJob {
-    param([string[]]$Vendors = @())
+    param(
+        [string[]]$Vendors = @(),
+        # Started by the two-week check, not by the technician: the completion event carries
+        # automatic = true so the panel reloads quietly (no toasts, no Acer browser window).
+        [switch]$Automatic
+    )
     if ($script:AppVendorSccmCatalogRefreshJob) {
-        return @{ accepted = $true; background = $true; alreadyRunning = $true }
+        return @{ accepted = $true; background = $true; alreadyRunning = $true; automatic = [bool]$script:AppVendorSccmCatalogRefreshJob.automatic }
     }
     $stamp = [Guid]::NewGuid().ToString('N')
     $runnerPath = Join-Path ([IO.Path]::GetTempPath()) "$(Get-AppProductSlug)-catalog-refresh-$stamp.ps1"
@@ -171,9 +176,10 @@ function Start-AppVendorSccmCatalogRefreshJob {
         resultPath = $resultPath
         runnerPath = $runnerPath
         startedAt  = Get-Date
+        automatic  = [bool]$Automatic
     }
-    Write-SidecarLog 'vendor catalogs: background refresh started (child pwsh)'
-    @{ accepted = $true; background = $true }
+    Write-SidecarLog "vendor catalogs: background refresh started (child pwsh$(if ($Automatic) { ', automatic two-week check' }))"
+    @{ accepted = $true; background = $true; automatic = [bool]$Automatic }
 }
 
 function Sync-AppVendorSccmCatalogRefreshJob {
@@ -201,10 +207,11 @@ function Sync-AppVendorSccmCatalogRefreshJob {
     Remove-Item -LiteralPath $job.runnerPath -Force -ErrorAction SilentlyContinue
     if (-not $payload) {
         Write-SidecarLog 'vendor catalogs: background refresh ended with no result'
-        Write-SidecarEvent -EventName 'vendor-catalog-refresh' -Data @{ error = 'refresh process ended without a result (killed or crashed)' }
+        Write-SidecarEvent -EventName 'vendor-catalog-refresh' -Data @{ error = 'refresh process ended without a result (killed or crashed)'; automatic = [bool]$job.automatic }
         return
     }
-    Write-SidecarLog 'vendor catalogs: background refresh finished'
+    Write-SidecarLog "vendor catalogs: background refresh finished$(if ($job.automatic) { ' (automatic)' })"
+    $payload | Add-Member -NotePropertyName automatic -NotePropertyValue ([bool]$job.automatic) -Force
     Write-SidecarEvent -EventName 'vendor-catalog-refresh' -Data $payload
 }
 
@@ -280,4 +287,123 @@ function Set-AppAcerSccmCatalogFromHarvest {
         modelCount = $entries.Count
         summary    = (Get-AppAcerSccmCatalogSummary -Urls @($clean))
     }
+}
+
+# --- Automatic two-week check ----------------------------------------------
+# Drivers change rarely (Craig, 2026-08-22). The list path only ever reads the caches,
+# so nothing blocks on a fetch; this is the one place a live refresh starts on its own:
+# from the housekeeping tick, when any vendor's cache is missing, bundled-only or older
+# than its TTL (14 days), at most one attempt per 24 h (a failed fetch must not retry
+# every tick), never while a refresh is already running, and not while the product's
+# plug-in map says the downloads plug-in is off. It reuses the background child job, so
+# the panel keeps showing the old rows until the completion event (automatic = true)
+# reloads them. Manual Refresh catalogs is unchanged and always allowed.
+
+$script:AppVendorSccmCatalogAutoCheckAttemptIntervalHours = 24
+$script:AppVendorSccmCatalogAutoCheckEvaluateEveryMinutes = 30
+# First evaluation ~3 minutes after the libs load (boot is busy; the network gate may
+# still be settling), then every 30 minutes while the sidecar runs.
+$script:AppVendorSccmCatalogAutoCheckEvaluatedAt = (Get-Date).AddMinutes(3 - 30)
+
+function Get-AppVendorSccmCatalogAutoCheckStatePath {
+    Join-Path (Get-AppAria2StoreRoot) 'vendor-catalog-autocheck.json'
+}
+
+function Read-AppVendorSccmCatalogAutoCheckState {
+    $path = Get-AppVendorSccmCatalogAutoCheckStatePath
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    try { return (Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { return $null }
+}
+
+function Write-AppVendorSccmCatalogAutoCheckState {
+    param([Parameter(Mandatory)][hashtable]$State)
+    $path = Get-AppVendorSccmCatalogAutoCheckStatePath
+    $dir = Split-Path -Parent $path
+    if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
+    $tmp = "$path.tmp"
+    ($State | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $tmp -Encoding UTF8 -Force
+    Move-Item -LiteralPath $tmp -Destination $path -Force
+}
+
+function Test-AppVendorSccmCatalogDownloadsPluginOff {
+    # Only a pushed plug-in map that explicitly disables the downloads plug-in blocks the
+    # check; a product with no plug-in map (downloads are core there) is never blocked.
+    $state = Get-Variable -Name AppState -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if (-not $state) { return $false }
+    $rc = $state['RuntimeConfig']
+    if (-not $rc -or -not ($rc -is [System.Collections.IDictionary]) -or -not $rc.Contains('enabledPlugins')) { return $false }
+    $map = $rc['enabledPlugins']
+    if (-not ($map -is [System.Collections.IDictionary]) -or -not $map.Contains('aria2')) { return $false }
+    return -not [bool]$map['aria2']
+}
+
+function Get-AppVendorSccmCatalogStaleVendors {
+    <#
+    .SYNOPSIS
+        Vendors whose on-disk catalog is missing (bundled-only) or older than its TTL.
+        Cache-only reads: this never fetches.
+    #>
+    $stale = [System.Collections.Generic.List[string]]::new()
+    $getters = [ordered]@{
+        dell      = 'Get-AppDellSccmDriverCatalog'
+        hp        = 'Get-AppHpSccmDriverCatalog'
+        lenovo    = 'Get-AppLenovoSccmDriverCatalog'
+        microsoft = 'Get-AppMicrosoftSccmDriverCatalog'
+        acer      = 'Get-AppAcerSccmDriverUrlCatalog'
+    }
+    foreach ($vendor in $getters.Keys) {
+        $getter = $getters[$vendor]
+        if (-not (Get-Command $getter -ErrorAction SilentlyContinue)) { continue }
+        try {
+            $cat = & $getter -CacheOnly
+            if (-not $cat) { [void]$stale.Add($vendor); continue }
+            $isStale = [bool](Get-AppSidecarJsonPropSafe -Item $cat -Name 'stale')
+            $isBundled = [bool](Get-AppSidecarJsonPropSafe -Item $cat -Name 'bundled')
+            if ($isStale -or $isBundled) { [void]$stale.Add($vendor) }
+        } catch {
+            [void]$stale.Add($vendor)
+        }
+    }
+    @($stale)
+}
+
+function Get-AppSidecarJsonPropSafe {
+    # StrictMode-safe optional property read over hashtables and PSCustomObjects.
+    param($Item, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Item) { return $null }
+    if ($Item -is [System.Collections.IDictionary]) { if ($Item.Contains($Name)) { return $Item[$Name] }; return $null }
+    $prop = $Item.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $null }
+    return $prop.Value
+}
+
+function Test-AppVendorSccmCatalogAutoRefreshDue {
+    param([switch]$IgnoreThrottle)
+    if ($script:AppVendorSccmCatalogRefreshJob) { return $false }
+    if (Test-AppVendorSccmCatalogDownloadsPluginOff) { return $false }
+    if (-not $IgnoreThrottle) {
+        $state = Read-AppVendorSccmCatalogAutoCheckState
+        $lastRaw = Get-AppSidecarJsonPropSafe -Item $state -Name 'lastAttemptAt'
+        if ($lastRaw) {
+            try {
+                $last = if ($lastRaw -is [datetime]) { [datetime]$lastRaw } else { [datetime]::Parse([string]$lastRaw, $null, [Globalization.DateTimeStyles]::RoundtripKind) }
+                if (((Get-Date).ToUniversalTime() - $last.ToUniversalTime()).TotalHours -lt $script:AppVendorSccmCatalogAutoCheckAttemptIntervalHours) { return $false }
+            } catch { }
+        }
+    }
+    return ((Get-AppVendorSccmCatalogStaleVendors).Count -gt 0)
+}
+
+function Start-AppVendorSccmCatalogAutoRefreshIfDue {
+    # Housekeeping-tick entry point. Cheap when not due: one timestamp compare per tick,
+    # the cache reads at most every 30 minutes.
+    $now = Get-Date
+    if ($script:AppVendorSccmCatalogAutoCheckEvaluatedAt -and (($now - $script:AppVendorSccmCatalogAutoCheckEvaluatedAt).TotalMinutes -lt $script:AppVendorSccmCatalogAutoCheckEvaluateEveryMinutes)) { return $false }
+    $script:AppVendorSccmCatalogAutoCheckEvaluatedAt = $now
+    if (-not (Test-AppVendorSccmCatalogAutoRefreshDue)) { return $false }
+    $stale = @(Get-AppVendorSccmCatalogStaleVendors)
+    Write-AppVendorSccmCatalogAutoCheckState -State @{ lastAttemptAt = $now.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); vendors = $stale }
+    Write-SidecarLog "vendor catalogs: automatic two-week check - $($stale -join ', ') older than 14 days or missing; refreshing in the background"
+    $null = Start-AppVendorSccmCatalogRefreshJob -Vendors $stale -Automatic
+    return $true
 }

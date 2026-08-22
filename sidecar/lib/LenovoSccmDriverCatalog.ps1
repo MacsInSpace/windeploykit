@@ -10,7 +10,10 @@ if (-not (Get-Command Get-AppDataRoot -ErrorAction SilentlyContinue)) {
 }
 
 $script:AppLenovoSccmCatalogUrl = 'https://download.lenovo.com/cdrt/td/catalogv2.xml'
-$script:AppLenovoSccmCatalogCacheHours = 168
+# 14 days: drivers change rarely; the list path reads the cache only and the sidecar's
+# automatic check (VendorSccmCatalogRefresh.ps1) refreshes in the background once this
+# age is exceeded. Manual Refresh catalogs forces it at any time.
+$script:AppLenovoSccmCatalogCacheHours = 336
 $script:AppLenovoSccmCatalogLastError = $null
 
 # Support download pages - machine types from page titles; offlineWin11Url is last-resort when scrape fails.
@@ -72,7 +75,11 @@ function Write-AppLenovoSccmCatalogCache {
         models      = @($Catalog.models)
         fallbacks   = @($Catalog.fallbacks)
     }
-    ($payload | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $path -Encoding UTF8 -Force
+    # Atomic replace: the list path may read this file while the refresh child writes it;
+    # a half-written file would fall back to the bundled catalog and the list would shrink.
+    $tmp = "$path.tmp"
+    ($payload | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $tmp -Encoding UTF8 -Force
+    Move-Item -LiteralPath $tmp -Destination $path -Force
 }
 
 function Invoke-AppLenovoSccmHttpGet {

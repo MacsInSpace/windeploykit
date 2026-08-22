@@ -461,6 +461,8 @@ export interface VendorSccmCatalogRefreshResponse {
   acerHarvestUrl?: string;
   /** Acer XML refresh failed or the last full KB harvest is missing/older than 60 days. */
   acerHarvestRecommended?: boolean;
+  /** Started by the sidecar's two-week check, not the technician: reload quietly. */
+  automatic?: boolean;
 }
 
 export interface AcerSccmCatalogHarvestResponse {

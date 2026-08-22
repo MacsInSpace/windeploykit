@@ -20,7 +20,10 @@ $script:AppAcerSccmFallbackUrls = @(
 # pack URLs are a subset of the KB list - so it is merged into the URL cache, never a
 # replacement for the browser-harvested coverage (AGENT_NOTES_PXE_DRIVERS section 12).
 $script:AppAcerSccmXmlCatalogUrl = 'https://global-download.acer.com/supportfiles/files/support/sourcefile/msepm/AcerCatalog.xml'
-$script:AppAcerSccmCatalogCacheHours = 168
+# 14 days: drivers change rarely; the list path reads the cache only and the sidecar's
+# automatic check (VendorSccmCatalogRefresh.ps1) refreshes in the background once this
+# age is exceeded. Manual Refresh catalogs forces it at any time.
+$script:AppAcerSccmCatalogCacheHours = 336
 $script:AppAcerSccmCatalogLastError = $null
 
 function Get-AppAcerSccmCatalogLastError {
@@ -73,7 +76,11 @@ function Write-AppAcerSccmCatalogCache {
     }
     if ($null -ne $Models) { $payload.models = @($Models) }
     if (-not [string]::IsNullOrWhiteSpace($HarvestedAt)) { $payload.harvestedAt = $HarvestedAt }
-    ($payload | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $path -Encoding UTF8 -Force
+    # Atomic replace: the list path may read this file while the refresh child writes it;
+    # a half-written file would fall back to the bundled catalog and the list would shrink.
+    $tmp = "$path.tmp"
+    ($payload | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $tmp -Encoding UTF8 -Force
+    Move-Item -LiteralPath $tmp -Destination $path -Force
 }
 
 function Invoke-AppAcerSccmHttpGet {

@@ -234,6 +234,25 @@ export function ContentWorkspace({
     }
   }, []);
 
+  /** "Catalogs checked 3 days ago" from the oldest vendor fetch time (stale-while-revalidate: rows never blank). */
+  const catalogCheckedLabel = useMemo(() => {
+    const stamps = [
+      tracker?.acerCatalogAt,
+      tracker?.lenovoCatalogAt,
+      tracker?.dellCatalogAt,
+      tracker?.hpCatalogAt,
+      tracker?.microsoftCatalogAt,
+    ]
+      .map((s) => (s ? Date.parse(s) : NaN))
+      .filter((n) => Number.isFinite(n));
+    if (stamps.length === 0) return "Catalogs: bundled copy (never checked online) - checked automatically every 2 weeks";
+    const oldest = Math.min(...stamps);
+    const days = Math.floor((Date.now() - oldest) / 86_400_000);
+    const when = days <= 0 ? "today" : days === 1 ? "yesterday" : `${days} days ago`;
+    const next = Math.max(0, 14 - days);
+    return `Catalogs checked ${when} - next automatic check ${next === 0 ? "at the next opportunity" : `in ${next} day${next === 1 ? "" : "s"}`}`;
+  }, [tracker]);
+
   const loadTracker = useCallback(async () => {
     try {
       const data = await sidecar.invoke<Aria2TrackerCatalog>("GetAria2TrackerCatalog");
@@ -279,6 +298,12 @@ export function ContentWorkspace({
   const finishVendorCatalogRefresh = useCallback(
     async (res: VendorSccmCatalogRefreshResponse & { error?: string }) => {
       try {
+        if (res.automatic) {
+          // Sidecar's two-week check: swap the rows in quietly. No toasts, and never the
+          // Acer browser harvest - that only runs when the technician asked for a refresh.
+          if (!res.error) await loadTracker();
+          return;
+        }
         if (res.error) {
           toast.error("Vendor catalogs", res.error);
           return;
@@ -1569,6 +1594,9 @@ export function ContentWorkspace({
                 >
                   Microsoft ({microsoftDriverCount})
                 </button>
+              </div>
+              <div className="text-[10px] opacity-70" title="Vendor catalogs are read from this workstation's cache. The sidecar checks for new catalogs every two weeks in the background; the rows you see stay until the new ones arrive. Refresh Catalogs (Action menu) checks now.">
+                {catalogCheckedLabel}
               </div>
               <div className="input-box max-w-[20rem]">
                 <input

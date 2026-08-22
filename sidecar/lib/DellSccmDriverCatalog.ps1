@@ -10,7 +10,10 @@ if (-not (Get-Command Get-AppDataRoot -ErrorAction SilentlyContinue)) {
 }
 
 $script:AppDellSccmCatalogCabUrl = 'https://downloads.dell.com/catalog/DriverPackCatalog.cab'
-$script:AppDellSccmCatalogCacheHours = 168
+# 14 days: drivers change rarely; the list path reads the cache only and the sidecar's
+# automatic check (VendorSccmCatalogRefresh.ps1) refreshes in the background once this
+# age is exceeded. Manual Refresh catalogs forces it at any time.
+$script:AppDellSccmCatalogCacheHours = 336
 $script:AppDellSccmCatalogLastError = $null
 
 function Get-AppDellSccmCatalogLastError {
@@ -55,7 +58,11 @@ function Write-AppDellSccmCatalogCache {
         modelCount = @($Catalog.models).Count
         models     = @($Catalog.models)
     }
-    ($payload | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $path -Encoding UTF8 -Force
+    # Atomic replace: the list path may read this file while the refresh child writes it;
+    # a half-written file would fall back to the bundled catalog and the list would shrink.
+    $tmp = "$path.tmp"
+    ($payload | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $tmp -Encoding UTF8 -Force
+    Move-Item -LiteralPath $tmp -Destination $path -Force
 }
 
 function Get-AppDellSccmCatalogCabCachePath {
