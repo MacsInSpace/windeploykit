@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
+import { ContextMenu, useContextMenu } from "../components/ContextMenu";
 import { PanelShell } from "../components/PanelShell";
 import { toast } from "../state/toastStore";
 import { isTauri } from "../lib/tauriEnv";
@@ -76,7 +77,23 @@ export function SidecarLogPanel() {
     }
   }, [shown]);
 
+  const copySelection = useCallback(async () => {
+    // Right-click copies what you highlighted; with nothing highlighted it falls back to
+    // the whole view, so the verb always does something useful.
+    const selected = window.getSelection()?.toString() ?? "";
+    const text = selected.trim() ? selected : shown.join("\n");
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Sidecar log", selected.trim() ? "Selection copied." : `${shown.length} line(s) copied.`);
+    } catch (e) {
+      toast.error("Sidecar log", e instanceof Error ? e.message : String(e));
+    }
+  }, [shown]);
+
   const errors = useMemo(() => lines.filter((l) => /error|fail|unavailable|exception/i.test(l)).length, [lines]);
+
+  const logMenu = useContextMenu();
 
   const consoleActions = useMemo<ConsoleNodeActions>(
     () => ({
@@ -134,6 +151,14 @@ export function SidecarLogPanel() {
         <div
           className="mono min-h-0 flex-1 overflow-auto px-3 py-2 text-[10.5px] leading-[1.5]"
           style={{ color: "var(--text2)", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}
+          onContextMenu={(e) => {
+            const hasSelection = Boolean(window.getSelection()?.toString().trim());
+            logMenu.open(e, [
+              { label: hasSelection ? "Copy selection" : "Copy all", onSelect: () => void copySelection() },
+              { label: paused ? "Resume" : "Pause", onSelect: togglePause },
+              { label: "Clear", disabled: lines.length === 0, onSelect: clear },
+            ]);
+          }}
         >
           {shown.length === 0 ? (
             <p className="empty-state">
@@ -152,6 +177,7 @@ export function SidecarLogPanel() {
           )}
           <div ref={bottomRef} />
         </div>
+        <ContextMenu state={logMenu.state} onClose={logMenu.close} />
       </div>
     </PanelShell>
   );
