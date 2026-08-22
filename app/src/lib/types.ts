@@ -583,6 +583,8 @@ export interface PxeBootTaskSequencesPayload {
   defaultSequenceId?: string;
   /** Credential-store entries offered for the join-credential selector. */
   credentialOptions?: { id: string; label: string; loginName?: string }[];
+  /** Domains discovered from this host's DNS; verified = publishes the AD DC SRV record. */
+  joinDomainSuggestions?: { domain: string; verified: boolean; source: string }[];
   /** Central domains + the site's local domain from the Site Profile. */
   joinDomainOptions?: string[];
   /** Site machine OUs from the Site Profile, labelled by first RDN. */

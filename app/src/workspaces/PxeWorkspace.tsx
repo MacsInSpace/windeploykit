@@ -344,6 +344,10 @@ export function PxeWorkspace({
   const [libraryBusy, setLibraryBusy] = useState(false);
   // Editable working copy - Save publishes the whole set.
   const [tsEdit, setTsEdit] = useState<PxeBootTaskSequence[] | null>(null);
+  // Domain join is an optional addition, not part of every sequence: a sequence is
+  // "joining" when it has a domain set, or when the operator has just ticked the box
+  // and has not typed one yet.
+  const [tsJoinOptIn, setTsJoinOptIn] = useState<Set<string>>(new Set());
 
   /** The library list that applies to a sequence: client sequences get the client list. */
   const libraryFor = useCallback(
@@ -386,7 +390,6 @@ export function PxeWorkspace({
   const [tsNewName, setTsNewName] = useState("");
   // Sequences whose local-domain machine OU is in "Custom..." free-text mode (the
   // select alone can't tell "custom equals the suggestion" from "picked the suggestion").
-  const [tsCustomOuIds, setTsCustomOuIds] = useState<Set<string>>(new Set());
   // Preselected ImageDeployer menu item ("" = tech picks at the device).
   const [tsDefaultId, setTsDefaultId] = useState("");
   // Visible DNS rows per sequence (1-3; the values live in fields dns1..dns3).
@@ -2140,7 +2143,7 @@ export function PxeWorkspace({
                         style={{ color: "var(--text3)" }}
                         title={
                           "Published to TaskSequences/ in the deploy share - pick one in ImageDeployer's Task Sequence menu. " +
-                          "{{SITE}}, {{SERIAL}} and the connect credentials fill on the device at deploy time, so no secrets are stored here."
+                          "{{SERIAL}} and the connect credentials fill on the device at deploy time, so no secrets are stored here."
                         }
                       >
                         Named first-boot setups ImageDeployer can apply after imaging.
@@ -2279,13 +2282,41 @@ export function PxeWorkspace({
                                 <option value="client">Client</option>
                                 <option value="server">Server</option>
                               </select>
+                              <span />
+                              <label className="flex items-center gap-1.5 text-[11px]">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(seq.fields.joinDomain) || tsJoinOptIn.has(seq.id)}
+                                  onChange={(e) => {
+                                    const on = e.target.checked;
+                                    setTsJoinOptIn((prev) => {
+                                      const next = new Set(prev);
+                                      if (on) next.add(seq.id);
+                                      else next.delete(seq.id);
+                                      return next;
+                                    });
+                                    if (!on) {
+                                      // Turning it off clears the whole section rather than
+                                      // leaving a half-configured join behind.
+                                      setTsEdit((prev) =>
+                                        (prev ?? []).map((s) =>
+                                          s.id === seq.id
+                                            ? { ...s, fields: { ...s.fields, joinDomain: "", machineOu: "", joinCredential: "" } }
+                                            : s,
+                                        ),
+                                      );
+                                    }
+                                  }}
+                                />
+                                Join a domain
+                              </label>
                               {TS_FIELD_ORDER
                                 .filter((key) => key in seq.fields)
                                 .filter((key) => {
-                                  const joining = Boolean(seq.fields.joinDomain);
+                                  const joining = Boolean(seq.fields.joinDomain) || tsJoinOptIn.has(seq.id);
                                   if (["ipCidr", "gateway", "dns1"].includes(key))
                                     return seq.fields.network === "static";
-                                  if (["joinCredential", "machineOu"].includes(key)) return joining;
+                                  if (["joinDomain", "joinCredential", "machineOu"].includes(key)) return joining;
                                   return true;
                                 })
                                 .map((key) => {
@@ -2304,28 +2335,21 @@ export function PxeWorkspace({
                                         key === "joinCredential"
                                           ? "Join credentials are filled in on the device at deploy time, or taken from a stored credential when one is selected - never written into the published file."
                                           : key === "computerName"
-                                            ? "Always prefixed with the site id - servers as {{SITE}}..., everything else as {{SITE}}-... (enforced at publish)."
+                                            ? "Free text. {{SERIAL}} fills on the device at deploy time."
                                             : undefined
                                       }
                                     >
                                       {TS_FIELD_LABELS[key] ?? key}
                                     </label>
                                     {key === "computerName" ? (
-                                      <div className="flex items-center gap-1">
-                                        <span
-                                          className="mono rounded border px-1.5 text-[11px] leading-[24px]"
-                                          style={{ borderColor: "var(--border)", color: "var(--text3)", background: "var(--surface2)" }}
-                                          title="Site id prefix - locked; resolved on the device at deploy"
-                                        >
-                                          {(siteId ?? "{{SITE}}") + (seq.kind === "server" ? "" : "-")}
-                                        </span>
-                                        <input
-                                          className="input-box mono h-[26px] flex-1 text-[11px]"
-                                          value={seq.fields[key]}
-                                          spellCheck={false}
-                                          onChange={(e) => setField(e.target.value)}
-                                        />
-                                      </div>
+                                      <input
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        value={seq.fields[key]}
+                                        spellCheck={false}
+                                        placeholder="{{SERIAL}}"
+                                        title="Free text. {{SERIAL}} fills on the device from the BIOS serial (15-character NetBIOS limit applies)."
+                                        onChange={(e) => setField(e.target.value)}
+                                      />
                                     ) : key === "productKey" ? (
                                       <select
                                         className="input-box mono h-[26px] text-[11px]"
@@ -2368,102 +2392,61 @@ export function PxeWorkspace({
                                         ))}
                                       </select>
                                     ) : key === "joinDomain" ? (
-                                      <select
+                                      (() => {
+                                        // Suggestions come from this host's DNS search suffixes;
+                                        // "verified" means the domain publishes the AD
+                                        // domain-controller SRV record.
+                                        const suggestions = tsPayload?.joinDomainSuggestions ?? [];
+                                        return (
+                                          <div className="flex flex-col gap-1">
+                                            <input
+                                              className="input-box mono h-[26px] text-[11px]"
+                                              value={seq.fields[key]}
+                                              spellCheck={false}
+                                              list={`join-domains-${seq.id}`}
+                                              placeholder="corp.example.com"
+                                              title="The domain to join. Suggestions come from this machine's DNS."
+                                              onChange={(e) => setField(e.target.value)}
+                                            />
+                                            <datalist id={`join-domains-${seq.id}`}>
+                                              {suggestions.map((s) => (
+                                                <option key={s.domain} value={s.domain} />
+                                              ))}
+                                            </datalist>
+                                            {suggestions.length > 0 && !seq.fields[key] ? (
+                                              <span className="flex flex-wrap items-center gap-1 text-[10px]" style={{ color: "var(--text3)" }}>
+                                                From DNS:
+                                                {suggestions.slice(0, 3).map((s) => (
+                                                  <button
+                                                    key={s.domain}
+                                                    type="button"
+                                                    className="btn px-1 py-0 text-[10px]"
+                                                    title={
+                                                      s.verified
+                                                        ? "Publishes the Active Directory domain-controller SRV record"
+                                                        : "A DNS search suffix on this machine - no AD domain-controller record found"
+                                                    }
+                                                    onClick={() => setField(s.domain)}
+                                                  >
+                                                    {s.domain}
+                                                    {s.verified ? " (AD)" : ""}
+                                                  </button>
+                                                ))}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        );
+                                      })()
+                                    ) : key === "machineOu" ? (
+                                      <input
                                         className="input-box mono h-[26px] text-[11px]"
                                         value={seq.fields[key]}
-                                        onChange={(e) => {
-                                          setTsEdit((prev) =>
-                                            (prev ?? []).map((s) =>
-                                              s.id === seq.id
-                                                ? {
-                                                    ...s,
-                                                    fields: { ...s.fields, joinDomain: e.target.value, machineOu: "" },
-                                                  }
-                                                : s,
-                                            ),
-                                          );
-                                          setTsCustomOuIds((prev) => {
-                                            const next = new Set(prev);
-                                            next.delete(seq.id);
-                                            return next;
-                                          });
-                                        }}
-                                      >
-                                        <option value="">(no domain join)</option>
-                                        {[
-                                          ...(tsPayload?.joinDomainOptions ?? []),
-                                          ...((tsPayload?.joinDomainOptions ?? []).includes(seq.fields[key])
-                                            ? []
-                                            : [seq.fields[key]]),
-                                        ]
-                                          .filter(Boolean)
-                                          .map((d) => (
-                                            <option key={d} value={d}>
-                                              {d}
-                                            </option>
-                                          ))}
-                                      </select>
-                                    ) : key === "machineOu" ? (
-                                      (tsPayload?.machineOuOptions ?? []).length > 0 ? (
-                                        <select
-                                          className="input-box mono h-[26px] text-[11px]"
-                                          value={seq.fields[key]}
-                                          title={seq.fields[key] || "Machine OU from the Site Profile"}
-                                          onChange={(e) => setField(e.target.value)}
-                                        >
-                                          <option value="">(choose OU)</option>
-                                          {(tsPayload?.machineOuOptions ?? []).map((o) => (
-                                            <option key={o.dn} value={o.dn}>
-                                              {o.label}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      ) : (
-                                        (() => {
-                                          const suggestion = (tsPayload as { defaultOuSuggestion?: string } | undefined)?.defaultOuSuggestion ?? "";
-                                          const ouValue = seq.fields[key] ?? "";
-                                          const isCustom =
-                                            tsCustomOuIds.has(seq.id) ||
-                                            (Boolean(ouValue) && ouValue !== suggestion);
-                                          return (
-                                            <div className="flex flex-col gap-1">
-                                              <select
-                                                className="input-box mono h-[26px] text-[11px]"
-                                                value={isCustom ? "__custom__" : ouValue}
-                                                title={ouValue || "Where the computer object lands in the domain"}
-                                                onChange={(e) => {
-                                                  const v = e.target.value;
-                                                  if (v === "__custom__") {
-                                                    setTsCustomOuIds((prev) => new Set(prev).add(seq.id));
-                                                    if (!ouValue) setField(suggestion);
-                                                  } else {
-                                                    setTsCustomOuIds((prev) => {
-                                                      const next = new Set(prev);
-                                                      next.delete(seq.id);
-                                                      return next;
-                                                    });
-                                                    setField(v);
-                                                  }
-                                                }}
-                                              >
-                                                <option value="">(none - AD default)</option>
-                                                {suggestion ? <option value={suggestion}>{suggestion}</option> : null}
-                                                <option value="__custom__">Custom...</option>
-                                              </select>
-                                              {isCustom ? (
-                                                <input
-                                                  className="input-box mono h-[26px] text-[11px]"
-                                                  value={ouValue}
-                                                  spellCheck={false}
-                                                  placeholder={suggestion || "CN=Computers,DC=example,DC=local"}
-                                                  title="Full distinguished name for the machine object (left empty, AD decides)"
-                                                  onChange={(e) => setField(e.target.value)}
-                                                />
-                                              ) : null}
-                                            </div>
-                                          );
-                                        })()
-                                      )
+                                        spellCheck={false}
+                                        disabled={!seq.fields.joinDomain}
+                                        placeholder="OU=Workstations,DC=corp,DC=example,DC=com"
+                                        title="Where the computer object lands. Blank uses the domain's default Computers container."
+                                        onChange={(e) => setField(e.target.value)}
+                                      />
                                     ) : key === "dns1" ? (
                                       (() => {
                                         const values = [seq.fields.dns1 ?? "", seq.fields.dns2 ?? "", seq.fields.dns3 ?? ""];

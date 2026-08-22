@@ -300,6 +300,89 @@ function ConvertTo-AppPxeBootTsXmlEscaped {
     [System.Security.SecurityElement]::Escape($Value)
 }
 
+$script:AppPxeBootTsDomainSuggestionCache = $null
+$script:AppPxeBootTsDomainSuggestionTtlMinutes = 5
+
+function Get-AppPxeBootTsDomainCandidates {
+    # DNS search suffixes this host already knows about. macOS keeps them in scutil,
+    # Windows in the DNS client settings (plus USERDNSDOMAIN when the host is joined).
+    $out = [System.Collections.Generic.List[string]]::new()
+    $add = {
+        param([string]$Value)
+        $v = ([string]$Value).Trim().Trim('.')
+        if ($v -and $v -match '\.' -and $out -notcontains $v) { [void]$out.Add($v) }
+    }
+    try {
+        if ($IsWindows) {
+            & $add ([string]$env:USERDNSDOMAIN)
+            if (Get-Command Get-DnsClientGlobalSetting -ErrorAction SilentlyContinue) {
+                foreach ($s in @((Get-DnsClientGlobalSetting).SuffixSearchList)) { & $add ([string]$s) }
+            }
+        } else {
+            $scutil = @(& scutil --dns 2>$null)
+            foreach ($line in $scutil) {
+                if ($line -match 'search domain\[\d+\]\s*:\s*(?<d>\S+)') { & $add ([string]$matches['d']) }
+            }
+            foreach ($line in @(Get-Content -LiteralPath '/etc/resolv.conf' -ErrorAction SilentlyContinue)) {
+                if ($line -match '^\s*(?:search|domain)\s+(?<rest>.+)$') {
+                    foreach ($d in ($matches['rest'] -split '\s+')) { & $add ([string]$d) }
+                }
+            }
+        }
+    } catch { }
+    @($out)
+}
+
+function Test-AppPxeBootTsDomainIsAdDomain {
+    <#
+    .SYNOPSIS
+        Does this suffix actually look like an Active Directory domain? Asks DNS for the
+        domain controller SRV record every AD domain publishes.
+    #>
+    param([Parameter(Mandatory)][string]$Domain)
+    $query = "_ldap._tcp.dc._msdcs.$Domain"
+    try {
+        if ($IsWindows -and (Get-Command Resolve-DnsName -ErrorAction SilentlyContinue)) {
+            $rr = Resolve-DnsName -Name $query -Type SRV -ErrorAction Stop
+            return (@($rr | Where-Object { $_.Type -eq 'SRV' }).Count -gt 0)
+        }
+        if (Get-Command dig -ErrorAction SilentlyContinue) {
+            # Bounded hard: this runs on the dispatch thread.
+            $answer = @(& dig +short +time=2 +tries=1 SRV $query 2>$null)
+            return (@($answer | Where-Object { $_ -match '\S' }).Count -gt 0)
+        }
+    } catch { }
+    return $false
+}
+
+function Get-AppPxeBootTsDomainSuggestions {
+    <#
+    .SYNOPSIS
+        Domains worth offering in the join field, discovered from this host's DNS
+        (Craig, 2026-08-22: "suggested domain join should be grabbed via dns").
+        Verified ones - those publishing the AD domain-controller SRV record - come
+        first. Memoised for a few minutes: DNS lookups are cheap but not free, and the
+        dispatch loop is single-threaded.
+    #>
+    param([switch]$Force)
+    $now = (Get-Date).ToUniversalTime()
+    if (-not $Force -and $script:AppPxeBootTsDomainSuggestionCache -and
+        ($now - $script:AppPxeBootTsDomainSuggestionCache.at).TotalMinutes -lt $script:AppPxeBootTsDomainSuggestionTtlMinutes) {
+        return $script:AppPxeBootTsDomainSuggestionCache.items
+    }
+    $items = [System.Collections.Generic.List[hashtable]]::new()
+    foreach ($candidate in @(Get-AppPxeBootTsDomainCandidates)) {
+        [void]$items.Add([ordered]@{
+            domain   = $candidate
+            verified = [bool](Test-AppPxeBootTsDomainIsAdDomain -Domain $candidate)
+            source   = 'dns-search-suffix'
+        })
+    }
+    $ordered = @(@($items | Where-Object { $_.verified }) + @($items | Where-Object { -not $_.verified }))
+    $script:AppPxeBootTsDomainSuggestionCache = @{ at = $now; items = $ordered }
+    return $ordered
+}
+
 function Get-AppPxeBootTaskSequencePublishContext {
     <#
     .SYNOPSIS
@@ -777,19 +860,12 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     $role = if ($rec.kind -eq 'server') { 'server' } else { 'client' }
     $ctx = Get-AppPxeBootTaskSequencePublishContext
 
-    # --- Computer name: suffix field + composed, healed {{SITE}} prefix ----------
-    # Heal collapses only the {{SITE}} token and the configured site id (typed once
-    # or repeated, dash or not). Never strip arbitrary leading digits: a suffix can
-    # legitimately start with digits (serials/asset tags - Craig, 2026-08-19).
-    $nameSuffix = & $get 'computerName' '{{SERIAL}}'
-    $nameSuffix = $nameSuffix -replace '^(\{\{SITE\}\}-?)+', ''
-    if ($ctx.siteId) {
-        $siteEsc = [regex]::Escape([string]$ctx.siteId)
-        $nameSuffix = $nameSuffix -replace "^(?i:(?:$siteEsc-?)+)", ''
-    }
-    $nameSuffix = $nameSuffix.TrimStart('-')
-    if ([string]::IsNullOrWhiteSpace($nameSuffix)) { $nameSuffix = '{{SERIAL}}' }
-    $computerName = if ($role -eq 'server') { '{{SITE}}' + $nameSuffix } else { '{{SITE}}-' + $nameSuffix }
+    # --- Computer name -----------------------------------------------------------
+    # Free text (Craig, 2026-08-22: this is a corporate product - there is no site id
+    # to prefix). {{SERIAL}} still fills on the device, so the default names a machine
+    # after its BIOS serial; anything else is published verbatim.
+    $computerName = & $get 'computerName' '{{SERIAL}}'
+    if ([string]::IsNullOrWhiteSpace($computerName)) { $computerName = '{{SERIAL}}' }
 
     # --- Section toggles ---------------------------------------------------------
     $staticIp = ((& $get 'network' 'dhcp') -eq 'static')
@@ -813,10 +889,8 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     # --- Domain-join section (OU resolved, credentials threaded) -----------------
     $joinComponent = ''
     if ($joining) {
+        # Free text: a DN typed by whoever built the sequence.
         $ou = & $get 'machineOu' ''
-        if ($ou -match '\{\{SiteOu\}\}') {
-            if ($ctx.siteOuDn) { $ou = $ou.Replace('{{SiteOu}}', $ctx.siteOuDn) } else { $ou = '' }
-        }
         $ouElement = if ($ou) { "				<MachineObjectOU>$(ConvertTo-AppPxeBootTsXmlEscaped $ou)</MachineObjectOU>`n" } else { '' }
         $joinComponent = Get-AppPxeBootTsUnattendedJoin -OuElement $ouElement
     }
@@ -946,6 +1020,8 @@ function Get-AppPxeBootTaskSequencesPayload {
     # Join-domain options come from the Site Profile. Guard against wrapper leaks:
     # a store that wraps entries as @{value; userLocked; updatedAt} must be
     # unwrapped before display (field bug 2026-08-20 leaked the whole wrapper).
+    # Discovered from this host's DNS - the join field offers them, it does not force one.
+    $joinDomainSuggestions = @(Get-AppPxeBootTsDomainSuggestions)
     $joinDomainOptions = @()  # TODO(Site Profile): seeded from the Site Profile join domains
     try {
         $sp = if (Get-Command Get-AppSiteProfile -ErrorAction SilentlyContinue) { Get-AppSiteProfile } else { $null }
@@ -1023,6 +1099,7 @@ function Get-AppPxeBootTaskSequencesPayload {
         defaultSequenceId  = (Get-AppPxeBootTaskSequenceDefaultId)
         credentialOptions  = $credentialOptions
         joinDomainOptions  = $joinDomainOptions
+        joinDomainSuggestions = @($joinDomainSuggestions)
         machineOuOptions   = $machineOuOptions
         defaultOuSuggestion = $defaultOuSuggestion
         kmsKeyOptions      = $kmsKeyOptions

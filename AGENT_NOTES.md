@@ -1083,3 +1083,26 @@ discovery, i.e. exactly the lines you open the panel to read. History now lives 
 is looking; the panel renders the buffer on mount. Pause freezes the view without dropping
 lines, and Clear empties the shared buffer.
 
+### Task sequences are corporate now, not site-shaped (2026-08-22)
+
+Craig: "Computer name is free hand. As is Domain join, Domain creds, and OU. There is no
+{{site}}." So:
+
+- **Computer name** is published verbatim. The `{{SITE}}` prefix composition and its healing
+  regexes are gone; `{{SERIAL}}` still fills on the device, so the default still names a
+  machine after its BIOS serial.
+- **Machine OU** is a typed DN. `{{SiteOu}}` substitution is gone.
+- **Join domain** is a text box with suggestions, not a fixed list.
+- **Domain join is an optional addition**: a "Join a domain" tick box reveals domain, OU and
+  credentials, and clearing it wipes all three rather than leaving half a join behind.
+
+**Domain suggestions come from DNS** (`Get-AppPxeBootTsDomainSuggestions`): the host's search
+suffixes from `scutil --dns` / `/etc/resolv.conf` on macOS, `USERDNSDOMAIN` +
+`SuffixSearchList` on Windows. Each is probed for `_ldap._tcp.dc._msdcs.<domain>` - the SRV
+record every AD domain publishes - so a real domain is marked `(AD)` and sorts first. The
+probe is bounded (`dig +time=2 +tries=1`) and memoised for 5 minutes, because it runs on the
+single-threaded dispatch loop. Measured here: 421 ms cold, 4 ms cached.
+
+Still open: a vault editor overlay, so join credentials can be created from inside the app
+rather than only selected.
+
