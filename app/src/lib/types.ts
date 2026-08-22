@@ -528,7 +528,7 @@ export interface PxeBootTaskSequencesPayload {
   /** Absolute path of <library>/TaskSequences, null when no library root is set. */
   libraryDir?: string | null;
   publishedFiles: string[];
-  /** Preselected ImageDeployer sequence id; '' = the None item (clean OOBE / Intune). */
+  /** Preselected imaging-client sequence id; '' = the None item (clean OOBE). */
   defaultSequenceId?: string;
   /** Credential-store entries offered for the join-credential selector. */
   credentialOptions?: { id: string; label: string; loginName?: string }[];

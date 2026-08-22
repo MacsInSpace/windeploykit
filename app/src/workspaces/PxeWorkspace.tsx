@@ -2100,7 +2100,7 @@ export function PxeWorkspace({
                           value={tsDefaultId}
                           onChange={(e) => setTsDefaultId(e.target.value)}
                         >
-                          <option value="">(none - clean OOBE / Intune)</option>
+                          <option value="">(none - clean OOBE)</option>
                           {(tsEdit ?? [])
                             .filter((s) => s.enabled)
                             .map((s) => (
