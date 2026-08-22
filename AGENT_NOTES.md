@@ -863,3 +863,71 @@ Mirrored from USM the same night (converged libs, ASCII-clean, all three gates g
   torn down while the panel still showed it ticked - WinPE then fails with "network path not
   found". Panel guidance for "ticked but not published" rewritten to match.
 
+## 10. Windows evaluation media (Evaluation Center ISOs) - 2026-08-22
+
+Craig's `GetWinISOs.ps1` rebuilt as a real feature, at the top of Operating Systems.
+**Tested against the live pages before writing any code** - the answer to "I'm not 100%
+it still works" is: the idea works, the script did not.
+
+### What was broken in the original
+
+| | |
+|---|---|
+| `and ($_.outerHTML -notlike "*ARM*")` | missing the `-`; the whole `Where-Object` was a runtime error |
+| `-like "*Download Windows*(en-US)*"` on link text | current pages render the link text as just "64-bit edition" - matches nothing |
+| `country=US` | pages now emit lower-case `country=us` |
+| `Start-BitsTransfer` | Windows only |
+| `$ISOs = "E:\ISOs"` | hardcoded |
+| Windows 10 Enterprise | evaluation retired - that page has no download anchors at all |
+
+### How the pages are parsed now
+
+The only stable identity on the page is the anchor's `aria-label`:
+
+    aria-label="64-bit edition: Download Windows 11 Enterprise ISO 64-bit (en-US)"
+    aria-label="Download Windows Server 2025 Preview VHD 64-bit (en-US)"
+
+`ConvertFrom-AppEvalIsoPage` matches that, decodes entities, and classifies media
+(ISO/VHD), edition (Standard/LTSC), arch and culture. The catalog offers en-US x64 ISO
+only. Gotchas that cost time: 2016/2019/2022 use `/fwlink/p/?linkid=` and encode `=` as
+`&#61;`; a slug that does not exist yet answers 403/404, not a clean 404 only.
+
+### Shape
+
+- `sidecar/lib/EvalIsoCatalog.ps1` - product table (one row per release), parser,
+  HEAD resolver (real file name + byte size + build/release), 14-day cache under
+  `<data root>/plugins/aria2/eval-iso-catalog.json` with atomic writes, background
+  refresh in a child pwsh, and `Start-AppEvalIsoDownload` on the direct-HTTP rail
+  (`AssetKind 'iso'`, `ProgressKey "eval|<id>"`, 6 h timeout) so it works with the
+  aria2 daemon stopped and promotes into Netboot's `iso/` store.
+- `Get-AppEvalIsoCatalog` is **cache-only** - never scrapes on the dispatch thread
+  (the old version blocked all IPC for up to 60 s per call).
+- Housekeeping tick runs `Sync-AppEvalIsoCatalogRefreshJob` and
+  `Start-AppEvalIsoCatalogRefreshIfDue` (first check 3 min after boot, then at most
+  one cache read every 30 min, refresh only past the 14-day TTL).
+- Handlers: `GetEvalIsoCatalog`, `RefreshEvalIsoCatalog`, `StartEvalIsoDownload` -
+  all three call `Set-AppImageLibraryRuntimeRootFromParams` first, or "already
+  downloaded" is decided against whatever root a previous call happened to push.
+- UI: top of the Operating Systems images tab, with a "Check for updates" button, the
+  cache age, and a footnote for releases that are retired or not published yet.
+
+### Ready for Windows 12
+
+The product table carries `probe` rows (`win12`) that are expected to return nothing:
+a missing page is recorded as `not-published`, never as an error, and the row starts
+working the day Microsoft publishes it. Adding another release is one line in
+`$script:AppEvalIsoProducts`.
+
+### Tests
+
+- `scripts/test-eval-iso-catalog.ps1` - offline gate, 14 checks against real anchors
+  captured under `scripts/fixtures/eval-iso/` (run it with the other three gates).
+- `scripts/refresh-eval-iso-catalog.ps1` - live refresh/CLI listing.
+- Verified 2026-08-22: 6 downloads offered (Win11 25H2 6.61 GB, Win11 LTSC 4.76 GB,
+  Server 2025 7.59 GB, 2022 4.70 GB, 2019 5.26 GB, 2016 6.49 GB); a real fwlink
+  streamed 544 MB in 8 s through the worker with the total size matching the catalog.
+
+**PowerShell trap that bit the test harness:** a function returning a one-element
+array unrolls it to the element, and `.Count` on a hashtable is its KEY count - "1
+offered row" silently read as 9. Return `,@(...)` from helpers that must stay arrays.
+

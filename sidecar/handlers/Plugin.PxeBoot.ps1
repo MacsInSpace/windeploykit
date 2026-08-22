@@ -391,12 +391,30 @@ function Handle-SavePxeBootTaskSequences {
 
 function Handle-GetEvalIsoCatalog {
     param([int]$Id, $Params)
-    $data = @{ entries = @(Get-AppEvalIsoCatalog) }
+    # The catalog reports what is already on disk, so the image library root the UI
+    # is showing has to be in effect before we look.
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $data = Get-AppEvalIsoCatalog
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-RefreshEvalIsoCatalog {
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $requested = Get-AppSidecarParam -Params $Params -Name 'products'
+    $list = @()
+    if ($requested) { $list = @($requested | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ }) }
+    $data = if ($list.Count -gt 0) {
+        Start-AppEvalIsoCatalogRefreshJob -ProductIds $list
+    } else {
+        Start-AppEvalIsoCatalogRefreshJob
+    }
     Write-SidecarResponse -Id $Id -Data $data
 }
 
 function Handle-StartEvalIsoDownload {
     param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
     $isoId = Get-AppSidecarParam -Params $Params -Name 'id'
     if ([string]::IsNullOrWhiteSpace([string]$isoId)) { throw 'StartEvalIsoDownload: id required.' }
     $data = Start-AppEvalIsoDownload -Id ([string]$isoId)

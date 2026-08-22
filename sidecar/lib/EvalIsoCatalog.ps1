@@ -3,111 +3,571 @@
 # Why this exists: the product needs a legal, no-account, zero-setup source of
 # Windows media so a fresh install can be tested end to end. Evaluation Center
 # ISOs are freely downloadable from Microsoft and time-limited (180 days for
-# Server, 90 for client) - fine for lab, imaging tests and CI.
+# Server, 90 for client) - fine for lab, imaging tests and CI. Netboot mounts and
+# serves whatever lands in the image library, so there is no WIM extraction step.
 #
-# Ported from Craig's GetWinISOs.ps1 with three changes:
-#   1. Cross-platform: Start-BitsTransfer (Windows-only) -> the shared aria2 /
-#      direct-HTTP rail, so this works on macOS.
-#   2. Fixed the malformed `and (` filter clause (was a parse error).
-#   3. No hardcoded E:\ISOs - lands in the image library `iso/` folder, which is
+# Ported from Craig's GetWinISOs.ps1, then rebuilt 2026-08-22 after testing the
+# original end to end against the live pages:
+#   1. Cross-platform: Start-BitsTransfer (Windows-only) -> the shared direct-HTTP
+#      rail, so this works on macOS and with the aria2 daemon stopped.
+#   2. The original's filter clause was a parse error ("and (" with no dash) AND
+#      its two predicates no longer match anything: link text is now just
+#      "64-bit edition" (not "Download Windows ... (en-US)"), and country is
+#      lower-case "us" on current pages.
+#   3. No hardcoded E:\ISOs - lands in the image library iso/ folder, which is
 #      what Caddy and the SMB share already serve.
 #
-# Evaluation Center markup changes without notice: Get-AppEvalIsoDirectUrl is
-# best-effort and returns $null rather than throwing when the scrape misses.
+# HOW THE PAGES ARE PARSED (this is the whole trick):
+# Nothing visible identifies a download - every link's text is "64-bit edition".
+# The one stable identity is the anchor's aria-label:
+#     aria-label="64-bit edition: Download Windows 11 Enterprise ISO 64-bit (en-US)"
+#     aria-label="Download Windows Server 2025 Preview VHD 64-bit (en-US)"
+# so that is what ConvertFrom-AppEvalIsoPage matches. Verified against all six
+# live pages on 2026-08-22; fixtures under scripts/fixtures/eval-iso/ keep the
+# parser honest offline (scripts/test-eval-iso-catalog.ps1).
+#
+# Facts that cost real debugging - do not re-derive:
+#   * Older product pages (2016/2019/2022) use /fwlink/p/?linkid= and HTML-encode
+#     '=' as &#61;, so the href pattern and entity decoding must both be tolerant.
+#   * Windows 10 Enterprise's page still exists but carries NO download anchors
+#     (evaluation retired with Win10 servicing). That is 'unavailable', not an error.
+#   * A slug that does not exist yet answers 403 behind Akamai, not 404 - so a
+#     future product is simply "no entries yet". See the probe rows below.
+#   * The fwlink is what we download (stable); the file it redirects to is not.
+#     One HEAD chain per entry gives the real file name and size, which is also
+#     the only way "already downloaded" can ever match on disk.
+#   * Evaluation Center rejects some non-browser agents, so the page fetch sends a
+#     browser user agent. The ISO fetch itself uses the product agent as usual.
 
-$script:AppEvalIsoCatalog = @(
-    [ordered]@{ id = 'srv2025'; name = 'Windows Server 2025';    kind = 'server'; page = 'https://www.microsoft.com/en-us/evalcenter/download-windows-server-2025' }
-    [ordered]@{ id = 'srv2022'; name = 'Windows Server 2022';    kind = 'server'; page = 'https://www.microsoft.com/en-us/evalcenter/download-windows-server-2022' }
-    [ordered]@{ id = 'srv2019'; name = 'Windows Server 2019';    kind = 'server'; page = 'https://www.microsoft.com/en-us/evalcenter/download-windows-server-2019' }
-    [ordered]@{ id = 'srv2016'; name = 'Windows Server 2016';    kind = 'server'; page = 'https://www.microsoft.com/en-us/evalcenter/download-windows-server-2016' }
-    [ordered]@{ id = 'win11';   name = 'Windows 11 Enterprise';  kind = 'client'; page = 'https://www.microsoft.com/en-us/evalcenter/download-windows-11-enterprise' }
-    [ordered]@{ id = 'win10';   name = 'Windows 10 Enterprise';  kind = 'client'; page = 'https://www.microsoft.com/en-us/evalcenter/download-windows-10-enterprise' }
+if (-not (Get-Command Get-AppDataRoot -ErrorAction SilentlyContinue)) {
+    . (Join-Path $PSScriptRoot 'AppPaths.ps1')
+}
+
+$script:AppEvalIsoCacheHours = 336          # 14 days, same policy as the driver catalogs
+$script:AppEvalIsoCacheSchema = 1
+$script:AppEvalIsoCacheName = 'eval-iso-catalog.json'
+$script:AppEvalIsoBaseUrl = 'https://www.microsoft.com/en-us/evalcenter/'
+$script:AppEvalIsoCulture = 'en-US'
+$script:AppEvalIsoPageAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+$script:AppEvalIsoRefreshJob = $null
+
+# Data-driven: a new release is one row. probe = expected to return nothing until
+# Microsoft publishes the page; it must never surface as a failure.
+$script:AppEvalIsoProducts = @(
+    [ordered]@{ id = 'win11';   name = 'Windows 11 Enterprise'; kind = 'client'; slug = 'download-windows-11-enterprise'; probe = $false }
+    [ordered]@{ id = 'win12';   name = 'Windows 12 Enterprise'; kind = 'client'; slug = 'download-windows-12-enterprise'; probe = $true }
+    [ordered]@{ id = 'win10';   name = 'Windows 10 Enterprise'; kind = 'client'; slug = 'download-windows-10-enterprise'; probe = $false }
+    [ordered]@{ id = 'srv2025'; name = 'Windows Server 2025';   kind = 'server'; slug = 'download-windows-server-2025';   probe = $false }
+    [ordered]@{ id = 'srv2022'; name = 'Windows Server 2022';   kind = 'server'; slug = 'download-windows-server-2022';   probe = $false }
+    [ordered]@{ id = 'srv2019'; name = 'Windows Server 2019';   kind = 'server'; slug = 'download-windows-server-2019';   probe = $false }
+    [ordered]@{ id = 'srv2016'; name = 'Windows Server 2016';   kind = 'server'; slug = 'download-windows-server-2016';   probe = $false }
 )
+
+function Get-AppEvalIsoProducts {
+    @($script:AppEvalIsoProducts | ForEach-Object { [ordered]@{
+        id    = [string]$_.id
+        name  = [string]$_.name
+        kind  = [string]$_.kind
+        probe = [bool]$_.probe
+        page  = $script:AppEvalIsoBaseUrl + [string]$_.slug
+    } })
+}
+
+function Get-AppEvalIsoCachePath {
+    $root = if (Get-Command Get-AppAria2StoreRoot -ErrorAction SilentlyContinue) {
+        Get-AppAria2StoreRoot
+    } else {
+        Get-AppPluginDir -Plugin 'aria2'
+    }
+    Join-Path $root $script:AppEvalIsoCacheName
+}
+
+function Read-AppEvalIsoCache {
+    # $null on missing/blank/corrupt - never throws, never blocks.
+    $path = Get-AppEvalIsoCachePath
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    try {
+        $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8
+        if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+        return ($raw | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
+function Write-AppEvalIsoCache {
+    # Atomic: a killed refresh must never leave a half-written catalog behind.
+    param([Parameter(Mandatory)]$Payload)
+    $path = Get-AppEvalIsoCachePath
+    $dir = Split-Path -Parent $path
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
+    $tmp = "$path.tmp"
+    ($Payload | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $tmp -Encoding UTF8
+    Move-Item -LiteralPath $tmp -Destination $path -Force
+    return $path
+}
+
+function Get-AppEvalIsoProp {
+    # StrictMode-safe optional read (ConvertFrom-Json omits absent keys, so a bare
+    # $json.maybe throws). Local on purpose: the refresh child loads this file alone.
+    param($Item, [string]$Name)
+    if ($null -eq $Item) { return $null }
+    if ($Item -is [System.Collections.IDictionary]) {
+        if ($Item.Contains($Name)) { return $Item[$Name] }
+        return $null
+    }
+    $prop = $Item.PSObject.Properties[$Name]
+    if ($prop) { return $prop.Value }
+    return $null
+}
+
+function Get-AppEvalIsoCacheAgeHours {
+    param($Cache)
+    $fetched = Get-AppEvalIsoProp -Item $Cache -Name 'fetchedAt'
+    if (-not $fetched) { return $null }
+    $parsed = [DateTime]::MinValue
+    $ok = [DateTime]::TryParse([string]$fetched, [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$parsed)
+    if (-not $ok) { return $null }
+    return [math]::Round(((Get-Date).ToUniversalTime() - $parsed).TotalHours, 1)
+}
+
+function ConvertFrom-AppEvalIsoPage {
+    <#
+    .SYNOPSIS
+        Pure: one product page's HTML -> download rows. No network, no state, so
+        the parser is unit-tested offline against captured fixtures.
+    #>
+    param(
+        [string]$Html,
+        [string]$ProductId,
+        [string]$ProductName
+    )
+    $rows = [System.Collections.Generic.List[hashtable]]::new()
+    if ([string]::IsNullOrWhiteSpace($Html)) { return @($rows) }
+    $seen = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    # aria-label and href appear in either order depending on the page generation.
+    $patterns = @(
+        '<a\b[^>]*?aria-label="(?<label>[^"]*?Download[^"]*?)"[^>]*?href="(?<href>https://go\.microsoft\.com/fwlink/[^"]+)"',
+        '<a\b[^>]*?href="(?<href>https://go\.microsoft\.com/fwlink/[^"]+)"[^>]*?aria-label="(?<label>[^"]*?Download[^"]*?)"'
+    )
+    foreach ($rx in $patterns) {
+        foreach ($m in [regex]::Matches($Html, $rx, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) {
+            $label = [System.Net.WebUtility]::HtmlDecode($m.Groups['label'].Value).Trim()
+            $href = [System.Net.WebUtility]::HtmlDecode($m.Groups['href'].Value).Trim()
+            if ([string]::IsNullOrWhiteSpace($href)) { continue }
+            # Strip a leading call-to-action ("64-bit edition: Download ...").
+            $core = $label
+            if ($core -match '^[^:]{1,40}:\s*(?<rest>Download\b.*)$') { $core = $matches['rest'] }
+            if ($core -notmatch '^Download\s+(?<name>.+?)\s+(?<media>ISO|VHD)\s+(?<extra>.*?)\((?<culture>[A-Za-z]{2}-[A-Za-z]{2})\)\s*$') { continue }
+            $name = $matches['name'].Trim()
+            $media = $matches['media'].ToUpperInvariant()
+            $extra = $matches['extra'].Trim()
+            $culture = $matches['culture']
+            $edition = if ($name -match '(?i)\bLTSC\b' -or $extra -match '(?i)\bLTSC\b') { 'LTSC' } else { 'Standard' }
+            $arch = if ($extra -match '(?i)ARM64') { 'arm64' } elseif ($extra -match '32-bit') { 'x86' } else { 'x64' }
+            $name = ($name -replace '(?i)\s*\bISO\b\s*$', '').Trim()
+            if (-not $seen.Add($href)) { continue }
+            $suffix = ''
+            if ($edition -eq 'LTSC') { $suffix += '-ltsc' }
+            if ($media -eq 'VHD') { $suffix += '-vhd' }
+            if ($arch -ne 'x64') { $suffix += "-$arch" }
+            [void]$rows.Add([ordered]@{
+                id          = ([string]$ProductId + $suffix).ToLowerInvariant()
+                productId   = [string]$ProductId
+                productName = [string]$ProductName
+                title       = $name
+                media       = $media
+                edition     = $edition
+                arch        = $arch
+                culture     = $culture
+                url         = $href
+            })
+        }
+    }
+    return @($rows)
+}
+
+function Get-AppEvalIsoReleaseFromFileName {
+    <#
+    .SYNOPSIS
+        Best-effort build/release out of Microsoft's eval file names, display only:
+          26200.6584.250915-1905.25h2_ge_release_..._en-us.iso -> 26200.6584 / 25H2
+          Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO -> 14393
+    #>
+    param([string]$FileName)
+    $out = [ordered]@{ build = ''; release = '' }
+    if ([string]::IsNullOrWhiteSpace($FileName)) { return $out }
+    if ($FileName -match '^(?<build>\d{5}\.\d+)') { $out.build = $matches['build'] }
+    elseif ($FileName -match '_(?<build>\d{5})_') { $out.build = $matches['build'] }
+    if ($FileName -match '(?i)[\._-](?<rel>\d{2}h[12])[\._]') { $out.release = $matches['rel'].ToUpperInvariant() }
+    return $out
+}
+
+function Resolve-AppEvalIsoDownload {
+    <#
+    .SYNOPSIS
+        One HEAD chain per link: the real file name, byte size and (where the
+        redirect passes through one) the aka.ms alias that names the release.
+        Returns $null when the link no longer resolves - the row is then still
+        offered, just without size/name detail.
+    #>
+    param([Parameter(Mandatory)][string]$Uri)
+    try {
+        $resp = Invoke-WebRequest -Uri $Uri -Method Head -MaximumRedirection 8 -TimeoutSec 60 -ErrorAction Stop
+    } catch {
+        return $null
+    }
+    $fileName = ''
+    $size = [long]0
+    try {
+        $disp = [string]($resp.Headers['Content-Disposition'] | Select-Object -First 1)
+        if ($disp -and $disp -match 'filename\*?=(?:UTF-8'''')?"?(?<n>[^";]+)"?') {
+            $fileName = [System.Net.WebUtility]::UrlDecode($matches['n'].Trim())
+        }
+    } catch { }
+    try {
+        $len = [string]($resp.Headers['Content-Length'] | Select-Object -First 1)
+        if ($len) { $size = [long]$len }
+    } catch { }
+    $final = ''
+    try { $final = [string]$resp.BaseResponse.RequestMessage.RequestUri } catch { }
+    if ([string]::IsNullOrWhiteSpace($fileName) -and $final) {
+        try { $fileName = [IO.Path]::GetFileName(([Uri]$final).LocalPath) } catch { }
+    }
+    if ([string]::IsNullOrWhiteSpace($fileName)) { return $null }
+    return [ordered]@{
+        fileName    = $fileName
+        sizeBytes   = $size
+        resolvedUrl = $final
+    }
+}
+
+function Update-AppEvalIsoCatalogCache {
+    <#
+    .SYNOPSIS
+        Fetch every product page, parse, resolve, write the cache atomically.
+        NETWORK: minutes of it - never call this on the dispatch thread, use
+        Start-AppEvalIsoCatalogRefreshJob (child pwsh).
+    #>
+    param([string[]]$ProductIds = @())
+    $wanted = @($ProductIds | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    $products = [System.Collections.Generic.List[hashtable]]::new()
+    $entries = [System.Collections.Generic.List[hashtable]]::new()
+    $previous = Read-AppEvalIsoCache
+
+    foreach ($product in $script:AppEvalIsoProducts) {
+        $productId = [string]$product.id
+        if ($wanted.Count -gt 0 -and $wanted -notcontains $productId) {
+            # Not in this pass: carry the previous rows forward rather than dropping them.
+            $keep = @()
+            if ($previous) {
+                $keep = @(@(Get-AppEvalIsoProp -Item $previous -Name 'entries') | Where-Object { [string](Get-AppEvalIsoProp -Item $_ -Name 'productId') -eq $productId })
+                $prevProduct = @(@(Get-AppEvalIsoProp -Item $previous -Name 'products') | Where-Object { [string](Get-AppEvalIsoProp -Item $_ -Name 'id') -eq $productId })[0]
+                if ($prevProduct) { [void]$products.Add((ConvertTo-AppEvalIsoHashtable -Item $prevProduct)) }
+            }
+            foreach ($k in $keep) { [void]$entries.Add((ConvertTo-AppEvalIsoHashtable -Item $k)) }
+            continue
+        }
+        $page = $script:AppEvalIsoBaseUrl + [string]$product.slug
+        $status = 'ok'
+        $message = ''
+        $html = ''
+        try {
+            $resp = Invoke-WebRequest -Uri $page -UseBasicParsing -TimeoutSec 60 -Headers @{ 'User-Agent' = $script:AppEvalIsoPageAgent } -ErrorAction Stop
+            $html = [string]$resp.Content
+        } catch {
+            $status = if ([bool]$product.probe) { 'not-published' } else { 'error' }
+            $message = $_.Exception.Message
+        }
+        $rows = @()
+        if ($html) {
+            $rows = @(ConvertFrom-AppEvalIsoPage -Html $html -ProductId $productId -ProductName ([string]$product.name) |
+                Where-Object {
+                    $_.media -eq 'ISO' -and $_.arch -eq 'x64' -and $_.culture -ieq $script:AppEvalIsoCulture
+                })
+            if ($rows.Count -eq 0) {
+                $status = if ([bool]$product.probe) { 'not-published' } else { 'unavailable' }
+                if (-not $message) {
+                    $message = if ([bool]$product.probe) {
+                        'not published yet'
+                    } else {
+                        'Microsoft no longer offers an evaluation download on this page'
+                    }
+                }
+            }
+        }
+        foreach ($row in $rows) {
+            $resolved = Resolve-AppEvalIsoDownload -Uri ([string]$row.url)
+            $fileName = ''
+            $size = [long]0
+            $resolvedUrl = ''
+            if ($resolved) {
+                $fileName = [string]$resolved.fileName
+                $size = [long]$resolved.sizeBytes
+                $resolvedUrl = [string]$resolved.resolvedUrl
+            }
+            $release = Get-AppEvalIsoReleaseFromFileName -FileName $fileName
+            [void]$entries.Add([ordered]@{
+                id          = [string]$row.id
+                productId   = [string]$row.productId
+                productName = [string]$row.productName
+                title       = [string]$row.title
+                edition     = [string]$row.edition
+                media       = [string]$row.media
+                arch        = [string]$row.arch
+                culture     = [string]$row.culture
+                url         = [string]$row.url
+                resolvedUrl = $resolvedUrl
+                fileName    = $fileName
+                sizeBytes   = $size
+                build       = [string]$release.build
+                release     = [string]$release.release
+                page        = $page
+            })
+        }
+        [void]$products.Add([ordered]@{
+            id      = $productId
+            name    = [string]$product.name
+            kind    = [string]$product.kind
+            probe   = [bool]$product.probe
+            page    = $page
+            status  = $status
+            message = $message
+            count   = $rows.Count
+        })
+        Write-SidecarLog "eval ISO: $($product.name) - $status ($($rows.Count) download(s))"
+    }
+
+    $payload = [ordered]@{
+        schema    = $script:AppEvalIsoCacheSchema
+        fetchedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        culture   = $script:AppEvalIsoCulture
+        products  = @($products)
+        entries   = @($entries)
+    }
+    $path = Write-AppEvalIsoCache -Payload $payload
+    return [ordered]@{
+        ok        = $true
+        path      = $path
+        products  = $products.Count
+        entries   = $entries.Count
+        fetchedAt = [string]$payload.fetchedAt
+    }
+}
+
+function ConvertTo-AppEvalIsoHashtable {
+    # ConvertFrom-Json gives PSCustomObjects; normalise so carried-forward rows and
+    # freshly parsed rows are the same shape.
+    param($Item)
+    $out = [ordered]@{}
+    if ($null -eq $Item) { return $out }
+    if ($Item -is [System.Collections.IDictionary]) {
+        foreach ($k in @($Item.Keys)) { $out[[string]$k] = $Item[$k] }
+        return $out
+    }
+    foreach ($p in @($Item.PSObject.Properties)) { $out[[string]$p.Name] = $p.Value }
+    return $out
+}
 
 function Get-AppEvalIsoCatalog {
     <#
     .SYNOPSIS
-        The static list of Evaluation Center editions the app can fetch.
-        No network access - the download URL is resolved on demand.
+        Cache-only view for the UI: never touches the network, so it is safe on
+        the dispatch thread. Adds live disk state (downloaded / local size) and
+        says how old the cache is so the panel can offer a refresh.
     #>
-    $libRoot = $null
-    try { $libRoot = (Get-AppImageLibraryPaths).isoDir } catch { }
-    foreach ($entry in $script:AppEvalIsoCatalog) {
-        $fileName = "$($entry.id)_eval.iso"
-        $localPath = if ($libRoot) { Join-Path $libRoot $fileName } else { $null }
-        [ordered]@{
-            id         = [string]$entry.id
-            name       = [string]$entry.name
-            kind       = [string]$entry.kind
-            page       = [string]$entry.page
-            fileName   = $fileName
-            downloaded = [bool]($localPath -and (Test-Path -LiteralPath $localPath))
-            sizeBytes  = if ($localPath -and (Test-Path -LiteralPath $localPath)) {
-                (Get-Item -LiteralPath $localPath).Length
-            } else { 0 }
+    $cache = Read-AppEvalIsoCache
+    $isoDir = $null
+    try { $isoDir = (Get-AppImageLibraryPaths).isoDir } catch { $isoDir = $null }
+
+    $entries = [System.Collections.Generic.List[hashtable]]::new()
+    if ($cache) {
+        $rows = @()
+        $rows = @(Get-AppEvalIsoProp -Item $cache -Name 'entries')
+        foreach ($row in $rows) {
+            $entry = ConvertTo-AppEvalIsoHashtable -Item $row
+            $fileName = [string]$entry['fileName']
+            $localPath = if ($isoDir -and $fileName) { Join-Path $isoDir $fileName } else { $null }
+            $have = [bool]($localPath -and (Test-Path -LiteralPath $localPath))
+            $entry['downloaded'] = $have
+            $entry['localSizeBytes'] = if ($have) { (Get-Item -LiteralPath $localPath).Length } else { [long]0 }
+            [void]$entries.Add($entry)
         }
+    }
+    $products = @()
+    if ($cache) {
+        $products = @(@(Get-AppEvalIsoProp -Item $cache -Name 'products') | ForEach-Object { ConvertTo-AppEvalIsoHashtable -Item $_ })
+    }
+    if (@($products).Count -eq 0) { $products = @(Get-AppEvalIsoProducts) }
+
+    $ageHours = Get-AppEvalIsoCacheAgeHours -Cache $cache
+    [ordered]@{
+        entries     = @($entries)
+        products    = @($products)
+        cached      = [bool]$cache
+        fetchedAt   = if ($cache) { [string](Get-AppEvalIsoProp -Item $cache -Name 'fetchedAt') } else { '' }
+        ageHours    = $ageHours
+        ttlHours    = $script:AppEvalIsoCacheHours
+        stale       = [bool](-not $cache -or ($null -eq $ageHours) -or ($ageHours -ge $script:AppEvalIsoCacheHours))
+        refreshing  = [bool]$script:AppEvalIsoRefreshJob
+        isoDir      = [string]$isoDir
     }
 }
 
-function Get-AppEvalIsoDirectUrl {
+$script:AppEvalIsoRefreshRunner = @'
+param(
+    [Parameter(Mandatory)][string]$SidecarRoot,
+    [Parameter(Mandatory)][string]$ResultPath,
+    [string]$Products = ''
+)
+$ErrorActionPreference = 'Stop'
+try {
+    . (Join-Path $SidecarRoot 'lib/AppPaths.ps1')
+    if (-not (Get-Command Write-SidecarLog -ErrorAction SilentlyContinue)) {
+        function Write-SidecarLog { param([string]$Message, [switch]$Flush) }
+    }
+    if (-not (Get-Command Write-SidecarLogVerbose -ErrorAction SilentlyContinue)) {
+        function Write-SidecarLogVerbose { param([string]$Message) }
+    }
+    . (Join-Path $SidecarRoot 'lib/Aria2Plugin.ps1')
+    . (Join-Path $SidecarRoot 'lib/EvalIsoCatalog.ps1')
+    $list = @(($Products -split ',') | ForEach-Object { ([string]$_).Trim() } | Where-Object { $_ })
+    $out = if ($list.Count -gt 0) { Update-AppEvalIsoCatalogCache -ProductIds $list } else { Update-AppEvalIsoCatalogCache }
+    ($out | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $ResultPath -Encoding UTF8
+} catch {
+    (@{ error = $_.Exception.Message } | ConvertTo-Json) | Set-Content -LiteralPath $ResultPath -Encoding UTF8
+    exit 1
+}
+'@
+
+function Start-AppEvalIsoCatalogRefreshJob {
     <#
     .SYNOPSIS
-        Scrape an Evaluation Center page for the en-US x64 ISO fwlink.
-    .NOTES
-        Filters mirror the original script: English, not Azure, not 32-bit,
-        not LTSC, not VHD, not ARM. Returns $null when nothing matches.
+        Refresh in a child pwsh: seven page fetches plus a HEAD per download is
+        minutes of network, and the dispatch loop is single-threaded.
     #>
-    param([Parameter(Mandatory)][string]$PageUrl)
+    param(
+        [string[]]$ProductIds = @(),
+        [switch]$Automatic
+    )
+    if ($script:AppEvalIsoRefreshJob) {
+        return @{ accepted = $true; background = $true; alreadyRunning = $true; automatic = [bool]$script:AppEvalIsoRefreshJob.automatic }
+    }
+    $stamp = [Guid]::NewGuid().ToString('N')
+    $runnerPath = Join-Path ([IO.Path]::GetTempPath()) "$(Get-AppProductSlug)-eval-iso-refresh-$stamp.ps1"
+    $resultPath = Join-Path ([IO.Path]::GetTempPath()) "$(Get-AppProductSlug)-eval-iso-refresh-$stamp.json"
+    Set-Content -LiteralPath $runnerPath -Value $script:AppEvalIsoRefreshRunner -Encoding UTF8
+    $pwsh = if ([string]::IsNullOrWhiteSpace([string][Environment]::ProcessPath)) { 'pwsh' } else { [string][Environment]::ProcessPath }
+    $procArgs = @('-NoProfile', '-NonInteractive', '-File', $runnerPath, '-SidecarRoot', [string]$script:SidecarRoot, '-ResultPath', $resultPath)
+    if (@($ProductIds).Count -gt 0) { $procArgs += @('-Products', (@($ProductIds) -join ',')) }
+    $proc = Start-AppNativeProcess -FilePath $pwsh -Arguments $procArgs
+    $script:AppEvalIsoRefreshJob = @{
+        process    = $proc
+        resultPath = $resultPath
+        runnerPath = $runnerPath
+        startedAt  = Get-Date
+        automatic  = [bool]$Automatic
+    }
+    Write-SidecarLog "eval ISO: catalog refresh started (child pwsh$(if ($Automatic) { ', automatic' }))"
+    @{ accepted = $true; background = $true; automatic = [bool]$Automatic }
+}
 
+function Sync-AppEvalIsoCatalogRefreshJob {
+    # Housekeeping tick: reap the finished child, emit the completion event.
+    $job = $script:AppEvalIsoRefreshJob
+    if (-not $job) { return }
+    $proc = $job.process
+    if ($proc -and -not $proc.HasExited) {
+        if (((Get-Date) - $job.startedAt).TotalMinutes -gt 15) {
+            Write-SidecarLog 'eval ISO: catalog refresh watchdog kill (15 min)'
+            try { $proc.Kill($true) } catch { }
+        }
+        return
+    }
+    $script:AppEvalIsoRefreshJob = $null
+    $payload = $null
     try {
-        $resp = Invoke-WebRequest -Uri $PageUrl -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
-    } catch {
-        Write-SidecarLog "Eval ISO: page fetch failed ($PageUrl) - $($_.Exception.Message)"
-        return $null
+        if (Test-Path -LiteralPath $job.resultPath) {
+            $payload = Get-Content -LiteralPath $job.resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+    } catch { $payload = $null }
+    Remove-Item -LiteralPath $job.resultPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $job.runnerPath -Force -ErrorAction SilentlyContinue
+    if (-not $payload) {
+        Write-SidecarLog 'eval ISO: catalog refresh ended with no result'
+        Write-SidecarEvent -EventName 'eval-iso-catalog-refresh' -Data @{ error = 'refresh process ended without a result (killed or crashed)'; automatic = [bool]$job.automatic }
+        return
     }
+    Write-SidecarLog "eval ISO: catalog refresh finished$(if ($job.automatic) { ' (automatic)' })"
+    $payload | Add-Member -NotePropertyName automatic -NotePropertyValue ([bool]$job.automatic) -Force
+    Write-SidecarEvent -EventName 'eval-iso-catalog-refresh' -Data $payload
+}
 
-    $links = @($resp.Links | Where-Object {
-        $_.href -like 'https://go.microsoft.com/fwlink*' -and
-        $_.outerHTML -like '*ISO*' -and
-        $_.outerHTML -notlike '*Azure*' -and
-        $_.outerHTML -notlike '*32-bit*' -and
-        $_.outerHTML -notlike '*LTSC*' -and
-        $_.outerHTML -notlike '*VHD*' -and
-        $_.outerHTML -notlike '*ARM*'
-    })
+function Stop-AppEvalIsoCatalogRefreshJob {
+    $job = $script:AppEvalIsoRefreshJob
+    if (-not $job) { return }
+    $script:AppEvalIsoRefreshJob = $null
+    try { if ($job.process -and -not $job.process.HasExited) { $job.process.Kill($true) } } catch { }
+    Remove-Item -LiteralPath $job.resultPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $job.runnerPath -Force -ErrorAction SilentlyContinue
+}
 
-    # Prefer an explicit English row when the page offers several languages.
-    $english = @($links | Where-Object { $_.outerHTML -match '(?i)en-?us|English' })
-    $chosen = if ($english.Count -gt 0) { $english[0] } elseif ($links.Count -gt 0) { $links[0] } else { $null }
+$script:AppEvalIsoAutoCheckLastEvalUtc = $null
+$script:AppEvalIsoAutoCheckEveryMinutes = 30
+$script:AppEvalIsoAutoCheckFirstDelayMinutes = 3
+$script:AppEvalIsoAutoCheckStartedUtc = (Get-Date).ToUniversalTime()
 
-    if (-not $chosen) {
-        Write-SidecarLog "Eval ISO: no matching download link on $PageUrl (page markup may have changed)"
-        return $null
+function Start-AppEvalIsoCatalogRefreshIfDue {
+    <#
+    .SYNOPSIS
+        Two-week policy on the housekeeping tick. The tick runs every ~50ms, so the
+        decision is throttled hard: nothing at all for the first 3 minutes of a boot
+        (the sidecar has better things to do), then at most one cache read every 30
+        minutes. Quiet (automatic) so the panel just updates - no toasts.
+    #>
+    if ($script:AppEvalIsoRefreshJob) { return }
+    $now = (Get-Date).ToUniversalTime()
+    if (($now - $script:AppEvalIsoAutoCheckStartedUtc).TotalMinutes -lt $script:AppEvalIsoAutoCheckFirstDelayMinutes) { return }
+    if ($script:AppEvalIsoAutoCheckLastEvalUtc -and
+        ($now - $script:AppEvalIsoAutoCheckLastEvalUtc).TotalMinutes -lt $script:AppEvalIsoAutoCheckEveryMinutes) { return }
+    $script:AppEvalIsoAutoCheckLastEvalUtc = $now
+    $cache = Read-AppEvalIsoCache
+    if ($cache) {
+        $age = Get-AppEvalIsoCacheAgeHours -Cache $cache
+        if ($null -ne $age -and $age -lt $script:AppEvalIsoCacheHours) { return }
     }
-    return [string]$chosen.href
+    Write-SidecarLog 'eval ISO: catalog is missing or older than two weeks - refreshing in the background'
+    $null = Start-AppEvalIsoCatalogRefreshJob -Automatic
 }
 
 function Start-AppEvalIsoDownload {
     <#
     .SYNOPSIS
-        Resolve and queue an Evaluation Center ISO into the image library.
-        Uses the same download rail as driver packs, so it works on macOS and
-        the finished file lands where Caddy/SMB already serve it.
+        Queue an Evaluation Center ISO into the image library over the direct HTTP
+        rail (works with the aria2 daemon stopped, emits driver-download-progress
+        under the key eval|<id>, and promotes into Netboot's iso/ store on finish).
     #>
     param([Parameter(Mandatory)][string]$Id)
 
-    $entry = @($script:AppEvalIsoCatalog | Where-Object { $_.id -eq $Id })[0]
-    if (-not $entry) { throw "Eval ISO: unknown id '$Id'." }
-
-    $url = Get-AppEvalIsoDirectUrl -PageUrl ([string]$entry.page)
-    if (-not $url) {
-        throw "Eval ISO: could not resolve a download URL for $($entry.name). Open $($entry.page) and download manually, or drop the ISO into the image library."
+    $catalog = Get-AppEvalIsoCatalog
+    $entry = @($catalog.entries | Where-Object { [string]$_['id'] -eq $Id })
+    if ($entry.Count -eq 0) {
+        if (-not $catalog.cached) {
+            throw "Eval ISO: the catalog has not been fetched yet - use Check for updates first."
+        }
+        throw "Eval ISO: unknown id '$Id'."
     }
+    $row = $entry[0]
+    $url = [string]$row['url']
+    if ([string]::IsNullOrWhiteSpace($url)) { throw "Eval ISO: no download URL for '$Id'." }
+    $fileName = [string]$row['fileName']
 
-    Write-SidecarLog "Eval ISO: $($entry.name) -> $url"
-    return Add-AppAria2ManagedDownload `
-        -Kind 'uri' `
+    Write-SidecarLog "eval ISO: $($row['productName']) $($row['edition']) -> $url"
+    return Add-AppAria2DirectHttpDownload `
         -Uris @($url) `
         -AssetKind 'iso' `
-        -FileNameHint "$($entry.id)_eval.iso"
+        -FileNameHint $fileName `
+        -ProgressKey ("eval|$Id") `
+        -TimeoutSec 21600
 }

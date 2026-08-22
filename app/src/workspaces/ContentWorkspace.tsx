@@ -25,6 +25,9 @@ import type {
   Aria2TrackerDriverRow,
   Aria2TrackerOemIsoRow,
   Aria2TrackerTorrentRow,
+  EvalIsoCatalogResponse,
+  EvalIsoEntry,
+  EvalIsoRefreshResponse,
   VendorSccmCatalogRefreshResponse,
 } from "../lib/types";
 import { toast } from "../state/toastStore";
@@ -214,6 +217,10 @@ export function ContentWorkspace({
   // Row labels for completion/failure toasts (events carry only key + fileName).
   const driverLabelsRef = useRef<Record<string, string>>({});
   const [catalogRefreshBusy, setCatalogRefreshBusy] = useState(false);
+  // Microsoft Evaluation Center media. Cached catalog (14 days) - the sidecar never
+  // scrapes on the dispatch thread, so this is just a read of the cache plus disk state.
+  const [evalIso, setEvalIso] = useState<EvalIsoCatalogResponse | null>(null);
+  const [evalIsoBusy, setEvalIsoBusy] = useState(false);
   const [imageRootPreview, setImageRootPreview] = useState("");
   const [imageFreeBytes, setImageFreeBytes] = useState<number | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -261,6 +268,55 @@ export function ContentWorkspace({
       toast.error("aria2 tracker", e instanceof Error ? e.message : String(e));
     }
   }, []);
+
+  const loadEvalIso = useCallback(async () => {
+    try {
+      const data = await sidecar.invoke<EvalIsoCatalogResponse>(
+        "GetEvalIsoCatalog",
+        await aria2SidecarParams(),
+      );
+      setEvalIso(data);
+    } catch (e) {
+      toast.error("Windows media", e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const refreshEvalIso = useCallback(async () => {
+    setEvalIsoBusy(true);
+    try {
+      const res = await sidecar.invoke<EvalIsoRefreshResponse>(
+        "RefreshEvalIsoCatalog",
+        await aria2SidecarParams(),
+      );
+      if (res?.alreadyRunning) {
+        toast.info("Windows media", "A catalog check is already running.");
+      } else {
+        toast.info("Windows media", "Checking Microsoft for current evaluation media...");
+      }
+    } catch (e) {
+      setEvalIsoBusy(false);
+      toast.error("Windows media", e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const downloadEvalIso = useCallback(
+    async (row: EvalIsoEntry) => {
+      const key = `eval|${row.id}`;
+      driverLabelsRef.current[key] = `${row.productName}${row.edition === "LTSC" ? " LTSC" : ""}`;
+      setDriverDownloads((prev) => ({ ...prev, [key]: { bytesDone: 0, totalBytes: 0 } }));
+      try {
+        await sidecar.invoke("StartEvalIsoDownload", await aria2SidecarParams({ id: row.id }));
+      } catch (e) {
+        setDriverDownloads((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+        toast.error("Windows media", e instanceof Error ? e.message : String(e));
+      }
+    },
+    [],
+  );
 
   const refreshDownloads = useCallback(async () => {
     try {
@@ -364,8 +420,9 @@ export function ContentWorkspace({
   useEffect(() => {
     void loadConfig();
     void loadTracker();
+    void loadEvalIso();
     void refreshImageDestination();
-  }, [loadConfig, loadTracker, refreshImageDestination]);
+  }, [loadConfig, loadEvalIso, loadTracker, refreshImageDestination]);
 
   const ensureBinary = useCallback(async () => {
     setInstallBusy(true);
@@ -438,6 +495,17 @@ export function ContentWorkspace({
         }
         return;
       }
+      if (ev.event === "eval-iso-catalog-refresh") {
+        const data = ev.data as { error?: string; entries?: number; automatic?: boolean } | undefined;
+        setEvalIsoBusy(false);
+        void loadEvalIso();
+        if (data?.error) {
+          toast.error("Windows media", data.error);
+        } else if (!data?.automatic) {
+          toast.success("Windows media", `Catalog updated (${data?.entries ?? 0} download(s) offered).`);
+        }
+        return;
+      }
       if (ev.event === "vendor-catalog-refresh") {
         void finishVendorCatalogRefresh(
           ev.data as VendorSccmCatalogRefreshResponse & { error?: string },
@@ -482,7 +550,7 @@ export function ContentWorkspace({
     return () => {
       void unsub.then((fn) => fn());
     };
-  }, [loadConfig, loadTracker, refreshDownloads, refreshImageDestination, finishVendorCatalogRefresh]);
+  }, [loadConfig, loadEvalIso, loadTracker, refreshDownloads, refreshImageDestination, finishVendorCatalogRefresh]);
 
   useEffect(() => {
     if (!config?.daemonRunning) {
@@ -1056,6 +1124,103 @@ export function ContentWorkspace({
     [adding, config?.daemonRunning, downloadTorrentRow, findImageTransfer],
   );
 
+  // "checked 3h ago" / "never checked" - the catalog is a two-week cache, so say so.
+  const evalIsoStatusText = useMemo(() => {
+    if (!evalIso?.cached) return "never checked";
+    const age = evalIso.ageHours;
+    if (age == null) return "checked recently";
+    const label = age < 1 ? "just now" : age < 48 ? `${Math.round(age)}h ago` : `${Math.round(age / 24)}d ago`;
+    return evalIso.stale ? `checked ${label} (stale)` : `checked ${label}`;
+  }, [evalIso]);
+
+  // Releases that are retired or not published yet: a one-line footnote, not table rows.
+  const evalIsoNotes = useMemo(() => {
+    const products = evalIso?.products ?? [];
+    return products
+      .filter((p) => p.status && p.status !== "ok")
+      .map((p) => {
+        if (p.status === "not-published") return `${p.name}: not published yet`;
+        if (p.status === "unavailable") return `${p.name}: evaluation retired - import an ISO instead`;
+        return `${p.name}: ${p.message || p.status}`;
+      });
+  }, [evalIso]);
+
+  // Microsoft Evaluation Center rows. Progress rides the same driver-download-progress
+  // channel as driver packs (key "eval|<id>"), so the bar here is the shared one.
+  const evalIsoColumns: DataTableColumn<EvalIsoEntry>[] = useMemo(
+    () => [
+      {
+        key: "name",
+        label: "Windows media",
+        sortValue: (r) => `${r.productName} ${r.edition}`,
+        render: (r) => (
+          <span className="flex flex-col">
+            <span>
+              {r.productName}
+              {r.edition === "LTSC" ? " LTSC" : ""}
+            </span>
+            <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+              {[r.release, r.build, r.culture].filter(Boolean).join(" | ")}
+            </span>
+          </span>
+        ),
+      },
+      {
+        key: "size",
+        label: "Size",
+        width: 80,
+        sortValue: (r) => r.sizeBytes,
+        render: (r) => formatBytes(r.sizeBytes),
+      },
+      {
+        key: "actions",
+        label: "",
+        width: 120,
+        sortValue: () => "",
+        render: (r) => {
+          const key = `eval|${r.id}`;
+          const live = driverDownloads[key];
+          if (live && !live.failed) {
+            const pct = live.totalBytes > 0 ? Math.min(100, Math.floor((live.bytesDone / live.totalBytes) * 100)) : 0;
+            return (
+              <span
+                className="inline-flex items-center gap-1.5"
+                title={`${formatBytes(live.bytesDone)} of ${formatBytes(live.totalBytes)}`}
+              >
+                <span
+                  aria-hidden
+                  style={{ width: 44, height: 4, borderRadius: 2, background: "var(--surface3)", overflow: "hidden", display: "inline-block" }}
+                >
+                  <span style={{ display: "block", width: `${pct}%`, height: "100%", background: "var(--accent)", transition: "width 0.3s linear" }} />
+                </span>
+                {live.totalBytes > 0 ? `${pct}%` : "..."}
+              </span>
+            );
+          }
+          if (r.downloaded) {
+            return (
+              <span className="text-[11px]" style={{ color: "var(--text3)" }} title={r.fileName}>
+                In Netboot
+              </span>
+            );
+          }
+          return (
+            <button
+              type="button"
+              className="table-action"
+              disabled={!r.url}
+              title={r.fileName ? `${r.fileName}${live?.failed ? ` - last attempt failed: ${live.message ?? ""}` : ""}` : r.url}
+              onClick={() => void downloadEvalIso(r)}
+            >
+              {live?.failed ? "Retry" : "Download"}
+            </button>
+          );
+        },
+      },
+    ],
+    [downloadEvalIso, driverDownloads],
+  );
+
   const oemColumns: DataTableColumn<Aria2TrackerOemIsoRow>[] = useMemo(
     () => [
       {
@@ -1510,6 +1675,38 @@ export function ContentWorkspace({
 
           {tab === "images" && (
             <section className="flex flex-col gap-2 flex-1 min-h-0">
+              <div className="flex flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="mono text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                    Windows evaluation media ({evalIso?.entries?.length ?? 0})
+                  </h3>
+                  <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                    {evalIsoStatusText}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn ml-auto py-0.5 text-[10px]"
+                    disabled={evalIsoBusy || (evalIso?.refreshing ?? false)}
+                    onClick={() => void refreshEvalIso()}
+                  >
+                    {evalIsoBusy || evalIso?.refreshing ? "Checking..." : "Check for updates"}
+                  </button>
+                </div>
+                {(evalIso?.entries?.length ?? 0) > 0 ? (
+                  <DataTable columns={evalIsoColumns} rows={evalIso?.entries ?? []} rowKey={(r) => r.id} />
+                ) : (
+                  <p className="text-[11px]" style={{ color: "var(--text2)" }}>
+                    {evalIso?.cached
+                      ? "Microsoft is not offering evaluation downloads right now."
+                      : "Not checked yet - use Check for updates to list current Microsoft evaluation ISOs."}
+                  </p>
+                )}
+                {evalIsoNotes.length > 0 && (
+                  <p className="text-[10px]" style={{ color: "var(--text3)" }}>
+                    {evalIsoNotes.join("  |  ")}
+                  </p>
+                )}
+              </div>
               <div className="flex gap-2 border-b flex-wrap" style={{ borderColor: "var(--border)" }}>
                 <button type="button" style={tabBtn(imagesView === "soe")} onClick={() => setImagesView("soe")}>
                   Catalog ({tracker?.torrents?.length ?? 0})

@@ -13,6 +13,7 @@ export type SidecarEventName =
   | "aria2-tools"
   | "driver-download-progress"
   | "vendor-catalog-refresh"
+  | "eval-iso-catalog-refresh"
   | "aria2-promote"
   | "exited";
 
@@ -90,6 +91,7 @@ export type SidecarCommand =
   | "RemovePxeBootIso"
   | "RemovePxeBootWim"
   | "RevealSmbdForFullDiskAccess"
+  | "RefreshEvalIsoCatalog"
   | "SavePxeBootTaskSequences"
   | "SetAria2PluginConfig"
   | "SetImageLibraryRoot"
@@ -692,6 +694,65 @@ export interface Aria2TrackerDriverRow {
   magnet?: string | null;
   source?: "acer" | "lenovo" | "lenovo-support" | "dell" | "hp" | "manifest" | null;
   downloadable?: boolean;
+}
+
+/**
+ * Microsoft Evaluation Center media. One row per downloadable edition (currently
+ * en-US x64 ISO only); `id` is what StartEvalIsoDownload takes.
+ */
+export interface EvalIsoEntry {
+  id: string;
+  productId: string;
+  productName: string;
+  /** Product name as Microsoft writes it on the page, e.g. "Windows Server 2025 Preview". */
+  title: string;
+  edition: "Standard" | "LTSC" | string;
+  media: "ISO" | "VHD" | string;
+  arch: "x64" | "arm64" | "x86" | string;
+  culture: string;
+  /** The fwlink we download - stable; the file it redirects to is not. */
+  url: string;
+  resolvedUrl?: string;
+  /** Real Microsoft file name, from the redirect chain; also how "downloaded" is matched. */
+  fileName: string;
+  sizeBytes: number;
+  build?: string;
+  release?: string;
+  page: string;
+  downloaded: boolean;
+  localSizeBytes: number;
+}
+
+/** Per-product state, including releases that are retired or not published yet. */
+export interface EvalIsoProduct {
+  id: string;
+  name: string;
+  kind: "client" | "server" | string;
+  probe?: boolean;
+  page: string;
+  /** ok = downloads offered; unavailable = page has none (retired); not-published = probe row waiting. */
+  status?: "ok" | "unavailable" | "not-published" | "error" | string;
+  message?: string;
+  count?: number;
+}
+
+export interface EvalIsoCatalogResponse {
+  entries: EvalIsoEntry[];
+  products: EvalIsoProduct[];
+  cached: boolean;
+  fetchedAt: string;
+  ageHours: number | null;
+  ttlHours: number;
+  stale: boolean;
+  refreshing: boolean;
+  isoDir: string;
+}
+
+export interface EvalIsoRefreshResponse {
+  accepted: boolean;
+  background?: boolean;
+  alreadyRunning?: boolean;
+  automatic?: boolean;
 }
 
 export interface Aria2TrackerCatalog {
