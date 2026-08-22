@@ -1279,7 +1279,9 @@ function Clear-AppAria2TrackerManifestFetchBackoff {
 
 function Write-AppAria2TrackerManifestFetchFailureLog {
     param(
-        [Parameter(Mandatory)][string]$ManifestUrl,
+        # AllowEmptyString: this is an error path, and refusing to log because the URL
+        # was empty turned a skippable condition into a thrown IPC error.
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ManifestUrl,
         [Parameter(Mandatory)][string]$Message
     )
     $shouldLog = $true
@@ -1357,6 +1359,24 @@ function Read-AppAria2TrackerManifest {
     }
 
     $manifestUrl = Get-AppAria2TrackerManifestUrl
+    if ([string]::IsNullOrWhiteSpace($manifestUrl)) {
+        # No asset feed configured (this product ships with none), so there is nothing
+        # to refresh from: use the disk cache or the bundled manifest and say nothing.
+        # Before this guard the empty URL reached Invoke-RestMethod, and the failure
+        # logger then rejected the empty string - so every poll of the downloads panel
+        # returned an IPC error instead of a catalog (Craig's log, 2026-08-23).
+        $disk = Read-AppAria2TrackerManifestDiskCache -AllowStale
+        if ($disk) {
+            Set-AppAria2TrackerManifestMemoryCache -Manifest $disk -Stale
+            return $disk
+        }
+        $bundledOnly = Read-AppAria2TrackerManifestBundled
+        if ($bundledOnly) {
+            Set-AppAria2TrackerManifestMemoryCache -Manifest $bundledOnly -Stale
+            return $bundledOnly
+        }
+        return $null
+    }
     if (-not $ForceRefresh -and (Test-AppAria2TrackerManifestFetchBackoffActive)) {
         $staleDisk = Read-AppAria2TrackerManifestDiskCache -AllowStale
         if ($staleDisk) {
