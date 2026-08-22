@@ -32,6 +32,7 @@ import type {
   PxeBootNetworkAdapter,
   PxeBootPluginConfigResponse,
   PxeBootPluginStatus,
+  PxeBootInstallImageEntry,
   PxeBootTaskSequence,
   PxeBootTaskSequenceStep,
   PxeBootTaskSequencesPayload,
@@ -344,6 +345,11 @@ export function PxeWorkspace({
   const [libraryBusy, setLibraryBusy] = useState(false);
   // Editable working copy - Save publishes the whole set.
   const [tsEdit, setTsEdit] = useState<PxeBootTaskSequence[] | null>(null);
+  // Install image sources for the per-sequence image dropdown. Seeded from the task
+  // sequence payload (cached editions only - no ISO is mounted on a panel load); the
+  // "Read editions" button asks the sidecar to mount and read what it has not seen.
+  const [installImages, setInstallImages] = useState<PxeBootInstallImageEntry[]>([]);
+  const [installImagesBusy, setInstallImagesBusy] = useState(false);
   // Domain join is an optional addition, not part of every sequence: a sequence is
   // "joining" when it has a domain set, or when the operator has just ticked the box
   // and has not typed one yet.
@@ -589,6 +595,7 @@ export function PxeWorkspace({
         setTsPayload(data);
         setTsEdit(tsWithStepKeys(data.sequences));
         setTsDefaultId(data.defaultSequenceId ?? "");
+        setInstallImages(data.installImages ?? []);
       } catch (e) {
         if (!cancelled) toast.error("Task sequences", e instanceof Error ? e.message : String(e));
       }
@@ -655,6 +662,7 @@ export function PxeWorkspace({
       setTsPayload(data);
       setTsEdit(tsWithStepKeys(data.sequences));
       setTsDefaultId(data.defaultSequenceId ?? "");
+      if (data.installImages) setInstallImages(data.installImages);
       toast.success("Task sequences", `${data.publishedFiles.length} published to the deploy share.`);
     } catch (e) {
       toast.error("Task sequences", e instanceof Error ? e.message : String(e));
@@ -662,6 +670,23 @@ export function PxeWorkspace({
       setTsSaving(false);
     }
   }, [tsEdit, tsDefaultId]);
+
+  const readInstallImageEditions = useCallback(async () => {
+    setInstallImagesBusy(true);
+    try {
+      const data = await sidecar.invoke<{ images: PxeBootInstallImageEntry[]; unread: number }>(
+        "ListPxeBootInstallImages",
+        await pxeSidecarParams({ refresh: true }),
+      );
+      setInstallImages(data.images ?? []);
+      const read = (data.images ?? []).filter((e) => e.imagesKnown).length;
+      toast.success("Windows images", `${read} source(s) read.`);
+    } catch (e) {
+      toast.error("Windows images", e instanceof Error ? e.message : String(e));
+    } finally {
+      setInstallImagesBusy(false);
+    }
+  }, []);
 
   const clearImagingLogs = useCallback(async () => {
     try {
@@ -2321,6 +2346,78 @@ export function PxeWorkspace({
                                 <option value="client">Client</option>
                                 <option value="server">Server</option>
                               </select>
+                              <label
+                                className="text-[11px]"
+                                style={{ color: "var(--text2)" }}
+                                title="The install.wim this sequence deploys. Blank leaves the choice to whoever is standing at the device."
+                              >
+                                Windows image
+                              </label>
+                              <div className="flex items-center gap-1.5">
+                                <select
+                                  className="input-box mono h-[26px] flex-1 text-[11px]"
+                                  value={seq.image ? `${seq.image.sourceId}||${seq.image.index}` : ""}
+                                  onChange={(e) => {
+                                    const raw = e.target.value;
+                                    setTsEdit((prev) =>
+                                      (prev ?? []).map((s) => {
+                                        if (s.id !== seq.id) return s;
+                                        if (!raw) {
+                                          const { image: _drop, ...rest } = s;
+                                          return rest as PxeBootTaskSequence;
+                                        }
+                                        const cut = raw.lastIndexOf("||");
+                                        const sourceId = raw.slice(0, cut);
+                                        const index = Number(raw.slice(cut + 2)) || 1;
+                                        const entry = installImages.find((x) => x.id === sourceId);
+                                        const img = entry?.images.find((i) => i.index === index);
+                                        return {
+                                          ...s,
+                                          image: { sourceId, index, editionName: img?.name ?? "" },
+                                        };
+                                      }),
+                                    );
+                                  }}
+                                >
+                                  <option value="">(chosen at the device)</option>
+                                  {installImages.map((entry) =>
+                                    entry.imagesKnown && entry.images.length > 0 ? (
+                                      <optgroup key={entry.id} label={entry.label}>
+                                        {entry.images.map((img) => (
+                                          <option key={`${entry.id}||${img.index}`} value={`${entry.id}||${img.index}`}>
+                                            {img.name || img.edition || `Image ${img.index}`} (index {img.index})
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                    ) : (
+                                      <option key={entry.id} value="" disabled>
+                                        {entry.label} - editions not read yet
+                                      </option>
+                                    ),
+                                  )}
+                                  {seq.image &&
+                                  !installImages.some(
+                                    (x) =>
+                                      x.id === seq.image?.sourceId &&
+                                      x.images.some((i) => i.index === seq.image?.index),
+                                  ) ? (
+                                    <option value={`${seq.image.sourceId}||${seq.image.index}`}>
+                                      {seq.image.editionName || `Index ${seq.image.index}`} (media offline)
+                                    </option>
+                                  ) : null}
+                                </select>
+                                {installImages.some((e) => !e.imagesKnown) ? (
+                                  <button
+                                    type="button"
+                                    className="btn px-1.5 py-0 text-[10px]"
+                                    disabled={installImagesBusy}
+                                    title="Mount each ISO once and read its editions (cached afterwards)."
+                                    onClick={() => void readInstallImageEditions()}
+                                  >
+                                    {installImagesBusy ? "Reading..." : "Read editions"}
+                                  </button>
+                                ) : null}
+                              </div>
                               <span />
                               <label className="flex items-center gap-1.5 text-[11px]">
                                 <input

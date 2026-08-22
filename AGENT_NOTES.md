@@ -1175,6 +1175,39 @@ block; `StopPxeBootServices` broke exactly this way and only an IPC round-trip c
 What is left: `GetPxeBootWimLibrary` (642 ms warm) and `GetPxeBootPluginConfig` (418 ms) both
 still rebuild status-shaped data. Worth another look only if the panel still feels slow.
 
+### A task sequence names its own install.wim (2026-08-23)
+
+Craig: "The task sequence should have the Install.Wim so we can selact it in the Task
+Sequence." Before this, a sequence described only what happened AFTER the image landed,
+and the image itself was whatever ISO the device booted.
+
+- `sidecar/lib/PxeBootInstallImages.ps1` lists sources (every ISO in `<library>/iso`,
+  every WIM/FFU in `<library>/WIMs`) and reads their editions with `wimlib-imagex info`.
+  Reading needs the ISO mounted, so it happens **once per file, ever**: the parsed list
+  is cached in `<store>/install-images.json` keyed by name+size+mtime, and an ISO that
+  Netboot already has attached is borrowed, never re-attached. A panel load only does a
+  directory listing plus a JSON read; the "Read editions" button asks for the rest.
+- A sequence stores `image = { sourceId, index, editionName }`. `sourceId` is
+  `iso:<file>` or `wim:<file>`; anything path-shaped is dropped rather than published.
+- Publishing writes `TaskSequences/index.json` next to the unchanged `<id>.xml` files -
+  a client that only globs `*.xml` keeps working. Each row carries `sharePath`
+  (`.mounts\<token>\sources\install.wim`, for a client on Deploy$) and `httpPath`
+  (for an HTTP-only client). `updatedAt` is excluded from the change comparison so a
+  re-save does not rewrite a watched file.
+- Caddy now serves `/TaskSequences/*` so an HTTP-only client can read it.
+- FieldIso (`sidecar/pxe/fieldiso/run.ps1`, v15) picks the sequence named in
+  `System32\tasksequence.id` or the published default, applies **its** image and index,
+  and drops the sequence's unattend into `<applied>\Windows\Panther\unattend.xml`.
+  It rebuilds the URL from `httpPath` against the host it is already talking to -
+  `httpUrl` in the index is the iPXE form and can contain a literal `${next-server}`.
+- **Array-return convention**: these functions emit ONE array object (`, $entries`) so an
+  empty result survives as an empty array. Call them as `$x = f` then `@($x)`; writing
+  `@(f)` nests the array one level deeper and every lookup silently misses. That bug hit
+  the handler, the payload and the gate before the gate pinned it.
+
+Gate: `scripts/test-install-images.ps1` (16 checks) - wimlib parsing, binding
+validation, resolution, and the client half lifted out of run.ps1's AST.
+
 ### Extracting a boot WIM from an ISO (2026-08-22)
 
 "I cant extract a boot wim from an ISO." The log told the whole story once it arrived:

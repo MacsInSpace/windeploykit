@@ -434,6 +434,31 @@ function Handle-ClearPxeBootLogTail {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-ListPxeBootInstallImages {
+    <#
+    .SYNOPSIS
+        Install images a task sequence can deploy (ISOs on the share + WIMs/*.wim).
+    .NOTES
+        Default is the cheap read: directory listing plus the cached edition lists.
+        refresh=true (or a sourceId) mounts what the cache does not cover and reads it
+        with wimlib - seconds per ISO, once per ISO, so the panel asks for it behind a
+        button rather than on every load.
+    #>
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $refresh = [bool](Get-AppSidecarParam -Params $Params -Name 'refresh')
+    $sourceId = ([string](Get-AppSidecarParam -Params $Params -Name 'sourceId')).Trim()
+    $only = if ($sourceId) { @($sourceId) } else { $null }
+    # The catalog emits ONE array object (, $entries) so an empty library stays an
+    # empty array over IPC. @(...) around the call would nest it one level deeper.
+    $entries = Get-AppPxeBootInstallImageCatalog -Read:($refresh -or [bool]$sourceId) -OnlySourceIds $only
+    $unread = @($entries | Where-Object { -not [bool]$_.imagesKnown })
+    Write-SidecarResponse -Id $Id -Data @{
+        images = @($entries)
+        unread = $unread.Count
+    }
+}
+
 function Handle-GetTaskSequenceStepLibrary {
     param([int]$Id, $Params)
     # Static catalog, split client/server - the menu caches it against the version.

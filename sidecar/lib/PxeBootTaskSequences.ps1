@@ -252,6 +252,28 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
             autoLogon      = [bool](Get-AppPxeBootTsProp -Item $accountIn -Name 'autoLogon')
         }
     }
+    # Which install.wim (and which index inside it) this sequence deploys. Empty =
+    # the tech picks at the device, which is how every sequence behaved before
+    # 2026-08-22. sourceId is 'iso:<file>' or 'wim:<file>' from the image catalog;
+    # anything else is dropped rather than published as a dangling reference.
+    $imageIn = Get-AppPxeBootTsProp -Item $Item -Name 'image'
+    $image = $null
+    if ($imageIn) {
+        $sourceId = ([string](Get-AppPxeBootTsProp -Item $imageIn -Name 'sourceId')).Trim()
+        if ($sourceId -match '^(iso|wim):[^\\/]+$') {
+            $imageIndex = 0
+            try { $imageIndex = [int](Get-AppPxeBootTsProp -Item $imageIn -Name 'index') } catch { $imageIndex = 0 }
+            if ($imageIndex -lt 1) { $imageIndex = 1 }
+            if ($imageIndex -gt 64) { $imageIndex = 64 }
+            $image = [ordered]@{
+                sourceId    = $sourceId
+                index       = $imageIndex
+                # Remembered so the panel and the published index can still name the
+                # edition when the media is offline (an unplugged drive, ISO removed).
+                editionName = ([string](Get-AppPxeBootTsProp -Item $imageIn -Name 'editionName')).Trim()
+            }
+        }
+    }
     $nameVal = [string](Get-AppPxeBootTsProp -Item $Item -Name 'name')
     $record = [ordered]@{
         id          = $id
@@ -263,6 +285,7 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         steps       = $steps
     }
     if ($localAccount) { $record['localAccount'] = $localAccount }
+    if ($image) { $record['image'] = $image }
     $record
 }
 
@@ -1005,6 +1028,24 @@ function Sync-AppPxeBootTaskSequenceStore {
 
     $published = 0
     $keep = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $indexRows = @()
+    # One cheap catalog read for the whole publish (cached edition lists, no mounting).
+    $catalog = $null
+    $httpPort = 0
+    $lanIp = ''
+    try {
+        if (Get-Command Get-AppPxeBootInstallImageCatalog -ErrorAction SilentlyContinue) {
+            # Assign, then wrap: the catalog emits one array object, so @(call) would
+            # nest it and every lookup below would miss.
+            $catalogRaw = Get-AppPxeBootInstallImageCatalog
+            $catalog = @($catalogRaw)
+            $cfg = Read-AppPxeBootConfig
+            $httpPort = [int]$cfg.httpPort
+            $lanIp = [string](Get-AppPxeBootLanIp)
+        }
+    } catch {
+        Write-SidecarLogVerbose "PXE boot: install image catalog unavailable for publish - $($_.Exception.Message)"
+    }
     foreach ($seq in @(Read-AppPxeBootTaskSequences)) {
         $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq
         if ($null -eq $rec -or -not [bool]$rec.enabled) { continue }
@@ -1019,11 +1060,63 @@ function Sync-AppPxeBootTaskSequenceStore {
         }
         [void]$keep.Add("$($rec.id).xml")
         $published++
+
+        # index.json row: what the client needs BEFORE it applies anything. A row with
+        # no image keeps the old behaviour (the tech picks the WIM at the device).
+        $row = [ordered]@{
+            id      = [string]$rec.id
+            name    = [string]$rec.name
+            kind    = [string]$rec.kind
+            file    = "$($rec.id).xml"
+            image   = $null
+        }
+        if ($rec.Contains('image')) {
+            $resolved = $null
+            try {
+                $resolved = Resolve-AppPxeBootTaskSequenceImage -Image $rec.image -Catalog $catalog -HttpPort $httpPort -LanIp $lanIp
+            } catch {
+                Write-SidecarLogVerbose "PXE boot: image resolve failed for '$($rec.id)' - $($_.Exception.Message)"
+            }
+            if ($resolved) {
+                $row.image = $resolved
+            } else {
+                # Media has gone away: publish what was chosen so the client can say
+                # WHICH image is missing instead of silently falling back.
+                $row.image = [ordered]@{
+                    sourceId    = [string]$rec.image.sourceId
+                    index       = [int]$rec.image.index
+                    editionName = [string]$rec.image.editionName
+                    missing     = $true
+                }
+            }
+        }
+        $indexRows += , $row
     }
     foreach ($existing in @(Get-ChildItem -LiteralPath $dir -File -Filter '*.xml' -ErrorAction SilentlyContinue)) {
         if (-not $keep.Contains($existing.Name)) {
             Remove-Item -LiteralPath $existing.FullName -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    # index.json - the machine-readable half of the share. The *.xml files stay exactly
+    # as they were (a client that only globs *.xml keeps working); this adds the image
+    # binding, which a client cannot infer from an unattend.
+    $indexFile = Join-Path $dir 'index.json'
+    if ($indexRows.Count -gt 0) {
+        $indexBody = ([ordered]@{
+                schema            = 1
+                updatedAt         = (Get-Date).ToUniversalTime().ToString('o')
+                defaultSequenceId = [string](Get-AppPxeBootTaskSequenceDefaultId)
+                sequences         = $indexRows
+            } | ConvertTo-Json -Depth 8)
+        $haveIndex = if (Test-Path -LiteralPath $indexFile) { Get-Content -LiteralPath $indexFile -Raw -ErrorAction SilentlyContinue } else { $null }
+        # updatedAt alone must not rewrite the file on every save (the share is watched).
+        $stripStamp = { param($s) if ($s) { [regex]::Replace([string]$s, '"updatedAt":\s*"[^"]*"', '"updatedAt":""') } else { '' } }
+        if ((& $stripStamp $haveIndex) -ne (& $stripStamp $indexBody)) {
+            [System.IO.File]::WriteAllText($indexFile, $indexBody, (New-Object System.Text.UTF8Encoding $false))
+        }
+    } elseif (Test-Path -LiteralPath $indexFile) {
+        Remove-Item -LiteralPath $indexFile -Force -ErrorAction SilentlyContinue
     }
 
     # _default.txt preselects the client menu (touch-free deploys). Written
@@ -1126,8 +1219,21 @@ function Get-AppPxeBootTaskSequencesPayload {
             }
         }
     } catch { }
+    # Install image sources for the per-sequence image dropdown. Cheap read: a
+    # directory listing plus the cached edition lists - ISOs are never mounted here.
+    # The panel asks ListPxeBootInstallImages with refresh when it wants the unread ones.
+    $installImages = @()
+    try {
+        if (Get-Command Get-AppPxeBootInstallImageCatalog -ErrorAction SilentlyContinue) {
+            $catalogPayload = Get-AppPxeBootInstallImageCatalog
+            $installImages = @($catalogPayload)
+        }
+    } catch {
+        Write-SidecarLogVerbose "PXE boot: install image catalog unavailable - $($_.Exception.Message)"
+    }
     @{
         sequences         = $sequences
+        installImages     = $installImages
         libraryDir        = $dir
         publishedFiles    = $publishedFiles
         defaultSequenceId  = (Get-AppPxeBootTaskSequenceDefaultId)

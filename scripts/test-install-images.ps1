@@ -1,0 +1,293 @@
+#requires -Version 7.0
+<#
+.SYNOPSIS
+    Offline gate for the install image catalog and the task sequence image binding.
+.DESCRIPTION
+    Craig, 2026-08-22: "The task sequence should have the Install.Wim so we can select
+    it in the Task Sequence." Three things have to hold for that to work end to end:
+
+      1. wimlib's `info` output parses into the editions a tech picks from.
+      2. A sequence stores {sourceId,index} and only that - a malformed or
+         path-shaped sourceId must never reach the published share.
+      3. The client half (FieldIso) reads TaskSequences/index.json and turns a row
+         into a URL + index against the host it is already talking to, ignoring the
+         iPXE-only ${next-server} form of the URL.
+#>
+[CmdletBinding()]
+param()
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$SidecarRoot = Join-Path $RepoRoot 'sidecar'
+$script:SidecarRoot = $SidecarRoot
+$script:AppState = @{ IsReady = $true }
+function Write-SidecarLog { param([string]$Message, [switch]$Flush) }
+function Write-SidecarLogVerbose { param([string]$Message) }
+. (Join-Path $SidecarRoot 'lib/AppPaths.ps1')
+. (Join-Path $SidecarRoot 'lib/AppProductIdentity.ps1')
+. (Join-Path $SidecarRoot 'lib/PxeBootTaskSequences.ps1')
+. (Join-Path $SidecarRoot 'lib/PxeBootPlugin.ps1')
+. (Join-Path $SidecarRoot 'lib/PxeBootInstallImages.ps1')
+
+$failures = 0
+function Test-Case {
+    param([string]$Name, [scriptblock]$Body)
+    try { & $Body; Write-Host "  [OK  ] $Name" }
+    catch { Write-Host "  [FAIL] $Name - $($_.Exception.Message)"; $script:failures++ }
+}
+function Assert-Equal {
+    param($Expected, $Actual, [string]$What)
+    if ("$Expected" -ne "$Actual") { throw "$What - expected '$Expected', got '$Actual'" }
+}
+
+# Real wimlib output (Windows Server 2025 evaluation media, 4 images).
+$wimlibInfo = @'
+WIM Information:
+----------------
+Path:           /Volumes/mount/sources/install.wim
+GUID:           0x85c0d8f533184149a9aff5dedc654606
+Image Count:    4
+Boot Index:     0
+
+Available Images:
+-----------------
+Index:                  1
+Name:                   Windows Server 2025 SERVERSTANDARDCORE
+Description:            Windows Server 2025 SERVERSTANDARDCORE
+Total Bytes:            11322334455
+Architecture:           x86_64
+Edition ID:             ServerStandardEval
+Installation Type:      Server Core
+Build:                  26100
+
+Index:                  2
+Name:                   Windows Server 2025 SERVERSTANDARD
+Description:            Windows Server 2025 SERVERSTANDARD
+Total Bytes:            24700000000
+Architecture:           x86_64
+Edition ID:             ServerStandardEval
+Installation Type:      Server
+Build:                  26100
+
+Index:                  4
+Name:                   Windows Server 2025 SERVERDATACENTER
+Description:            Windows Server 2025 SERVERDATACENTER
+Total Bytes:            24700000001
+Architecture:           x86_64
+Edition ID:             ServerDatacenterEval
+Installation Type:      Server
+Build:                  26100
+'@
+
+Write-Host 'wimlib info parsing:'
+
+Test-Case 'every image is found, in order' {
+    # Assign, then wrap: the parser emits ONE array object so an empty WIM stays an
+    # empty array over IPC. @(call) would nest it - this bit the handler too.
+    $parsed = ConvertFrom-AppPxeBootWimlibInfo -Text $wimlibInfo
+    $images = @($parsed)
+    Assert-Equal 3 $images.Count 'image count'
+    Assert-Equal '1,2,4' (($images | ForEach-Object { $_.index }) -join ',') 'indexes'
+}
+
+Test-Case 'fields a tech picks by are kept' {
+    # Assign, then wrap: the parser emits ONE array object so an empty WIM stays an
+    # empty array over IPC. @(call) would nest it - this bit the handler too.
+    $parsed = ConvertFrom-AppPxeBootWimlibInfo -Text $wimlibInfo
+    $images = @($parsed)
+    $second = $images[1]
+    Assert-Equal 'Windows Server 2025 SERVERSTANDARD' $second.name 'name'
+    Assert-Equal 'ServerStandardEval' $second.edition 'edition'
+    Assert-Equal 'Server' $second.installType 'install type'
+    Assert-Equal 'x86_64' $second.arch 'arch'
+    Assert-Equal 26100 $second.build 'build'
+    Assert-Equal 24700000000 $second.sizeBytes 'size'
+}
+
+Test-Case 'the WIM Information header is not mistaken for an image' {
+    # Assign, then wrap: the parser emits ONE array object so an empty WIM stays an
+    # empty array over IPC. @(call) would nest it - this bit the handler too.
+    $parsed = ConvertFrom-AppPxeBootWimlibInfo -Text $wimlibInfo
+    $images = @($parsed)
+    foreach ($i in $images) { if ($i.index -eq 0) { throw 'header parsed as an image' } }
+}
+
+Test-Case 'empty and garbage input return an empty array, not $null' {
+    foreach ($text in @('', 'no images here', "WIM Information:`n----`nPath: x")) {
+        $r = ConvertFrom-AppPxeBootWimlibInfo -Text $text
+        if ($null -eq $r) { throw 'returned $null' }
+        Assert-Equal 0 @($r).Count "count for '$text'"
+    }
+}
+
+Test-Case 'the dropdown label names the edition and index' {
+    # Assign, then wrap: the parser emits ONE array object so an empty WIM stays an
+    # empty array over IPC. @(call) would nest it - this bit the handler too.
+    $parsed = ConvertFrom-AppPxeBootWimlibInfo -Text $wimlibInfo
+    $images = @($parsed)
+    Assert-Equal 'Windows Server 2025 SERVERSTANDARD (index 2)' (Get-AppPxeBootInstallImageLabel -Image $images[1]) 'label'
+    Assert-Equal 'Image 7 (index 7)' (Get-AppPxeBootInstallImageLabel -Image ([ordered]@{ index = 7; name = ''; edition = '' })) 'fallback label'
+}
+
+Test-Case 'a single-image WIM still parses as an array of one' {
+    $one = ConvertFrom-AppPxeBootWimlibInfo -Text "Available Images:`n-----`nIndex:   1`nName:    Windows 11 Pro`n"
+    Assert-Equal 1 @($one).Count 'count'
+    Assert-Equal 'Windows 11 Pro' @($one)[0].name 'name'
+}
+
+Write-Host ''
+Write-Host 'Task sequence image binding:'
+
+$baseSeq = @{ id = 'srv'; name = 'Server'; kind = 'server'; enabled = $true; fields = @{} }
+
+Test-Case 'a valid binding round-trips' {
+    $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item ($baseSeq + @{
+            image = @{ sourceId = 'iso:Win11_24H2.iso'; index = 6; editionName = 'Windows 11 Pro' }
+        })
+    Assert-Equal 'iso:Win11_24H2.iso' $rec.image.sourceId 'sourceId'
+    Assert-Equal 6 $rec.image.index 'index'
+    Assert-Equal 'Windows 11 Pro' $rec.image.editionName 'edition name'
+}
+
+Test-Case 'no image means no key at all (tech picks at the device)' {
+    $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $baseSeq
+    if ($rec.Contains('image')) { throw 'image key should be absent' }
+    $rec2 = ConvertTo-AppPxeBootTaskSequenceRecord -Item ($baseSeq + @{ image = @{ sourceId = ''; index = 3 } })
+    if ($rec2.Contains('image')) { throw 'blank sourceId should not bind' }
+}
+
+Test-Case 'path-shaped and unknown-kind source ids are refused' {
+    foreach ($bad in @('iso:../../etc/passwd', 'iso:sub/dir.iso', 'iso:sub\dir.iso', 'ftp:x.iso', 'Win11.iso', 'iso:')) {
+        $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item ($baseSeq + @{ image = @{ sourceId = $bad; index = 1 } })
+        if ($rec.Contains('image')) { throw "'$bad' should have been refused" }
+    }
+}
+
+Test-Case 'index is clamped into a sane range' {
+    foreach ($pair in @(@(0, 1), @(-4, 1), @(999, 64), @(3, 3))) {
+        $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item ($baseSeq + @{
+                image = @{ sourceId = 'wim:soe.wim'; index = $pair[0] }
+            })
+        Assert-Equal $pair[1] $rec.image.index "index $($pair[0])"
+    }
+}
+
+Test-Case 'resolve turns a binding into share path + HTTP URL' {
+    $catalog = @(
+        [ordered]@{
+            id = 'iso:Win11.iso'; kind = 'iso'; fileName = 'Win11.iso'; label = 'Win11'
+            sharePath = '.mounts\win11-abcd1234\sources\install.wim'
+            httpPath = 'iso-wim/win11-abcd1234/install.wim'
+            imagesKnown = $true
+            images = @([ordered]@{ index = 6; name = 'Windows 11 Pro'; edition = 'Professional' })
+        }
+    )
+    $resolved = Resolve-AppPxeBootTaskSequenceImage -Image @{ sourceId = 'iso:Win11.iso'; index = 6 } -Catalog $catalog -HttpPort 8080 -LanIp '10.0.1.147'
+    Assert-Equal '.mounts\win11-abcd1234\sources\install.wim' $resolved.sharePath 'share path'
+    Assert-Equal 'http://10.0.1.147:8080/iso-wim/win11-abcd1234/install.wim' $resolved.httpUrl 'http url'
+    Assert-Equal 'Windows 11 Pro' $resolved.editionName 'edition name from the catalog'
+    Assert-Equal 6 $resolved.index 'index'
+    if ($null -ne (Resolve-AppPxeBootTaskSequenceImage -Image @{ sourceId = 'iso:Gone.iso'; index = 1 } -Catalog $catalog)) {
+        throw 'a missing source should resolve to $null'
+    }
+    if ($null -ne (Resolve-AppPxeBootTaskSequenceImage -Image $null -Catalog $catalog)) {
+        throw 'no image should resolve to $null'
+    }
+}
+
+Test-Case 'an ISO mount token is stable and URL-safe' {
+    $token = Get-AppPxeBootIsoMountToken -IsoFileName 'Windows 11 (24H2) x64.iso'
+    if ($token -notmatch '^[A-Za-z0-9._-]+$') { throw "token is not URL-safe: $token" }
+    Assert-Equal $token (Get-AppPxeBootIsoMountToken -IsoFileName 'Windows 11 (24H2) x64.iso') 'stable across calls'
+    if ($token -eq (Get-AppPxeBootIsoMountToken -IsoFileName 'Windows 11 (23H2) x64.iso')) { throw 'two ISOs collided' }
+}
+
+Write-Host ''
+Write-Host 'Client half (FieldIso reads the published index):'
+
+# The client functions live in a script that runs main() on load, so lift just the
+# function definitions out of its AST rather than dot-sourcing it.
+$runPath = Join-Path $SidecarRoot 'pxe/fieldiso/run.ps1'
+$errors = $null
+$tokens = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($runPath, [ref]$tokens, [ref]$errors)
+if ($errors -and $errors.Count -gt 0) { throw "run.ps1 does not parse: $($errors[0])" }
+$wanted = @('Get-FieldIsoHttpOrigin', 'Get-FieldIsoTaskSequence', 'Get-FieldIsoTaskSequenceImage', 'Install-FieldIsoTaskSequenceUnattend', 'Get-FieldIsoJsonProp', 'Test-FieldIsoJsonBool', 'Read-FieldIsoOneLineFile', 'Get-FieldIsoWorkDir')
+$defs = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
+$src = ($defs | Where-Object { $wanted -contains $_.Name } | ForEach-Object { $_.Extent.Text }) -join "`n"
+foreach ($name in $wanted) { if ($src -notmatch [regex]::Escape("function $name")) { throw "run.ps1 is missing $name" } }
+
+$clientScope = [scriptblock]::Create(@"
+`$script:log = [System.Collections.Generic.List[string]]::new()
+function Write-FieldIsoLog { param([string]`$Message) [void]`$script:log.Add(`$Message) }
+function Stop-FieldIsoBootstrap { param([string]`$Message) throw `$Message }
+$src
+"@)
+$clientState = [powershell]::Create()
+$null = $clientState.AddScript({
+        param($Setup, $IndexJson, $TempDir)
+        . ([scriptblock]::Create($Setup))
+        # Stub the network: index.json comes from a temp file, everything else 404s.
+        function Invoke-FieldIsoCurl {
+            param([string]$Url, [string]$OutFile, [string]$CurlPath)
+            if ($Url -like '*TaskSequences/index.json') {
+                Set-Content -LiteralPath $OutFile -Value $script:IndexBody -Encoding UTF8
+                return $true
+            }
+            return $false
+        }
+        $script:IndexBody = $IndexJson
+        $env:SystemRoot = $TempDir
+        $results = [ordered]@{}
+        $results['origin'] = Get-FieldIsoHttpOrigin -HttpBase 'http://10.0.1.147:8080/fieldiso'
+        $seq = Get-FieldIsoTaskSequence -HttpBase 'http://10.0.1.147:8080/fieldiso' -CurlPath ''
+        $results['seqId'] = if ($seq) { [string]$seq.id } else { '' }
+        $img = Get-FieldIsoTaskSequenceImage -Sequence $seq -HttpBase 'http://10.0.1.147:8080/fieldiso'
+        $results['url'] = if ($img) { [string]$img.Url } else { '' }
+        $results['index'] = if ($img) { [int]$img.Index } else { 0 }
+        $results['log'] = ($script:log -join ' | ')
+        $results
+    })
+$null = $clientState.AddParameters(@{
+        Setup = $clientScope.ToString()
+        TempDir = ([IO.Path]::GetTempPath())
+        IndexJson = (@{
+                schema = 1
+                defaultSequenceId = 'server-standard'
+                sequences = @(
+                    @{ id = 'client-domain'; name = 'Client'; kind = 'client'; file = 'client-domain.xml'; image = $null }
+                    @{ id = 'server-standard'; name = 'Server'; kind = 'server'; file = 'server-standard.xml'
+                        image = @{
+                            sourceId = 'iso:Server2025.iso'; index = 2; editionName = 'Windows Server 2025 SERVERSTANDARD'
+                            httpPath = 'iso-wim/server2025-a38406a3/install.wim'
+                            # Deliberately the iPXE form - the client must not use it.
+                            httpUrl = 'http://${next-server}:8080/iso-wim/server2025-a38406a3/install.wim'
+                            sharePath = '.mounts\server2025-a38406a3\sources\install.wim'
+                        }
+                    }
+                )
+            } | ConvertTo-Json -Depth 8)
+    })
+$clientResult = $clientState.Invoke()
+$clientState.Dispose()
+$r = @($clientResult)[0]
+
+Test-Case 'origin is taken from the http_base URL' {
+    Assert-Equal 'http://10.0.1.147:8080' $r['origin'] 'origin'
+}
+
+Test-Case 'the default sequence is selected from index.json' {
+    Assert-Equal 'server-standard' $r['seqId'] 'sequence id'
+}
+
+Test-Case 'the image URL is rebuilt from httpPath, never the iPXE httpUrl' {
+    Assert-Equal 'http://10.0.1.147:8080/iso-wim/server2025-a38406a3/install.wim' $r['url'] 'image url'
+    if ($r['url'] -match 'next-server') { throw 'the client used the iPXE URL' }
+    Assert-Equal 2 $r['index'] 'image index'
+}
+
+Write-Host ''
+if ($failures -gt 0) { Write-Host "install images: $failures failure(s)"; exit 1 }
+Write-Host 'install images: all checks passed'
+exit 0

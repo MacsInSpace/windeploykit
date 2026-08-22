@@ -637,6 +637,135 @@ function Invoke-FieldIsoCurl {
     }
 }
 
+function Get-FieldIsoHttpOrigin {
+    <#
+    .SYNOPSIS
+        scheme://host:port from the http_base URL (which points at /fieldiso).
+        TaskSequences/ and iso-wim/ are served from the root, not under it.
+    #>
+    param([Parameter(Mandatory)][string]$HttpBase)
+    try {
+        $u = [Uri]$HttpBase
+        return ('{0}://{1}' -f $u.Scheme, $u.Authority)
+    } catch {
+        return ($HttpBase -replace '/[^/]*$', '')
+    }
+}
+
+function Get-FieldIsoTaskSequence {
+    <#
+    .SYNOPSIS
+        The task sequence this deployment runs, from TaskSequences/index.json.
+    .NOTES
+        Which one: System32\tasksequence.id if iPXE wrote one, else the panel's
+        default. Returns $null when there is no index, no default and no override -
+        the deployment then behaves exactly as it did before sequences existed.
+        A sequence carries the image to apply (source + index), which is the whole
+        point: the client stops guessing which install.wim and which edition.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$HttpBase,
+        [string]$CurlPath
+    )
+    $origin = Get-FieldIsoHttpOrigin -HttpBase $HttpBase
+    $url = "$origin/TaskSequences/index.json"
+    $out = Join-Path (Get-FieldIsoWorkDir) 'tasksequences.json'
+    if (-not (Invoke-FieldIsoCurl -Url $url -OutFile $out -CurlPath $CurlPath)) {
+        Write-FieldIsoLog 'No TaskSequences/index.json on the PXE host - continuing without a task sequence.'
+        return $null
+    }
+    $index = $null
+    try {
+        $index = (Get-Content -LiteralPath $out -Raw -Encoding UTF8) | ConvertFrom-Json
+    } catch {
+        Write-FieldIsoLog "TaskSequences/index.json is not valid JSON - $($_.Exception.Message)"
+        return $null
+    }
+    $sequences = @(Get-FieldIsoJsonProp -Item $index -Name 'sequences')
+    if ($sequences.Count -eq 0) {
+        Write-FieldIsoLog 'TaskSequences/index.json lists no sequences.'
+        return $null
+    }
+    $wantId = Read-FieldIsoOneLineFile -Path (Join-Path $env:SystemRoot 'System32\tasksequence.id')
+    if (-not $wantId) { $wantId = [string](Get-FieldIsoJsonProp -Item $index -Name 'defaultSequenceId') }
+    if (-not $wantId) {
+        Write-FieldIsoLog "Task sequences published ($($sequences.Count)) but none is the default - continuing without one."
+        return $null
+    }
+    $match = $sequences | Where-Object { [string](Get-FieldIsoJsonProp -Item $_ -Name 'id') -eq $wantId } | Select-Object -First 1
+    if (-not $match) {
+        Write-FieldIsoLog "Task sequence '$wantId' is not published - continuing without one."
+        return $null
+    }
+    Write-FieldIsoLog "Task sequence: $(Get-FieldIsoJsonProp -Item $match -Name 'name') ($wantId)"
+    return $match
+}
+
+function Get-FieldIsoTaskSequenceImage {
+    <#
+    .SYNOPSIS
+        @{ Url; Index } from a sequence's image binding, or $null.
+    .NOTES
+        The URL is rebuilt from httpPath against the host this client already talks
+        to. index.json's own httpUrl is written for iPXE and can carry the literal
+        ${next-server} token, which means nothing here.
+    #>
+    param(
+        $Sequence,
+        [Parameter(Mandatory)][string]$HttpBase
+    )
+    if (-not $Sequence) { return $null }
+    $image = Get-FieldIsoJsonProp -Item $Sequence -Name 'image'
+    if (-not $image) { return $null }
+    if (Test-FieldIsoJsonBool (Get-FieldIsoJsonProp -Item $image -Name 'missing')) {
+        Write-FieldIsoLog "WARNING: the task sequence names an image the PXE host no longer has ($(Get-FieldIsoJsonProp -Item $image -Name 'sourceId')) - falling back to the boot ISO."
+        return $null
+    }
+    $httpPath = [string](Get-FieldIsoJsonProp -Item $image -Name 'httpPath')
+    if ([string]::IsNullOrWhiteSpace($httpPath)) { return $null }
+    $index = 1
+    $parsed = 0
+    if ([int]::TryParse([string](Get-FieldIsoJsonProp -Item $image -Name 'index'), [ref]$parsed) -and $parsed -gt 0) {
+        $index = $parsed
+    }
+    $origin = Get-FieldIsoHttpOrigin -HttpBase $HttpBase
+    return @{
+        Url     = "$origin/$($httpPath.TrimStart('/'))"
+        Index   = $index
+        Edition = [string](Get-FieldIsoJsonProp -Item $image -Name 'editionName')
+    }
+}
+
+function Install-FieldIsoTaskSequenceUnattend {
+    <#
+    .SYNOPSIS
+        Drop the sequence's unattend into <applied image>\Windows\Panther\unattend.xml.
+        That is the standard first-boot hook (specialize + oobeSystem) for a
+        DISM-applied image - there is no setup.exe pass to run a windowsPE section.
+    #>
+    param(
+        [Parameter(Mandatory)]$Sequence,
+        [Parameter(Mandatory)][string]$ApplyDir,
+        [Parameter(Mandatory)][string]$HttpBase,
+        [string]$CurlPath
+    )
+    $file = [string](Get-FieldIsoJsonProp -Item $Sequence -Name 'file')
+    if ([string]::IsNullOrWhiteSpace($file)) { return $false }
+    $origin = Get-FieldIsoHttpOrigin -HttpBase $HttpBase
+    $tmp = Join-Path (Get-FieldIsoWorkDir) 'unattend.xml'
+    if (-not (Invoke-FieldIsoCurl -Url "$origin/TaskSequences/$file" -OutFile $tmp -CurlPath $CurlPath)) {
+        Write-FieldIsoLog "Task sequence unattend download failed ($file) - image applied without it."
+        return $false
+    }
+    $pantherDir = Join-Path $ApplyDir 'Windows\Panther'
+    if (-not (Test-Path -LiteralPath $pantherDir)) {
+        New-Item -Path $pantherDir -ItemType Directory -Force | Out-Null
+    }
+    Copy-Item -LiteralPath $tmp -Destination (Join-Path $pantherDir 'unattend.xml') -Force
+    Write-FieldIsoLog "Task sequence unattend written to $pantherDir\unattend.xml"
+    return $true
+}
+
 function Get-FieldIsoEntryProp {
     param(
         $Entry,
@@ -997,7 +1126,7 @@ function Invoke-FieldIsoDismApplyFromIsoRoot {
 }
 
 # --- main ---
-$FieldIsoRunVersion = '2026-06-24-v14'
+$FieldIsoRunVersion = '2026-08-23-v15'
 $script:FieldIsoBootstrapOk = $false
 $curl = $null
 $sevenZip = $null
@@ -1008,7 +1137,10 @@ $installWimUrlFile = Read-FieldIsoOneLineFile -Path (Join-Path $env:SystemRoot '
 $httpBase = Read-FieldIsoOneLineFile -Path (Join-Path $env:SystemRoot 'System32\fieldiso.url')
 
 if (-not $isoUrl -and -not $installWimUrlFile) {
-    Stop-FieldIsoBootstrap 'No iso.url or install.wim.url - pick an ISO from the WinDeployKit boot ISO catalog.'
+    # Not fatal any more: a task sequence can name the image itself, and that is
+    # resolved below (once curl exists). Only ending up with no install.wim URL at
+    # all stops the deployment.
+    Write-FieldIsoLog 'No iso.url or install.wim.url - will look for a task sequence image.'
 }
 if (-not $httpBase) {
     Stop-FieldIsoBootstrap 'No fieldiso.url (http_base) - regenerate PXE menus (Start field PXE).'
@@ -1033,17 +1165,27 @@ try {
     Write-FieldIsoDiskInventory
     $virtioRoot = Install-FieldIsoVirtioWinFromCd -SevenZipPath $sevenZip
 
-    $installWimUrl = Resolve-FieldIsoInstallWimUrl -InstallWimUrlFile $installWimUrlFile -IsoUrl $isoUrl
-    if ([string]::IsNullOrWhiteSpace($installWimUrl)) {
-        Stop-FieldIsoBootstrap 'Could not resolve install.wim URL - add http/iso-wim/<iso>/install.wim on PXE host and Start field PXE.'
-    }
+    $taskSequence = Get-FieldIsoTaskSequence -HttpBase $httpBase -CurlPath $curl
+    $tsImage = Get-FieldIsoTaskSequenceImage -Sequence $taskSequence -HttpBase $httpBase
 
+    $installWimUrl = Resolve-FieldIsoInstallWimUrl -InstallWimUrlFile $installWimUrlFile -IsoUrl $isoUrl
     $imageIndex = 1
-    if ($env:FIELDISO_IMAGE_INDEX) {
+
+    if ($tsImage) {
+        # The sequence names the image, so it wins over whatever ISO was booted.
+        $installWimUrl = [string]$tsImage.Url
+        $imageIndex = [int]$tsImage.Index
+        $editionText = if ($tsImage.Edition) { " ($($tsImage.Edition))" } else { '' }
+        Write-FieldIsoLog "Task sequence image: index $imageIndex$editionText from $installWimUrl"
+    } elseif ($env:FIELDISO_IMAGE_INDEX) {
         $parsed = 0
         if ([int]::TryParse([string]$env:FIELDISO_IMAGE_INDEX, [ref]$parsed) -and $parsed -gt 0) {
             $imageIndex = $parsed
         }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($installWimUrl)) {
+        Stop-FieldIsoBootstrap 'No install.wim to apply - give the task sequence a Windows image in the Netboot panel, or pick an ISO from the boot ISO catalog.'
     }
 
     $applyDir = [string](Invoke-FieldIsoApplyInstallWim -InstallWimUrl $installWimUrl -CurlPath $curl -ImageIndex $imageIndex)
@@ -1076,6 +1218,14 @@ try {
         }
     } elseif ($script:FieldIsoAutoPreppedVolume) {
         Install-FieldIsoUefiBootFiles -ApplyDir $applyDir | Out-Null
+    }
+
+    if ($taskSequence) {
+        try {
+            Install-FieldIsoTaskSequenceUnattend -Sequence $taskSequence -ApplyDir $applyDir -HttpBase $httpBase -CurlPath $curl | Out-Null
+        } catch {
+            Write-FieldIsoLog "Task sequence unattend skipped due to error: $($_.Exception.Message)"
+        }
     }
 
     $script:FieldIsoBootstrapOk = $true

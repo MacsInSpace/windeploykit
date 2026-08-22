@@ -5413,7 +5413,10 @@ function Write-AppPxeBootCaddyfile {
         foreach ($route in @(
                 @{ prefix = 'iso';     dir = $lib.isoDir },
                 @{ prefix = 'drivers'; dir = $lib.driversDir },
-                @{ prefix = 'WIMs';    dir = $lib.wimsDir }
+                @{ prefix = 'WIMs';    dir = $lib.wimsDir },
+                # TaskSequences/ so an HTTP-only client (no Deploy$ mount) can read
+                # index.json and the unattend it names. Same files the share serves.
+                @{ prefix = 'TaskSequences'; dir = (Join-Path $lib.root 'TaskSequences') }
             )) {
             $dirNorm = ([string]$route.dir -replace '\\', '/')
             $routeLines += @(

@@ -79,6 +79,7 @@ export type SidecarCommand =
   | "ImportPxeBootWimBootAssets"
   | "ImportPxeBootWimFromIso"
   | "ListPxeBootIsos"
+  | "ListPxeBootInstallImages"
   | "ListVaultSecrets"
   | "RemoveVaultSecret"
   | "SetVaultSecret"
@@ -592,10 +593,55 @@ export interface PxeBootTaskSequence {
   steps?: PxeBootTaskSequenceStep[];
   /** Local account created at first boot (optional). */
   localAccount?: PxeBootTaskSequenceLocalAccount;
+  /** Which install.wim (and index) this sequence deploys; absent = tech picks at the device. */
+  image?: PxeBootTaskSequenceImage;
+}
+
+/** One image inside an install.wim, as wimlib reports it. */
+export interface PxeBootInstallImage {
+  index: number;
+  name: string;
+  description?: string;
+  /** Edition ID, e.g. ServerStandardEval / Professional. */
+  edition?: string;
+  installType?: string;
+  arch?: string;
+  build?: string;
+  /** Uncompressed size of the applied image. */
+  sizeBytes?: number;
+}
+
+/** One selectable install image source on the deploy share (an ISO, or a WIM in WIMs/). */
+export interface PxeBootInstallImageEntry {
+  /** 'iso:<file>' or 'wim:<file>' - what a task sequence stores. */
+  id: string;
+  kind: "iso" | "wim" | string;
+  fileName: string;
+  label: string;
+  sizeBytes: number;
+  /** Path under the deploy share root, e.g. .mounts\<token>\sources\install.wim */
+  sharePath: string;
+  /** Path under the HTTP root, e.g. iso-wim/<token>/install.wim */
+  httpPath: string;
+  /** False until the editions have been read once (reading mounts the ISO). */
+  imagesKnown: boolean;
+  images: PxeBootInstallImage[];
+}
+
+export interface PxeBootTaskSequenceImage {
+  /** Matches PxeBootInstallImageEntry.id. */
+  sourceId: string;
+  index: number;
+  /** Remembered so the panel can name the edition when the media is offline. */
+  editionName?: string;
+  /** Set by the sidecar on a published row when the source is gone. */
+  missing?: boolean;
 }
 
 export interface PxeBootTaskSequencesPayload {
   sequences: PxeBootTaskSequence[];
+  /** Install image sources for the per-sequence image dropdown (cached editions only). */
+  installImages?: PxeBootInstallImageEntry[];
   /** Absolute path of <library>/TaskSequences, null when no library root is set. */
   libraryDir?: string | null;
   publishedFiles: string[];
