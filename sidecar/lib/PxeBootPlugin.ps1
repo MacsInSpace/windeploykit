@@ -3212,9 +3212,29 @@ function Expand-AppPxeBootP7zipArchive {
 }
 
 function Ensure-AppPxeBootP7zipTools {
+    <#
+    .SYNOPSIS
+        Locate 7z if this Mac already has one. NEVER downloads.
+    .NOTES
+        Craig, 2026-08-22: "WDK should not download anything from gitlab". It used to fetch
+        a pinned p7zip from the product asset feed on first ISO read - which in this product
+        points at a placeholder host, so every attempt failed with a DNS error and ~10s of
+        dead time before falling back:
+            p7zip install failed - nodename nor servname provided (artifacts.example.com:443)
+        Nothing needs it: macOS reads ISOs with hdiutil (reusing the mount Netboot already
+        holds) and Windows with Mount-DiskImage. If a 7z happens to be on PATH we will use
+        it; otherwise we simply say so and the mount path handles it.
+    #>
     if (-not ($IsMacOS -or $IsDarwin)) {
         return @{ ok = $true; skipped = $true; reason = 'not_macos' }
     }
+    foreach ($candidate in @('7zz', '7z', '7za')) {
+        $found = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($found) {
+            return @{ ok = $true; skipped = $true; reason = 'system_7z'; path = [string]$found.Source }
+        }
+    }
+    return @{ ok = $false; skipped = $true; reason = 'no_download'; message = 'No 7z on this Mac - ISOs are read by mounting them instead.' }
     if ($script:AppPxeBootP7zipInstallInProgress) {
         return @{ ok = $false; installing = $true; skipped = $true; reason = 'install_in_progress' }
     }
@@ -8637,9 +8657,12 @@ function Complete-AppPxeBootWimImport {
     @{
         fileName            = $TargetName
         sizeBytes           = [long](Get-Item -LiteralPath $Dest).Length
-        bootAssetsReady     = [bool]$bootAssets.complete
-        bootAssetsPackaged  = @($bootAssets.packaged)
-        bootAssetsExtracted = @($bootAssets.extracted)
+        # Read defensively: Ensure-AppPxeBootWimBootAssets has early-return shapes without
+        # these keys, and under StrictMode a bare read threw AFTER the WIM had been copied -
+        # the import looked like it failed when the file was already in the library.
+        bootAssetsReady     = [bool](Get-AppSidecarJsonProp -Item $bootAssets -Name 'complete')
+        bootAssetsPackaged  = @(Get-AppSidecarJsonProp -Item $bootAssets -Name 'packaged')
+        bootAssetsExtracted = @(Get-AppSidecarJsonProp -Item $bootAssets -Name 'extracted')
         library             = (Get-AppPxeBootWimLibraryResponse)
     }
 }
@@ -8691,6 +8714,38 @@ function Remove-AppPxeBootWim {
     Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh -SkipLayoutProbe
 }
 
+function Get-AppPxeBootAttachedIsoMountPoint {
+    <#
+    .SYNOPSIS
+        Where an ISO is ALREADY attached, or $null.
+    .NOTES
+        Netboot attaches every ISO in the store so install.wim can be served over HTTP,
+        and macOS refuses a second attach of the same image with "Resource busy". Any
+        code that wants to read inside an ISO has to reuse the existing mount rather
+        than assume it owns the image (field, 2026-08-22: extracting a boot WIM from an
+        ISO failed with "failed to mount ISO (hdiutil)" purely because Netboot had it).
+    #>
+    param([Parameter(Mandatory)][string]$IsoPath)
+    if (-not ($IsMacOS -or $IsDarwin)) { return $null }
+    $full = try { (Resolve-Path -LiteralPath $IsoPath -ErrorAction Stop).Path } catch { $IsoPath }
+    try {
+        # plutil converts the plist to JSON so this is a data read, not XML shape-guessing
+        # (the first attempt walked $xml.plist.dict.array.dict and silently found nothing).
+        $json = & hdiutil info -plist 2>$null | & plutil -convert json -o - -- - 2>$null
+        if (-not $json) { return $null }
+        $info = ($json -join '') | ConvertFrom-Json
+        foreach ($image in @($info.images)) {
+            $imagePath = [string]$image.'image-path'
+            if (-not $imagePath -or $imagePath -ne $full) { continue }
+            foreach ($entity in @($image.'system-entities')) {
+                $mount = [string]$entity.'mount-point'
+                if ($mount -and (Test-Path -LiteralPath $mount)) { return $mount }
+            }
+        }
+    } catch { }
+    return $null
+}
+
 function Mount-AppPxeBootIsoReadOnly {
     param(
         [Parameter(Mandatory)][string]$IsoPath,
@@ -8699,6 +8754,13 @@ function Mount-AppPxeBootIsoReadOnly {
         [string]$MountPath
     )
     if ($IsMacOS -or $IsDarwin) {
+        # Someone else (Netboot's mount-and-serve) may already have this image attached;
+        # a second attach fails with "Resource busy". Borrow theirs, and remember not to
+        # detach it when we are done.
+        $existing = Get-AppPxeBootAttachedIsoMountPoint -IsoPath $IsoPath
+        if ($existing) {
+            return @{ platform = 'macos'; mountPath = $existing; borrowed = $true }
+        }
         $mountDir = if ($MountPath) {
             $MountPath
         } else {
@@ -8733,6 +8795,8 @@ function Dismount-AppPxeBootIso {
     param([Parameter(Mandatory)]$MountInfo)
     try {
         if ($MountInfo.platform -eq 'macos') {
+            # Never tear down a mount we borrowed - Netboot is serving install.wim from it.
+            if ($MountInfo.borrowed) { return }
             & hdiutil detach $MountInfo.mountPath -force 2>&1 | Out-Null
             Remove-Item -LiteralPath $MountInfo.mountPath -Recurse -Force -ErrorAction SilentlyContinue
         } elseif ($MountInfo.platform -eq 'windows') {

@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { PanelShell } from "../components/PanelShell";
+import { toast } from "../state/toastStore";
 import { isTauri } from "../lib/tauriEnv";
 import {
   clearSidecarLogBuffer,
@@ -61,19 +62,34 @@ export function SidecarLogPanel() {
     return q ? lines.filter((l) => l.toLowerCase().includes(q)) : lines;
   }, [lines, filter]);
 
+  const copyShown = useCallback(async () => {
+    // Selecting text in a webview panel is fiddly at the best of times, and the log is the
+    // one thing people need to paste elsewhere (Craig, 2026-08-22: "I cant copy paste from
+    // Sidecar"). Copies exactly what is on screen, filter included.
+    const text = shown.join("\n");
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Sidecar log", `${shown.length} line(s) copied.`);
+    } catch (e) {
+      toast.error("Sidecar log", e instanceof Error ? e.message : String(e));
+    }
+  }, [shown]);
+
   const errors = useMemo(() => lines.filter((l) => /error|fail|unavailable|exception/i.test(l)).length, [lines]);
 
   const consoleActions = useMemo<ConsoleNodeActions>(
     () => ({
       items: [
         { label: paused ? "Resume" : "Pause", onSelect: togglePause },
+        { label: "Copy", disabled: shown.length === 0, onSelect: () => void copyShown() },
         { label: "Clear", disabled: lines.length === 0, onSelect: clear },
         { label: "-" },
         { label: "Restart Sidecar", disabled: !isTauri(), onSelect: () => void restartSidecarNow() },
       ],
       status: `${lines.length} line(s)${errors ? `, ${errors} flagged` : ""}${paused ? " - paused" : ""}`,
     }),
-    [paused, togglePause, lines.length, errors, clear],
+    [paused, togglePause, lines.length, errors, clear, shown.length, copyShown],
   );
   useConsoleActions(consoleActions);
 
@@ -100,13 +116,25 @@ export function SidecarLogPanel() {
               spellCheck={false}
             />
           </div>
+          <button
+            type="button"
+            className="btn px-2 py-0.5 text-[10px]"
+            disabled={shown.length === 0}
+            title="Copy the lines shown (respects the filter)"
+            onClick={() => void copyShown()}
+          >
+            Copy
+          </button>
           {paused && (
             <span className="badge badge-warn" title="The view is frozen; lines are still being collected">
               PAUSED
             </span>
           )}
         </div>
-        <div className="mono min-h-0 flex-1 overflow-auto px-3 py-2 text-[10.5px] leading-[1.5]" style={{ color: "var(--text2)" }}>
+        <div
+          className="mono min-h-0 flex-1 overflow-auto px-3 py-2 text-[10.5px] leading-[1.5]"
+          style={{ color: "var(--text2)", userSelect: "text", WebkitUserSelect: "text", cursor: "text" }}
+        >
           {shown.length === 0 ? (
             <p className="empty-state">
               {lines.length === 0 ? "Nothing from the sidecar yet." : "No lines match the filter."}

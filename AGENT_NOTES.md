@@ -1169,3 +1169,36 @@ block; `StopPxeBootServices` broke exactly this way and only an IPC round-trip c
 What is left: `GetPxeBootWimLibrary` (642 ms warm) and `GetPxeBootPluginConfig` (418 ms) both
 still rebuild status-shaped data. Worth another look only if the panel still feels slow.
 
+### Extracting a boot WIM from an ISO (2026-08-22)
+
+"I cant extract a boot wim from an ISO." The log told the whole story once it arrived:
+
+    PXE boot: installing 7zip 17.06 ... (GitLab HTTPS once per Mac)
+    PXE boot: p7zip install failed - nodename nor servname provided (artifacts.example.com:443)
+    PXE boot: ListPxeBootIsoWims failed - PXE boot: failed to mount ISO (hdiutil).
+
+Three faults, all fixed:
+
+1. **The ISO was already mounted.** Netboot attaches every ISO in the store to serve
+   install.wim in place, and macOS refuses a second attach of the same image ("Resource
+   busy"). `Get-AppPxeBootAttachedIsoMountPoint` now finds the existing mount and
+   `Mount-AppPxeBootIsoReadOnly` borrows it, marking the result `borrowed` so
+   `Dismount-AppPxeBootIso` never tears down a mount Netboot is serving from.
+   Parse `hdiutil info -plist` through `plutil -convert json` - the first attempt walked
+   `$xml.plist.dict.array.dict` and silently found nothing.
+2. **No GitLab downloads here** (Craig). `Ensure-AppPxeBootP7zipTools` used to fetch a pinned
+   p7zip from the product asset feed, which in this product is a placeholder host - so every
+   ISO read spent ~10 s on a DNS failure before falling back. It now looks for a system 7z
+   and otherwise says plainly that ISOs are read by mounting. Nothing needs the download:
+   macOS has hdiutil, Windows has Mount-DiskImage.
+3. **The import threw AFTER succeeding.** The response read `$bootAssets.packaged` directly;
+   `Ensure-AppPxeBootWimBootAssets` has early-return shapes without that key, so StrictMode
+   threw once the WIM was already copied - the operation looked like it failed while the file
+   sat in the library. Read through `Get-AppSidecarJsonProp` now.
+
+Verified from a clean state: `sources/boot.wim` and `sources/install.wim` list, and the
+extract produces a 610 MB `Server2025-boot.wim` with `bootAssetsReady=True`.
+
+Also: the Sidecar Log gained a **Copy** button (and explicit `user-select: text`), because
+"I cant copy paste from Sidecar" - it copies exactly what is on screen, filter included.
+
