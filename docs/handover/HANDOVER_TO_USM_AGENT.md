@@ -593,3 +593,11 @@ nine arch trees from your main, hashes verified. `79f6e26`: data root = slug, pe
 amended contract section 1. All gates green; stdio smoke green. Nothing owed either
 way. The remaining per-lib diff against USM is functional (site/school genericisation,
 `Get-AppSidecarJsonProp`, the `AppHttp` stub) - which is what the contract was for.
+
+# 2026-08-22 (late night) - catalogs + AppElevation taken with USM's changes
+
+Same agent, same day: `AppElevation.ps1` still byte-identical (saved-credential
+validation), `LocalMachineCredentials.ps1` vault-source marking + rejection reset, the
+five catalogs (TTL 14 d, atomic writes), `VendorSccmCatalogRefresh.ps1` automatic
+two-week check wired into our dispatch loop, Content workspace quiet reload + status
+line. Nothing owed.

@@ -33,7 +33,13 @@ $script:AppMacOsAdminCredentialCache = @{
     PasswordHash   = $null
     Username       = $null
     CachedAt       = $null
+    Source         = $null   # 'prompt' | 'prefetch' | 'vault'
 }
+# Set once sudo has refused the SAVED (vault) credential this session. From then on the
+# vault is skipped and the dialog is used, until a new credential is saved. Field bug
+# 2026-08-22: a stale saved password made the dialog unreachable because every retry
+# re-read the same rejected secret.
+$script:AppMacOsAdminVaultCredentialRejected = $false
 
 function Get-AppMacOsAdminCredentialCacheStatus {
     if (-not ($IsMacOS -or $IsDarwin)) {
@@ -45,10 +51,12 @@ function Get-AppMacOsAdminCredentialCacheStatus {
         }
     }
     @{
-        cached       = [bool]$script:AppMacOsAdminCredentialCache.SecurePassword
-        username     = $script:AppMacOsAdminCredentialCache.Username
-        passwordHash = $script:AppMacOsAdminCredentialCache.PasswordHash
-        cachedAt     = $script:AppMacOsAdminCredentialCache.CachedAt
+        cached        = [bool]$script:AppMacOsAdminCredentialCache.SecurePassword
+        username      = $script:AppMacOsAdminCredentialCache.Username
+        passwordHash  = $script:AppMacOsAdminCredentialCache.PasswordHash
+        cachedAt      = $script:AppMacOsAdminCredentialCache.CachedAt
+        source        = $script:AppMacOsAdminCredentialCache.Source
+        savedRejected = [bool]$script:AppMacOsAdminVaultCredentialRejected
     }
 }
 
@@ -60,12 +68,15 @@ function Clear-AppMacOsAdminCredentialCache {
     $script:AppMacOsAdminCredentialCache.PasswordHash = $null
     $script:AppMacOsAdminCredentialCache.Username = $null
     $script:AppMacOsAdminCredentialCache.CachedAt = $null
+    $script:AppMacOsAdminCredentialCache.Source = $null
 }
 
 function Set-AppMacOsAdminCredentialCache {
     param(
         [Parameter(Mandatory)][System.Security.SecureString]$SecurePassword,
-        [string]$UserName
+        [string]$UserName,
+        # Where the secret came from; 'vault' entries are validated before they can skip the dialog.
+        [ValidateSet('prompt', 'prefetch', 'vault')][string]$Source = 'prompt'
     )
     $plain = ConvertTo-AppPlainTextFromSecureString -SecureString $SecurePassword
     $hash = Get-AppSha256Hex -Text $plain
@@ -77,6 +88,62 @@ function Set-AppMacOsAdminCredentialCache {
         Get-AppMacOsAdminUserName
     }
     $script:AppMacOsAdminCredentialCache.CachedAt = (Get-Date).ToString('o')
+    $script:AppMacOsAdminCredentialCache.Source = $Source
+}
+
+function Set-AppMacOsAdminVaultCredentialRejected {
+    # sudo refused the saved credential: drop it, skip the vault for the rest of the session,
+    # say so once in the log and to the UI. The dialog takes over.
+    Clear-AppMacOsAdminCredentialCache
+    if ($script:AppMacOsAdminVaultCredentialRejected) { return }
+    $script:AppMacOsAdminVaultCredentialRejected = $true
+    Write-SidecarLog 'macOS: the saved local administrator password was rejected by sudo - asking for the password instead. Re-save it under Infrastructure credentials (this workstation) once you have it right.'
+    if (Get-Command Write-SidecarEvent -ErrorAction SilentlyContinue) {
+        try { Write-SidecarEvent -EventName 'macos-admin-credential' -Data @{ status = 'saved-rejected' } } catch { }
+    }
+}
+
+function Reset-AppMacOsAdminVaultCredentialRejection {
+    # A new credential was saved: let the vault be tried again.
+    $script:AppMacOsAdminVaultCredentialRejected = $false
+}
+
+function Get-AppMacOsAdminSavedRejectedPrefix {
+    if ($script:AppMacOsAdminVaultCredentialRejected) { return 'The saved local administrator password for this workstation was rejected. ' }
+    ''
+}
+
+function Test-AppMacOsAdminPassword {
+    <#
+    .SYNOPSIS
+        Ask sudo (-S -k, /usr/bin/true) whether it accepts this password for the current
+        user. Used to validate a SAVED credential before it is allowed to replace the
+        dialog. Any failure counts as a rejection.
+    #>
+    param([Parameter(Mandatory)][System.Security.SecureString]$SecurePassword)
+    if (-not ($IsMacOS -or $IsDarwin)) { return $true }
+    $plain = [System.Net.NetworkCredential]::new('', $SecurePassword).Password
+    if ([string]::IsNullOrEmpty($plain)) { return $false }
+    try {
+        $psi = [System.Diagnostics.ProcessStartInfo]::new()
+        $psi.FileName = '/usr/bin/sudo'
+        foreach ($a in @('-S', '-k', '-p', '', '/usr/bin/true')) { $psi.ArgumentList.Add($a) }
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $proc.StandardInput.WriteLine($plain)
+        $proc.StandardInput.Close()
+        $null = $proc.StandardOutput.ReadToEnd()
+        $null = $proc.StandardError.ReadToEnd()
+        $proc.WaitForExit()
+        return ($proc.ExitCode -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $plain = $null
+    }
 }
 
 function Get-AppMacOsAdminUserName {
@@ -203,7 +270,8 @@ end try
 
 function Invoke-AppMacOsAdminCredentialPrompt {
     param([string]$Message)
-    $msg = if ($Message) {
+    $msg = Get-AppMacOsAdminSavedRejectedPrefix
+    $msg += if ($Message) {
         [string]$Message
     } else {
         @(
@@ -229,17 +297,25 @@ function Start-AppMacOsAdminCredentialPrefetch {
     )
     if (-not ($IsMacOS -or $IsDarwin)) { return $null }
     if ((Get-AppMacOsAdminCredentialCacheStatus).cached) { return $null }
-    if (Get-Command Resolve-AppMacOsAdminCredentialFromVaultOrPrompt -ErrorAction SilentlyContinue) {
+    if (-not $script:AppMacOsAdminVaultCredentialRejected -and (Get-Command Resolve-AppMacOsAdminCredentialFromVaultOrPrompt -ErrorAction SilentlyContinue)) {
         if (Resolve-AppMacOsAdminCredentialFromVaultOrPrompt) {
-            Write-SidecarLog 'macOS: using saved local administrator credential (no dialog)'
-            return $null
+            # The saved credential may skip the dialog only once sudo has accepted it. A stale
+            # one (password changed since it was saved) used to win here unconditionally and
+            # the dialog never appeared - every retry re-read the same rejected secret.
+            $saved = $script:AppMacOsAdminCredentialCache.SecurePassword
+            if ($saved -and (Test-AppMacOsAdminPassword -SecurePassword $saved)) {
+                Write-SidecarLog 'macOS: using saved local administrator credential (no dialog)'
+                return $null
+            }
+            Set-AppMacOsAdminVaultCredentialRejected
         }
     }
     if ($script:AppMacOsAdminCredentialPrefetchState) {
         return $script:AppMacOsAdminCredentialPrefetchState
     }
 
-    $msg = if ($Purpose -eq 'pxe') {
+    $msg = Get-AppMacOsAdminSavedRejectedPrefix
+    $msg += if ($Purpose -eq 'pxe') {
         @(
             "$(Get-AppProductDisplayName) needs your macOS administrator password for Netboot (TFTP port 69)."
             'It is kept in memory only - not saved to disk.'
@@ -378,20 +454,24 @@ function Invoke-AppMacOsAdminShellCommand {
     }
 
     $attempt = 0
+    $maxAttempts = 2
     while ($true) {
         $attempt++
         # Resolve the admin password: session cache -> in-flight prefetch -> local-admin
-        # vault -> osascript prompt (last resort, used sparingly).
+        # vault (unless sudo already refused it this session) -> prompt (last resort).
         $secure = $script:AppMacOsAdminCredentialCache.SecurePassword
+        $source = if ($secure -and $script:AppMacOsAdminCredentialCache.Source) { [string]$script:AppMacOsAdminCredentialCache.Source } else { 'cache' }
         if (-not $secure) {
             if ($script:AppMacOsAdminCredentialPrefetchState) {
                 Complete-AppMacOsAdminCredentialPrefetch -PrefetchState $script:AppMacOsAdminCredentialPrefetchState
                 $secure = $script:AppMacOsAdminCredentialCache.SecurePassword
+                $source = 'prefetch'
             }
-            if (-not $secure -and (Get-Command Get-AppLocalMachineCredentialSecure -ErrorAction SilentlyContinue)) {
+            if (-not $secure -and -not $script:AppMacOsAdminVaultCredentialRejected -and (Get-Command Get-AppLocalMachineCredentialSecure -ErrorAction SilentlyContinue)) {
                 $fromVault = Get-AppLocalMachineCredentialSecure
-                if ($fromVault) {
+                if ($fromVault -and $fromVault.SecurePassword) {
                     $secure = $fromVault.SecurePassword
+                    $source = 'vault'
                     if (-not $script:AppMacOsAdminCredentialCache.Username) {
                         $script:AppMacOsAdminCredentialCache.Username = $fromVault.LoginName
                     }
@@ -399,6 +479,7 @@ function Invoke-AppMacOsAdminShellCommand {
             }
             if (-not $secure) {
                 $secure = Request-AppMacOsAdminCredential -Message $PromptMessage
+                $source = 'prompt'
             }
         }
         if (-not $secure) { throw 'macOS administrator password unavailable.' }
@@ -432,7 +513,13 @@ function Invoke-AppMacOsAdminShellCommand {
         # retry once (which re-prompts / re-reads the vault).
         if ($stderr -match 'Sorry, try again|incorrect password attempt') {
             Clear-AppMacOsAdminCredentialCache
-            if ($attempt -lt 2) { continue }
+            if ($source -eq 'vault') {
+                # The SAVED credential is stale: never re-read it this session; give the
+                # technician a real prompt (one extra attempt for it).
+                Set-AppMacOsAdminVaultCredentialRejected
+                $maxAttempts = 3
+            }
+            if ($attempt -lt $maxAttempts) { continue }
             if ($AllowFailure) { return ($stdout + "`n" + $stderr).Trim() }
             throw 'macOS administrator password was incorrect.'
         }
@@ -445,7 +532,8 @@ function Invoke-AppMacOsAdminShellCommand {
             $userName = if ($script:AppMacOsAdminCredentialCache.Username) {
                 [string]$script:AppMacOsAdminCredentialCache.Username
             } else { Get-AppMacOsAdminUserName }
-            Set-AppMacOsAdminCredentialCache -SecurePassword $secure -UserName $userName
+            $cacheSource = if ($source -in @('prompt', 'prefetch', 'vault')) { $source } else { 'prompt' }
+            Set-AppMacOsAdminCredentialCache -SecurePassword $secure -UserName $userName -Source $cacheSource
         }
         return ($stdout + "`n" + $stderr)
     }

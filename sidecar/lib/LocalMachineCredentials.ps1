@@ -163,7 +163,8 @@ function Save-AppLocalMachineCredential {
     }
 
     Import-AppLocalMachineCredentialToMacOsAdminCache | Out-Null
-    Write-SidecarLog "Local machine credential saved for login=$loginTrim"
+        if (Get-Command Reset-AppMacOsAdminVaultCredentialRejection -ErrorAction SilentlyContinue) { Reset-AppMacOsAdminVaultCredentialRejection }
+Write-SidecarLog "Local machine credential saved for login=$loginTrim"
     Get-AppLocalMachineCredentialStatus
 }
 
@@ -188,7 +189,7 @@ function Import-AppLocalMachineCredentialToMacOsAdminCache {
     }
     $fromVault = Get-AppLocalMachineCredentialSecure
     if (-not $fromVault) { return $false }
-    Set-AppMacOsAdminCredentialCache -SecurePassword $fromVault.SecurePassword -UserName $fromVault.LoginName
+    Set-AppMacOsAdminCredentialCache -SecurePassword $fromVault.SecurePassword -UserName $fromVault.LoginName -Source 'vault'
     Write-SidecarLog 'Local machine credential loaded into macOS admin session cache'
     return $true
 }

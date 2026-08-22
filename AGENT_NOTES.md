@@ -806,3 +806,22 @@ the time comes.
 **Still open:** item 3 (confirm the app end to end on this Mac after `npm run
 tauri:dev` - not done in this pass), then 5-10 as listed. The contract's widened grep
 (section 0) is the drift check to run before touching any lib USM also carries.
+
+### 9c. Update 2026-08-22 (late night) - driver-catalog policy, saved-password fix
+
+- **Driver catalogs** (Craig: "cached and checked only every 2 weeks, or manually; the old
+  data should stay there during the fetch"): TTL 14 days in all five catalogs; cache
+  files written tmp + Move-Item (a read landing mid-write used to fall back to the
+  bundled catalog and the list shrank); `Start-AppVendorSccmCatalogAutoRefreshIfDue`
+  runs from `Invoke-SidecarDispatchOnce` (first evaluation ~3 min after boot, then every
+  30 min) and starts the existing background job for stale vendors only, at most once
+  per 24 h, never while a refresh runs; the completion event carries `automatic: true`
+  and `ContentWorkspace.tsx` reloads quietly (no toasts, no Acer harvest window) and
+  shows "Catalogs checked N days ago". The list path was already cache-only.
+- **`AppElevation.ps1`** (USM's, byte-identical here): a saved `local-machine/admin`
+  credential is validated with `sudo -S -k /usr/bin/true` before it may replace the
+  password dialog; once refused it is skipped for the session and the dialog explains
+  why. `LocalMachineCredentials.ps1` passes `-Source 'vault'` when loading the cache and
+  resets the rejection when a credential is saved. USM field bug 2026-08-22 (stale saved
+  password: TFTP failed, no dialog).
+- Gates: ascii, strictmode, parse clean; both harnesses pass here.
