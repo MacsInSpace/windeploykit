@@ -645,10 +645,16 @@ this; if you write a new entry point, do it there too.
 - The bundled `snponly.efi` carries a **byte-patched embed** (an upstream WAN
   fallback removed). The ipxeboot source embed still needs the matching change
   at next rebuild.
-- `packaging/aria2-tracker.json` is an **empty skeleton** - the original catalog
-  was org-specific and was removed. Point `manifestUrl` at your own artifact
-  host. **7 URL constants** across `sidecar/lib/` still reference
-  `artifacts.example.com` - grep for it.
+- **This product downloads nothing at runtime (2026-08-22).**
+  `product-identity.ps1` ships `AssetFeedBaseUrl = ''`, so
+  `Get-AppProductAssetFeedUrl` returns `$null` and every caller takes its
+  bundled-copy fallback. The `packaging/*.json` manifests keep only public
+  upstream `githubUrl` values (caddy, tftpd64); the placeholder-host
+  `manifestUrl`/`downloadUrl`/`wimUrl` fields are blank. aria2 ships in
+  `vendor/aria2-tools/`, p7zip is neither bundled nor fetched (ISOs are read by
+  mounting them), and `packaging/aria2-tracker.json` is an empty skeleton - the
+  original catalog was org-specific and was removed. To wire up your own
+  artifact host, set `AssetFeedBaseUrl` and fill those fields back in.
 
 ---
 

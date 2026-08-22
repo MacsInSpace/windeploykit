@@ -1376,7 +1376,7 @@ function Read-AppAria2TrackerManifest {
             Write-AppAria2TrackerManifestCache -Manifest $remote
             Set-AppAria2TrackerManifestMemoryCache -Manifest $remote
             Clear-AppAria2TrackerManifestFetchBackoff
-            Write-SidecarLogVerbose 'aria2: tracker manifest refreshed from GitLab.'
+            Write-SidecarLogVerbose 'aria2: tracker manifest refreshed from the asset feed.'
             return $remote
         }
     } catch {

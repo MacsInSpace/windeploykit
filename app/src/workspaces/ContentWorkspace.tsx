@@ -414,7 +414,7 @@ export function ContentWorkspace({
 
   /**
    * USM-side vendor catalog refresh - all four vendors, one action (replaces the retired
-   * GitLab CI job). Dell/HP/Lenovo refresh via sidecar curl; Acer needs a real browser
+   * CI job). Dell/HP/Lenovo refresh via sidecar curl; Acer needs a real browser
    * engine (its discovery pages fingerprint-block curl from any network), so a hidden app
    * webview harvests the community-KB links and the sidecar validates + stores them.
    */

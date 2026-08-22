@@ -8,7 +8,7 @@
 
 .PARAMETER SkipMiniPlayerToolsBuild
     Skip downloading yt-dlp/deno when GitHub is unreachable (corp proxy). Mini player
-    downloads tools on first use at runtime instead; release builds should use GitLab
+    downloads tools on first use at runtime instead; release builds should use the
     Optional: build-mini-player-tools.ps1 for seed-lofi-watch-url.ps1 / dev (not bundled in release).
 #>
 [CmdletBinding()]

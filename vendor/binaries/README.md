@@ -1,4 +1,4 @@
-# Vendored release binaries (committed for GitLab / offline builds)
+# Vendored release binaries (committed for offline builds)
 
 Prebuilt tools copied into `packaging/staged/` during `prepare-bundle-deps.ps1`.
 

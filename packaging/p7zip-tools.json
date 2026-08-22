@@ -2,7 +2,7 @@
   "schema": 1,
   "version": "17.06",
   "updated": "2026-06-24",
-  "manifestUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/p7zip-tools.json",
+  "manifestUrl": "",
   "platforms": {
     "macos_arm64": {
       "archiveName": "p7zip-17.06_mac_arm64.tar.gz",
@@ -13,7 +13,7 @@
       ],
       "sizeBytes": 2720122,
       "sha256": "e92578adffedd95aa7b3bd00cbeb51c2ab3ea63596353ba3ca6e3607b43073e5",
-      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/p7zip-17.06_mac_arm64.tar.gz",
+      "downloadUrl": null,
       "notes": "Homebrew p7zip repack - run scripts/fetch-p7zip-tools.ps1 on Apple Silicon Mac to refresh."
     },
     "macos_amd64": {
@@ -25,7 +25,7 @@
       ],
       "sizeBytes": 0,
       "sha256": "",
-      "downloadUrl": "https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest/p7zip-17.06_mac_amd64.tar.gz",
+      "downloadUrl": null,
       "notes": "Run scripts/fetch-p7zip-tools.ps1 on Intel Mac to refresh."
     }
   }

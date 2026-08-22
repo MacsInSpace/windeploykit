@@ -39,16 +39,8 @@ git add vendor/binaries/pxe-macos/wimlib-imagex-* vendor/binaries/pxe-macos/COPY
 
 ## p7zip (install.wim extract from catalog ISOs)
 
-LGPL-licensed [p7zip](https://sourceforge.net/projects/p7zip/) - **not bundled** in the signed macOS pkg. The sidecar downloads pinned `7za` + `7z.so` from GitLab on first **Start field PXE** that needs `install.wim` extract (same pattern as aria2). Installed under `~/.local/share/windeploykit/pxe-boot/tools/p7zip/`.
+LGPL-licensed [p7zip](https://sourceforge.net/projects/p7zip/) - **not bundled**, and no longer downloaded either (2026-08-22): this product fetches nothing at runtime. ISOs are read by mounting them (`hdiutil` on macOS, `Mount-DiskImage` on Windows); if a `7z` happens to be on PATH the sidecar will use it.
 
 WinPE uses separate Windows `7z.exe` from `sidecar/pxe/fieldiso/tools/` (`fetch-fieldiso-tools.ps1`).
 
-Maintainer refresh + publish:
 
-```powershell
-pwsh -File ./scripts/fetch-p7zip-tools.ps1
-export GITLAB_TOKEN='...'
-pwsh -File ./scripts/fetch-p7zip-tools.ps1 -Publish
-```
-
-If p7zip download fails, macOS falls back to `hdiutil attach` for Windows ISOs.

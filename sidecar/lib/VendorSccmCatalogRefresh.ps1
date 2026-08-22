@@ -1,6 +1,6 @@
 # Vendor SCCM catalog refresh - USM-side, all four vendors uniformly.
 #
-# Replaces the GitLab CI job `refresh:vendor-sccm-catalogs` (removed 2026-08-18, Craig's
+# Replaces the CI job `refresh:vendor-sccm-catalogs` (removed 2026-08-18, Craig's
 # call: the catalogs should have ONE refresh path, and CI could no longer cover Acer -
 # the discovery pages sit behind fingerprint-level bot mitigation that blocks curl from
 # any network, while a real browser passes; see AGENT_NOTES_PXE_DRIVERS section 12).

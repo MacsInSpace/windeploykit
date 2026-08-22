@@ -67,7 +67,7 @@ function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
 function Remove-AppStagedFieldIsoBuildArtifacts {
     <#
-    FieldIso.wim is downloaded at runtime (GitLab manifest). wim-inject/ and Windows
+    FieldIso.wim is downloaded at runtime (asset-feed manifest). wim-inject/ and Windows
     fieldiso/tools/*.exe are maintainer-only inputs for build-fieldiso-wim.sh - not for the app bundle.
     #>
     param([Parameter(Mandatory)][string]$SidecarDest)
@@ -334,7 +334,7 @@ if (-not $PsOpenAdSrc -or -not (Test-Path -LiteralPath (Join-Path $PsOpenAdSrc '
 PSOpenAD not found for bundling.
 
 Preferred (CI / release):
-  GitLab pipeline job build:psopenad, or locally:
+  CI job build:psopenad, or locally:
   pwsh -File ./scripts/build-psopenad.ps1
 
 Then re-run prepare-bundle-deps.ps1 (uses vendor/PSOpenAD automatically).

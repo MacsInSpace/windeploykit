@@ -36,7 +36,7 @@ repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$(dirname "$0")/load-local-env.sh"
 load_local_env "${repo_root}" || true
-report_local_env APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD GITLAB_TOKEN || true
+report_local_env APPLE_ID APPLE_TEAM_ID APPLE_PASSWORD || true
 
 app_dir="${repo_root}/app"
 tauri_conf="${app_dir}/src-tauri/tauri.conf.json"

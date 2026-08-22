@@ -8,13 +8,13 @@
 
       pwsh -File .\scripts\package-windows.ps1
 
-    It pulls latest source from GitLab, builds MSI + zip, then prompts you to
-    test and optionally upload to GitLab Releases (GITLAB_TOKEN in environment).
+    It pulls latest source from the git remote, builds MSI + zip, then prompts you to
+    test and optionally upload to GitHub Releases (GH_TOKEN in environment).
 
     One-time setup: pwsh -File .\scripts\bootstrap-windows.ps1
 
 .PARAMETER NoSync
-    Skip test + GitLab upload prompts at the end (like package-macos.sh --no-sync).
+    Skip test + upload prompts at the end (like package-macos.sh --no-sync).
 
 .PARAMETER SkipPull
     Do not git pull before building.
@@ -478,7 +478,7 @@ if (-not $SkipPrepare) {
 PSOpenAD was not staged for the installer.
 Expected: $psOpenAdManifest
 Run: pwsh -File .\scripts\build-psopenad.ps1
-Or use a GitLab pipeline artifact from job build:psopenad, then re-run package-windows.ps1 (without -SkipPrepare).
+Or use a CI artifact from job build:psopenad, then re-run package-windows.ps1 (without -SkipPrepare).
 "@
     }
     if (-not (Test-Path -LiteralPath $psModuleManifest)) {

@@ -484,7 +484,7 @@ function Get-AppAria2Manifest {
             Write-SidecarLogVerbose "aria2: bundled manifest read failed: $($_.Exception.Message)"
         }
     }
-    throw 'aria2: manifest unavailable (GitLab + bundled copy both failed).'
+    throw 'aria2: manifest unavailable (no asset feed configured and no bundled copy).'
 }
 
 function Get-AppAria2PlatformEntry {
@@ -610,7 +610,7 @@ function Ensure-AppAria2Binary {
             [void]$downloadUrls.Add([string]$entry.githubUrl)
         }
         if ($downloadUrls.Count -eq 0) {
-            throw 'aria2: manifest entry has no download URL (macOS builds must be published to GitLab first).'
+            throw 'aria2: manifest entry has no download URL - ship the binary in vendor/binaries for this platform.'
         }
 
         $downloaded = $false

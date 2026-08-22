@@ -1,6 +1,6 @@
 #!/usr/bin/env pwsh
 # Refresh vendor SCCM driver catalogs and write packaging/*.json (the bundled fallbacks
-# shipped with releases). LOCAL/MAINTAINER USE ONLY - the GitLab CI job was retired
+# shipped with releases). LOCAL/MAINTAINER USE ONLY - the CI job was retired
 # 2026-08-18; day-to-day refresh now lives in the app (aria2 Tracker -> Refresh catalogs).
 # Acer resolves via AcerCatalog.xml (curl-friendly CDN) merged over the cached KB-harvest
 # list; the legacy HTML scrape only runs as a last resort and fails from any curl client

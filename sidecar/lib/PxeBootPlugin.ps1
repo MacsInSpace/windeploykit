@@ -3152,7 +3152,7 @@ function Get-AppPxeBootP7zipManifest {
             Write-SidecarLogVerbose "PXE boot: bundled p7zip manifest read failed: $($_.Exception.Message)"
         }
     }
-    throw 'PXE boot: p7zip manifest unavailable (GitLab + bundled copy both failed).'
+    throw 'PXE boot: p7zip manifest unavailable (no asset feed configured and no bundled copy).'
 }
 
 function Invoke-AppPxeBootP7zipArtifactDownload {
@@ -3258,12 +3258,12 @@ function Ensure-AppPxeBootP7zipTools {
     }
     $entry = $manifest.platforms[$platformKey]
     if ([string]::IsNullOrWhiteSpace($entry.downloadUrl)) {
-        return @{ ok = $false; message = 'p7zip manifest entry has no downloadUrl (publish archives to GitLab first).' }
+        return @{ ok = $false; message = 'p7zip manifest entry has no downloadUrl - ship the archive in vendor/binaries.' }
     }
 
     $toolsDir = Get-AppPxeBootP7zipToolsDir
     $sizeMb = if ($entry.sizeBytes -gt 0) { [math]::Round($entry.sizeBytes / 1MB, 1) } else { 6 }
-    Write-SidecarLog "PXE boot: installing p7zip $($manifest.version) ($platformKey, ~${sizeMb} MB) to $toolsDir (GitLab HTTPS once per Mac)"
+    Write-SidecarLog "PXE boot: installing p7zip $($manifest.version) ($platformKey, ~${sizeMb} MB) to $toolsDir"
 
     $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("sm-pxe-p7zip-" + [guid]::NewGuid().ToString())
     $archivePath = Join-Path $tmpRoot $entry.archiveName
@@ -5228,7 +5228,7 @@ function Get-AppPxeBootCaddyManifest {
             Write-SidecarLogVerbose "PXE boot: bundled Caddy manifest read failed: $($_.Exception.Message)"
         }
     }
-    throw 'PXE boot: Caddy manifest unavailable (GitLab + bundled copy both failed).'
+    throw 'PXE boot: Caddy manifest unavailable (no asset feed configured and no bundled copy).'
 }
 
 function Get-AppPxeBootCaddyPlatformEntry {
@@ -5635,7 +5635,7 @@ function Get-AppPxeBootTftpd64Manifest {
             Write-SidecarLogVerbose "PXE boot: bundled Tftpd64 manifest read failed: $($_.Exception.Message)"
         }
     }
-    throw 'PXE boot: Tftpd64 manifest unavailable (GitLab + bundled copy both failed).'
+    throw 'PXE boot: Tftpd64 manifest unavailable (no asset feed configured and no bundled copy).'
 }
 
 function Get-AppPxeBootTftpd64PlatformEntry {

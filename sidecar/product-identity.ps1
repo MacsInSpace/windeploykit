@@ -18,5 +18,10 @@ $script:AppProductIdentity = [ordered]@{
     # placeholder host from the port: every caller falls back to the bundled manifest when
     # the fetch fails, so behaviour is unchanged until a real feed exists. Omit the field to
     # skip the fetch entirely.
-    AssetFeedBaseUrl = 'https://artifacts.example.com/api/v4/projects/MacsInSpace%2Fwindeploykit/packages/generic/windeploykit/latest'
+    # No runtime asset feed (Craig, 2026-08-22: "WDK should not download anything from
+    # gitlab"). This was a GitLab package URL on a placeholder host, so every fetch failed
+    # anyway - after burning a DNS timeout first. Get-AppProductAssetFeedUrl returns $null
+    # for an empty base and every caller already treats that as "use the bundled copy",
+    # so this single line removes the download attempts rather than papering over them.
+    AssetFeedBaseUrl = ''
 }
