@@ -63,6 +63,7 @@ set "CURL="
 if exist "%SYS%\curl.exe" set "CURL=%SYS%\curl.exe"
 if defined LOGHOST if defined CURL (
     call :log "Log push: %LOGHOST%/imaging-log/ingest (device %SERIAL%)"
+    call :heartbeat_start
 ) else (
     call :log "Log push off (no loghost or no curl) - log is %LOG% only."
 )
@@ -151,6 +152,13 @@ if defined DRIVERDIR (
     if defined DRIVERSTAGE call :drvload_storage
 ) else (
     call :log "No driver pack for this machine on the share (Z:\Drivers\%MAKE%\%MODEL%) - continuing without."
+    if exist "Z:\Drivers\%MAKE%\" (
+        for /d %%M in ("Z:\Drivers\%MAKE%\*") do call :log "  Z:\Drivers\%MAKE%\ has: %%~nxM"
+    ) else (
+        call :log "  Z:\Drivers\ has no %MAKE% folder - create Z:\Drivers\%MAKE%\%MODEL%\ and drop the INF tree or pack in it."
+    )
+    if /i "%MAKE%"=="Proxmox" call :log "  Without vioscsi/viostor this VM has an emulated disk - the apply will be slow."
+    if /i "%MAKE%"=="QEMU" call :log "  Without vioscsi/viostor this VM has an emulated disk - the apply will be slow."
 )
 
 rem --- target volume --------------------------------------------------------
@@ -193,6 +201,7 @@ if not defined APPLYDIR (
     set "APPLYDIR=W:\"
 )
 call :log "Applying to %APPLYDIR%"
+call :log "Applying image - DISM prints no lines while it runs; the panel shows a heartbeat until it finishes."
 
 rem --- apply ----------------------------------------------------------------
 dism /Apply-Image /ImageFile:"%WIMPATH%" /Index:%TS_INDEX% /ApplyDir:%APPLYDIR%
@@ -244,8 +253,33 @@ if defined TS_UNATTEND (
 
 copy /y "%LOG%" "%APPLYDIR%Windows\Temp\windeploykit-deploy.log" >nul 2>&1
 call :log "Done - rebooting into Windows."
+call :heartbeat_stop
 net use Z: /delete /y >nul 2>&1
 wpeutil reboot
+goto :eof
+
+:heartbeat_start
+rem A background cmd that POSTs a heartbeat every 30s so the Netboot panel keeps
+rem this device "active" through a 10-minute DISM apply that prints nothing. It
+rem is a file of its own because the payload's escaped quotes do not survive a
+rem nested `cmd /c "..."`. It exits on its own when the flag file disappears;
+rem WinPE has no taskkill. ping is the sleep - WinPE has no timeout.exe either.
+set "HBFLAG=X:\Windows\Temp\deploy.heartbeat"
+set "HBCMD=X:\Windows\Temp\deploy-heartbeat.cmd"
+> "%HBFLAG%" echo on
+> "%HBCMD%" (
+    echo @echo off
+    echo :loop
+    echo if not exist "%HBFLAG%" exit
+    echo "%CURL%" -s -m 3 -o NUL -H "Content-Type: application/json" -d "{\"serial\":\"%SERIAL%\",\"make\":\"%MAKE%\",\"model\":\"%MODEL%\",\"session\":\"%SESSION%\",\"heartbeat\":true,\"lines\":[]}" "%LOGHOST%/imaging-log/ingest" ^>nul 2^>^&1
+    echo ping -n 31 127.0.0.1 ^>nul
+    echo goto :loop
+)
+start "" /b cmd /c "%HBCMD%"
+goto :eof
+
+:heartbeat_stop
+if defined HBFLAG if exist "%HBFLAG%" del /q "%HBFLAG%" >nul 2>&1
 goto :eof
 
 :log
@@ -357,6 +391,7 @@ echo.
 goto :eof
 
 :shell
+call :heartbeat_stop
 echo [deploy] Log: %LOG%
 echo [deploy] Dropping to a command prompt.
 cmd.exe

@@ -9273,6 +9273,27 @@ function Sync-AppPxeBootInstallWimMounts {
     }
 }
 
+function Sync-AppPxeBootDeployClientPublish {
+    <#
+    .SYNOPSIS
+        Housekeeping: while serving, re-publish the deploy client when its source
+        changed - so a fixed startnet.cmd reaches the next boot without Stop/Start.
+    #>
+    $state = $script:AppPxeBootState
+    if (-not ($state.HttpProcess -and -not $state.HttpProcess.HasExited)) { return }
+    $src = Get-AppPxeBootDeployClientStartnetSource
+    if (-not $src) { return }
+    $dir = Join-Path (Get-AppPxeBootLayoutPaths).httpRoot 'deploy'
+    $dst = Join-Path $dir 'startnet.cmd'
+    if (-not (Test-Path -LiteralPath $dst)) { return }
+    if ((Get-Item -LiteralPath $src).LastWriteTimeUtc -le (Get-Item -LiteralPath $dst).LastWriteTimeUtc) { return }
+    try {
+        Write-AppPxeBootDeployOverlayFiles -Dir $dir -LanIp (Get-AppPxeBootLanIp)
+    } catch {
+        Write-SidecarLogVerbose "PXE boot: deploy client re-publish failed - $($_.Exception.Message)"
+    }
+}
+
 function Dismount-AppPxeBootInstallWimIso {
     param([Parameter(Mandatory)][string]$Base)
     $entry = $script:AppPxeBootState.IsoMounts[$Base]

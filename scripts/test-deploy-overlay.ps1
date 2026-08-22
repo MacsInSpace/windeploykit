@@ -236,6 +236,11 @@ try {
             # A loose INF tree (Craig's Proxmox\vm) must be used in place and /Recurse-injected.
             if ($text -notmatch '(?i)INF tree in place') { throw 'loose INF tree is not handled in place' }
             if ($text -notmatch '(?i)for /r "%DRIVERSTAGE%"') { throw 'drvload must walk the staged tree with a plain %var% root' }
+            # The heartbeat keeps the panel's "active" badge alive through a silent DISM
+            # apply, and must be stopped on BOTH exits (reboot and the failure prompt).
+            if ($text -notmatch '(?i)call :heartbeat_start') { throw 'no heartbeat' }
+            if (([regex]::Matches($text, '(?i)call :heartbeat_stop')).Count -lt 2) { throw 'heartbeat is not stopped on both exits' }
+            if ($text -notmatch '(?i)"heartbeat\\":true') { throw 'heartbeat payload is not the ingest heartbeat shape' }
         } finally {
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
         }
