@@ -965,3 +965,73 @@ starts the first and parks the rest in `$script:AppEvalIsoPendingQueue`;
 hand in the meantime is skipped). Rows already in the store never queue. The button shows
 the count and the total bytes, so nobody starts 35 GB by accident.
 
+## 11. Windows Server evaluation -> licensed edition (2026-08-22)
+
+Evaluation Center media installs as `ServerStandardEval` / `ServerDatacenterEval` and dies
+after 180 days, so every seeded **Server** task sequence now carries a conversion step.
+It is a no-op on anything that is not an evaluation edition.
+
+### Why the hand-written original could not work
+
+Craig's `ServerBaseActivationandSettings.ps1`, verbatim:
+
+    If ($BuildNumber = 20348)              # ASSIGNMENT, not -eq: always true, and it
+                                           # overwrites $BuildNumber. Every version block
+                                           # ran, in order, on every machine.
+    If ($TargetEdition = "ServerStandard") # same - Standard, Datacenter and Essentials
+                                           # branches all ran.
+    Dism /Set-Edition:ServerDataCentre     # not an edition id (ServerDatacenter).
+    2019 Datacenter -> N69G4-...           # that is the 2019 STANDARD key.
+    slmgr /ipk WVDHN-...-YY726C            # 26 characters, one too many.
+    $CurrentEdition -Like "ServerStandard" # no wildcards, compared against a Caption -
+                                           # every fallback branch was dead.
+
+It appeared to work on 2022 Standard by luck: the first DISM call that matched won.
+
+### What runs now
+
+`sidecar/lib/ServerEvalConversion.ps1` (dependency-free, byte-identical in USM):
+
+1. `DISM /online /Get-CurrentEdition` - ask, do not infer from `Win32_OperatingSystem.Caption`.
+2. Act only when the edition ends in `Eval`; otherwise log and exit 0.
+3. Target = the edition minus `Eval`, and `DISM /online /Get-TargetEditions` must actually
+   offer it.
+4. GVLK looked up by **(build, target edition)** from Microsoft's published list
+   (learn.microsoft.com/windows-server/get-started/kms-client-activation-keys, 2026-08-22).
+5. `DISM /online /Set-Edition:<target> /ProductKey:<gvlk> /AcceptEula /NoRestart`, logged to
+   `C:\Windows\Setup\Scripts\eval-conversion.log`. No forced reboot - it lands on the
+   next restart, which the join step causes anyway.
+
+**It runs from SetupComplete.cmd, not the specialize pass**: `/Set-Edition` is a servicing
+operation that wants a full OS, and SetupComplete runs as SYSTEM after setup and before
+anyone can log on. The specialize step just drops the payload and appends the hook (it
+never clobbers an existing SetupComplete.cmd).
+
+### New step type: `pwshEncoded`
+
+A whole script as one step, base64 (UTF-16LE) into `powershell.exe -EncodedCommand`. The
+rendered unattend line contains **no quotes at all**, so nothing can break it, however
+nested the script is - while the stored step stays readable text for the panel. Verified:
+9174-char line, exact round-trip, valid XML.
+
+### Keys corrected
+
+`Get-AppPxeBootTsProductKeyDefault`'s server fallback was `8B2CN-7C8FB-QWPCQ-42WKG-724QW`,
+which is **not a published GVLK** (it came across from the hand-written script). Server 2022
+Standard is `VDYBN-27WPP-V4HQT-9VMD4-VMK7H`. A gate test asserts the 8B2CN key never returns.
+
+### Client media is NOT convertible
+
+`/Set-Edition` is a Server capability. Windows client Enterprise **Evaluation** cannot be
+converted - Microsoft's documented answer is a clean install, and `/Get-TargetEditions`
+offers nothing on a client eval. The GitHub trick doing the rounds
+(`Switch-Windows-EnterpriseEval-to-Enterprise`) works by copying licensing SKU tokens into
+`System32\spp\tokens\skus` from other media and then activating with MAS - build-specific,
+unsupported, and not something to put on a fleet. Use volume/IoT LTSC media for clients;
+evaluation client ISOs are for lab and imaging tests.
+
+### Tests
+
+`scripts/test-server-eval-conversion.ps1` (14 checks) - every case is a mistake the original
+actually made. USM mirrors them in `sidecar/tests/ServerEvalConversion.Tests.ps1`.
+

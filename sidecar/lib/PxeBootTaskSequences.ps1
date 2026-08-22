@@ -55,7 +55,7 @@ function Get-AppPxeBootTaskSequenceDefaults {
     # boot (specialize RunSynchronous) - seeded here from Craig's RDP-enable and
     # GPO-disable sets, but plain data the panel can add to, remove, or reorder.
     # Empty productKey publishes the role default from the KMS catalog.
-    @(
+    $defaults = @(
         [ordered]@{
             id      = 'client-domain'
             name    = 'Client - domain join'
@@ -117,6 +117,17 @@ function Get-AppPxeBootTaskSequenceDefaults {
             )
         }
     )
+    # Evaluation Center media installs as ServerStandardEval/ServerDatacenterEval and
+    # expires in 180 days, so every Server sequence gets the conversion step. It is a
+    # no-op on anything that is not an evaluation edition (see ServerEvalConversion.ps1,
+    # which also records why the original hand-written version could not work).
+    if (Get-Command Get-AppServerEvalConversionStep -ErrorAction SilentlyContinue) {
+        foreach ($sequence in $defaults) {
+            if ([string]$sequence.kind -ne 'server') { continue }
+            $sequence.steps = @(@($sequence.steps) + (Get-AppServerEvalConversionStep))
+        }
+    }
+    $defaults
 }
 function Get-AppPxeBootTaskSequenceDefaultId {
     # '' = no default. A sequence id, or the literal Intune / Autopilot menu item.
@@ -307,7 +318,11 @@ function Get-AppPxeBootTsProductKeyDefault {
             }
         }
     } catch { }
-    if ($Role -eq 'server') { '8B2CN-7C8FB-QWPCQ-42WKG-724QW' } else { 'KBN8V-HFGQ4-MGXVD-347P6-PDQGT' }
+    # Server 2022 Standard / Windows IoT Enterprise LTSC 2024, from Microsoft's published
+    # GVLK list. The previous server fallback (8B2CN-...) is not a published GVLK at all -
+    # it came across from the hand-written activation script (checked 2026-08-22 against
+    # learn.microsoft.com/windows-server/get-started/kms-client-activation-keys).
+    if ($Role -eq 'server') { 'VDYBN-27WPP-V4HQT-9VMD4-VMK7H' } else { 'KBN8V-HFGQ4-MGXVD-347P6-PDQGT' }
 }
 
 function Get-AppPxeBootTsStepCommandLine {
@@ -334,6 +349,13 @@ function Get-AppPxeBootTsStepCommandLine {
             }
         }
         'pwsh' { "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"$(([string]$Step.command) -replace '"', '\"')`"" }
+        # A whole script as one step: base64 (UTF-16LE, what -EncodedCommand wants) so
+        # quoting cannot break the generated line, however long or nested the script is.
+        # The step still stores readable text, so the panel can show and edit it.
+        'pwshEncoded' {
+            $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes([string]$Step.command))
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
+        }
         default { "cmd /c $([string]$Step.command)" }
     }
 }

@@ -56,6 +56,7 @@ $libRoot = Join-Path $script:SidecarRoot 'lib'
 . (Join-Path $libRoot 'MicrosoftSccmDriverCatalog.ps1')
 . (Join-Path $libRoot 'VendorSccmCatalogRefresh.ps1')
 . (Join-Path $libRoot 'PxeBootPlugin.ps1')
+. (Join-Path $libRoot 'ServerEvalConversion.ps1')
 . (Join-Path $libRoot 'PxeBootTaskSequences.ps1')
 . (Join-Path $libRoot 'PxeBootDriverPullThrough.ps1')
 . (Join-Path $libRoot 'Aria2Plugin.ps1')
