@@ -8839,6 +8839,76 @@ function Remove-AppPxeBootWim {
     Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh -SkipLayoutProbe
 }
 
+function ConvertFrom-AppPxeBootHdiutilInfo {
+    <#
+    .SYNOPSIS
+        `hdiutil info -plist` (as JSON) -> @( @{ imagePath; devEntry; mountPoint } ) per entity.
+        Pure parse so the gate can feed it a canned record.
+    #>
+    param([AllowEmptyString()][string]$Json)
+    # Self-contained property reads: Get-AppSidecarJsonProp lives in lib/Ipc.ps1, which
+    # the sidecar loads but the gates do not - the first cut of this parser silently
+    # returned nothing outside the app, so the detach it fed never happened (2026-08-23).
+    $prop = {
+        param($Item, [string]$Name)
+        if ($null -eq $Item) { return $null }
+        $p = $Item.PSObject.Properties[$Name]
+        if ($p) { return $p.Value }
+        return $null
+    }
+    $rows = @()
+    if ([string]::IsNullOrWhiteSpace($Json)) { return $rows }
+    try {
+        $info = $Json | ConvertFrom-Json
+        foreach ($image in @(& $prop $info 'images')) {
+            $imagePath = [string](& $prop $image 'image-path')
+            if (-not $imagePath) { continue }
+            foreach ($entity in @(& $prop $image 'system-entities')) {
+                if ($null -eq $entity) { continue }
+                $rows += , @{
+                    imagePath  = $imagePath
+                    devEntry   = [string](& $prop $entity 'dev-entry')
+                    mountPoint = [string](& $prop $entity 'mount-point')
+                }
+            }
+        }
+    } catch { }
+    # Plain output: callers write @(ConvertFrom-AppPxeBootHdiutilInfo ...).
+    $rows
+}
+
+function Get-AppPxeBootAttachedIsoEntities {
+    # Every hdiutil entity for this image (dev entry + mount point, either may be empty).
+    param([Parameter(Mandatory)][string]$IsoPath)
+    if (-not ($IsMacOS -or $IsDarwin)) { return @() }
+    $full = try { (Resolve-Path -LiteralPath $IsoPath -ErrorAction Stop).Path } catch { $IsoPath }
+    $json = try { (& hdiutil info -plist 2>$null | & plutil -convert json -o - -- - 2>$null) -join '' } catch { '' }
+    # -eq is case-insensitive: hdiutil reports the path as the caller typed it at attach
+    # time (Public/WinDeployKit vs Public/windeploykit on this case-insensitive volume).
+    @(ConvertFrom-AppPxeBootHdiutilInfo -Json $json | Where-Object { $_.imagePath -eq $full })
+}
+
+function Disconnect-AppPxeBootAttachedIso {
+    <#
+    .SYNOPSIS
+        Detach every entity of an attached ISO and report whether it is really gone.
+    .NOTES
+        Detaching by mount point alone left an orphan on 2026-08-23: the detach
+        failed quietly, the temp directory was removed anyway, and from then on every
+        Start borrowed a mount that lived in /private/var/folders - served fine over
+        HTTP, invisible on the SMB share, "Image not on the share" at the device.
+        Detach by dev entry, then CHECK.
+    #>
+    param([Parameter(Mandatory)][string]$IsoPath)
+    foreach ($e in @(Get-AppPxeBootAttachedIsoEntities -IsoPath $IsoPath)) {
+        $target = if ($e.devEntry) { $e.devEntry } else { $e.mountPoint }
+        if (-not $target) { continue }
+        & hdiutil detach $target -force 2>&1 | Out-Null
+    }
+    $left = @(Get-AppPxeBootAttachedIsoEntities -IsoPath $IsoPath)
+    return ($left.Count -eq 0)
+}
+
 function Get-AppPxeBootAttachedIsoMountPoint {
     <#
     .SYNOPSIS
@@ -8884,7 +8954,18 @@ function Mount-AppPxeBootIsoReadOnly {
         # detach it when we are done.
         $existing = Get-AppPxeBootAttachedIsoMountPoint -IsoPath $IsoPath
         if ($existing) {
-            return @{ platform = 'macos'; mountPath = $existing; borrowed = $true }
+            $sameSpot = $MountPath -and ((($existing -replace '/+$', '') -eq ($MountPath -replace '/+$', '')) -or
+                    (($existing -replace '^/private', '') -eq ($MountPath -replace '^/private', '')))
+            if (-not $MountPath -or $sameSpot) {
+                return @{ platform = 'macos'; mountPath = $existing; borrowed = $true; isoPath = $IsoPath }
+            }
+            # A caller that needs the mount AT a specific path (mount-and-serve: inside
+            # the Deploy$ share) cannot use one that lives elsewhere - SMB clients would
+            # never see it. Re-home it: detach wherever it is and attach where asked.
+            Write-SidecarLog "PXE boot: $([IO.Path]::GetFileName($IsoPath)) is attached at $existing, not in the share - re-homing to $MountPath"
+            if (-not (Disconnect-AppPxeBootAttachedIso -IsoPath $IsoPath)) {
+                throw "PXE boot: $([IO.Path]::GetFileName($IsoPath)) is attached at $existing and will not detach - close whatever is using it and Start again."
+            }
         }
         $mountDir = if ($MountPath) {
             $MountPath
@@ -8896,12 +8977,13 @@ function Mount-AppPxeBootIsoReadOnly {
             Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue
         }
         $null = New-Item -Path $mountDir -ItemType Directory -Force
-        & hdiutil attach -nobrowse -readonly -mountpoint $mountDir $IsoPath 2>&1 | Out-Null
+        $attachOut = (& hdiutil attach -nobrowse -readonly -mountpoint $mountDir $IsoPath 2>&1 | Out-String).Trim()
         if ($LASTEXITCODE -ne 0) {
             Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue
-            throw 'PXE boot: failed to mount ISO (hdiutil).'
+            $reason = if ($attachOut) { ($attachOut -split "`n" | Select-Object -Last 1).Trim() } else { "exit $LASTEXITCODE" }
+            throw "PXE boot: failed to mount ISO (hdiutil: $reason)"
         }
-        return @{ platform = 'macos'; mountPath = $mountDir }
+        return @{ platform = 'macos'; mountPath = $mountDir; isoPath = $IsoPath; borrowed = $false }
     }
     if (Get-Command -Name Mount-DiskImage -ErrorAction SilentlyContinue) {
         $img = Mount-DiskImage -ImagePath $IsoPath -PassThru -ErrorAction Stop
@@ -8911,7 +8993,7 @@ function Mount-AppPxeBootIsoReadOnly {
             Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue | Out-Null
             throw 'PXE boot: ISO mounted but no drive letter was assigned.'
         }
-        return @{ platform = 'windows'; mountPath = "$($letter):\"; isoPath = $IsoPath }
+        return @{ platform = 'windows'; mountPath = "$($letter):\"; isoPath = $IsoPath; borrowed = $false }
     }
     throw 'PXE boot: cannot mount ISO on this platform without 7-Zip.'
 }
@@ -8922,8 +9004,20 @@ function Dismount-AppPxeBootIso {
         if ($MountInfo.platform -eq 'macos') {
             # Never tear down a mount we borrowed - Netboot is serving install.wim from it.
             if ($MountInfo.borrowed) { return }
-            & hdiutil detach $MountInfo.mountPath -force 2>&1 | Out-Null
-            Remove-Item -LiteralPath $MountInfo.mountPath -Recurse -Force -ErrorAction SilentlyContinue
+            $gone = $false
+            if ($MountInfo.isoPath) {
+                $gone = Disconnect-AppPxeBootAttachedIso -IsoPath $MountInfo.isoPath
+            } else {
+                & hdiutil detach $MountInfo.mountPath -force 2>&1 | Out-Null
+                $gone = -not (Test-Path -LiteralPath (Join-Path $MountInfo.mountPath 'sources'))
+            }
+            if ($gone) {
+                Remove-Item -LiteralPath $MountInfo.mountPath -Recurse -Force -ErrorAction SilentlyContinue
+            } else {
+                # Leave the directory: it is still the live mount point, and the next
+                # attach will borrow it from here rather than orphan it.
+                Write-SidecarLog "PXE boot: ISO still attached after detach ($($MountInfo.mountPath)) - left in place"
+            }
         } elseif ($MountInfo.platform -eq 'windows') {
             # Remove the in-share junction first - Directory.Delete on a reparse point drops
             # the link only, never recursing into (and deleting) the mounted ISO contents.

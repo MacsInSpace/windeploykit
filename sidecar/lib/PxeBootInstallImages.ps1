@@ -225,7 +225,21 @@ function Get-AppPxeBootInstallImagesForSource {
 
     $mount = $null
     try {
-        $mount = Mount-AppPxeBootIsoReadOnly -IsoPath ([string]$Source.sourcePath)
+        # Mount at the SAME path mount-and-serve uses (.mounts/<token> inside the share),
+        # never a temp dir: a detach that fails quietly then leaves the ISO exactly where
+        # serving needs it, instead of an orphan in /private/var/folders that every later
+        # Start borrows and no SMB client can see (2026-08-23).
+        $mountArgs = @{ IsoPath = [string]$Source.sourcePath }
+        if ($IsMacOS -or $IsDarwin) {
+            try {
+                $mountDirRoot = (Get-AppPxeBootLayoutPaths).isoMountDir
+                if ($mountDirRoot) {
+                    if (-not (Test-Path -LiteralPath $mountDirRoot)) { $null = New-Item -Path $mountDirRoot -ItemType Directory -Force }
+                    $mountArgs.MountPath = Join-Path $mountDirRoot (Get-AppPxeBootIsoMountToken -IsoFileName ([string]$Source.fileName))
+                }
+            } catch { }
+        }
+        $mount = Mount-AppPxeBootIsoReadOnly @mountArgs
         $wim = Join-Path ([string]$mount.mountPath) 'sources/install.wim'
         if (-not (Test-Path -LiteralPath $wim)) {
             $wim = Join-Path ([string]$mount.mountPath) 'sources/install.esd'
@@ -239,7 +253,8 @@ function Get-AppPxeBootInstallImagesForSource {
         Write-SidecarLog "PXE boot: could not read editions from $($Source.fileName) - $($_.Exception.Message)"
         return $null
     } finally {
-        if ($mount -and -not [bool]$mount.borrowed) {
+        # Hashtable key read, not a dot: a mount record without the key must read false.
+        if ($mount -and -not [bool]($mount -is [System.Collections.IDictionary] -and $mount.ContainsKey('borrowed') -and $mount['borrowed'])) {
             Dismount-AppPxeBootIso -Mount $mount
         }
     }

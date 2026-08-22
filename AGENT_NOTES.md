@@ -1175,6 +1175,33 @@ block; `StopPxeBootServices` broke exactly this way and only an IPC round-trip c
 What is left: `GetPxeBootWimLibrary` (642 ms warm) and `GetPxeBootPluginConfig` (418 ms) both
 still rebuild status-shaped data. Worth another look only if the panel still feels slow.
 
+### "Image not on the share" - the orphaned ISO attach (2026-08-23)
+
+Two boots in a row reached the share and the sequence, then stopped at
+`Z:\.mounts\<token>\sources\install.wim` missing, while HTTP serving of the same
+install.wim worked. Cause: the edition reader (install image catalog) had attached
+the ISO at a temp dir in `/private/var/folders`, its detach failed quietly, and from
+then on every Start *borrowed* that attach - fine for Caddy's `/iso-wim/` route, but
+the SMB share needs the mount AT `.mounts/<token>` and nothing ever put it there.
+
+Three rules now, all exercised by a live cycle (reader -> serve -> dismount ->
+planted orphan -> serve re-homes it -> dismount; host ends with nothing attached):
+
+- Anything that mounts an ISO on macOS mounts it at the canonical
+  `.mounts/<token>` path, never a temp dir - so a detach that fails leaves the image
+  where serving needs it.
+- `Mount-AppPxeBootIsoReadOnly -MountPath X` re-homes an image attached anywhere
+  else (detach by dev entry, attach at X) instead of borrowing it; a borrow is only
+  for callers that do not care where it is.
+- Detach is by dev entry and VERIFIED (`Disconnect-AppPxeBootAttachedIso`); the
+  mount directory is removed only when the image is really gone, and the attach
+  failure message now carries hdiutil's own reason.
+
+`ConvertFrom-AppPxeBootHdiutilInfo` is a pure parser (pinned in the gate with the
+real orphan record) and is deliberately self-contained: its first cut used
+`Get-AppSidecarJsonProp` from lib/Ipc.ps1, which the sidecar loads and the gates do
+not, so outside the app it returned nothing and the detach it fed never ran.
+
 ### Drivers and live logs from the cmd-only client (2026-08-23)
 
 Craig: "WDK needs the same driver install injection as ImageDeployer (noting boot

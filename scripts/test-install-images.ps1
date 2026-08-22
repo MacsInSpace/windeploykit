@@ -204,6 +204,37 @@ Test-Case 'an ISO mount token is stable and URL-safe' {
 }
 
 Write-Host ''
+Write-Host 'ISO attach bookkeeping (macOS):'
+
+Test-Case 'hdiutil info parses to image path + dev entry + mount point' {
+    # The exact record behind the 2026-08-23 orphan: attached at a temp dir, so every
+    # Start borrowed it and the share never got .mounts/<token>.
+    $json = '{"images":[{"image-path":"/Users/x/Public/WinDeployKit/iso/SERVER_EVAL.iso","system-entities":[{"dev-entry":"/dev/disk14","mount-point":"/private/var/folders/9h/T/sm-pxe-iso-972bf356"}]},{"image-path":"/Users/x/other.dmg","system-entities":[{"dev-entry":"/dev/disk13"},{"dev-entry":"/dev/disk13s1","mount-point":"/Volumes/Other"}]}]}'
+    $rows = @(ConvertFrom-AppPxeBootHdiutilInfo -Json $json)
+    Assert-Equal 3 $rows.Count 'entity rows'
+    $iso = @($rows | Where-Object { $_.imagePath -like '*SERVER_EVAL.iso' })
+    Assert-Equal 1 $iso.Count 'iso rows'
+    Assert-Equal '/dev/disk14' $iso[0].devEntry 'dev entry'
+    Assert-Equal '/private/var/folders/9h/T/sm-pxe-iso-972bf356' $iso[0].mountPoint 'mount point'
+    $whole = @($rows | Where-Object { $_.devEntry -eq '/dev/disk13' })[0]
+    Assert-Equal '' $whole.mountPoint 'an entity with no mount point reads as empty, not missing'
+    Assert-Equal 0 @(ConvertFrom-AppPxeBootHdiutilInfo -Json '').Count 'empty input'
+    Assert-Equal 0 @(ConvertFrom-AppPxeBootHdiutilInfo -Json 'not json').Count 'garbage input'
+}
+
+Test-Case 'a serve mount is re-homed, never borrowed from outside the share' {
+    # Pinned by text: Mount-AppPxeBootIsoReadOnly must re-home (detach + attach at the
+    # requested path) when the image is attached elsewhere, and must surface hdiutil's
+    # own reason instead of a bare "failed to mount ISO".
+    $src = (Get-Command Mount-AppPxeBootIsoReadOnly).ScriptBlock.ToString()
+    if ($src -notmatch 'Disconnect-AppPxeBootAttachedIso') { throw 'no re-home path' }
+    if ($src -notmatch 're-homing to') { throw 'no re-home log line' }
+    if ($src -notmatch 'hdiutil: \$reason') { throw 'attach failure does not carry the hdiutil reason' }
+    $reader = (Get-Command Get-AppPxeBootInstallImagesForSource).ScriptBlock.ToString()
+    if ($reader -notmatch 'isoMountDir') { throw 'the edition reader does not mount at the canonical .mounts path' }
+}
+
+Write-Host ''
 Write-Host 'Client half (FieldIso reads the published index):'
 
 # The client functions live in a script that runs main() on load, so lift just the
