@@ -93,7 +93,7 @@ USM vendoring its own credential-prompt machinery back from a downstream project
 > byte-comparable. `AppHttp.ps1` is a deliberate 56-line stub of USM's 546 - that
 > asymmetry is intentional, not drift.
 
-### Identity injection - contract AGREED 2026-08-21, implementation not started
+### Identity injection - contract AGREED 2026-08-21, DONE 2026-08-22 (both halves)
 
 The domain libs hardcode product identity, which is why a cross-repo diff is ~90%
 noise and hid three real bugs for a day. The fix is one `$script:AppProductIdentity`
@@ -110,11 +110,18 @@ User-Agent per vendor catalog, `Ipc` x1, `PxeBootTaskSequences` x1,
 `Aria2PxeIntegration` x1); ~50 further mentions are prose, and the contract's grep
 counts those too, so they go as well.
 
-**Status 2026-08-22 - nobody has started, on either side.** Checked, not assumed:
-`AppProductIdentity` is defined in neither repo; USM's 32 sites still hit the grep;
-`AppElevation.ps1` / `AppNativeProcess.ps1` have never been committed to USM even
-though USM said it would take them and de-identify them first. The contract says
-we may convert our 20 sites now; see section 9.
+**Status 2026-08-22 evening - done on both sides, by one agent (Craig: "rather than run
+between 2 agents").** `sidecar/product-identity.ps1` is the only file with product
+literals; `lib/AppProductIdentity.ps1`, `lib/AppElevation.ps1`, `lib/AppNativeProcess.ps1`
+are byte-identical to USM main; every lib passes the widened drift grep
+(`Unofficial School Manager|School Manager|unofficial-school-manager|STMC|stmc|usm-|
+WinDeployKit|windeploykit|DeployKit|DEPLOYKIT`). Wording at every shared site is the
+same text as USM's (product name only where a technician sees it, "Netboot" in logs);
+dev env overrides are `APP_ARIA2` / `APP_PXE_CADDY` / `APP_PXE_TFTPD64`; the
+`Format-AppProcessArgumentList` sentinel is `__APP_DIRECT__`. The data root is the
+SLUG on every platform (`windeploykit`, USM `usm`) - contract section 1. Commits
+`7933b0b`, `79f6e26`. What is left in a diff against USM is functional: the site/school
+genericisation, our `Get-AppSidecarJsonProp`, the `AppHttp` stub.
 
 **Explicitly NOT shared: the frontend.** WinDeployKit is corporate - no themes,
 no arcade, no personality. USM keeps all of that. Panels, theme system and
@@ -773,3 +780,29 @@ ls sidecar/pxe/x86_64-sb 2>/dev/null || echo "arch trees not copied yet"
 cd app && npx tsc --noEmit
 ```
 
+
+### 9b. Update 2026-08-22 (night) - items 1 and 2 done, by the USM agent working here
+
+Craig: "Rather than run between 2 agents, can you continue and split WinDeployKit out
+cleanly." So the USM agent worked in this tree directly. Local commits, **not pushed**:
+
+| Commit | What |
+| --- | --- |
+| `eb6a28f` | **Arch trees** - all nine `sidecar/pxe/<arch>/` trees (37 files, 25 MB) byte-identical to USM main; every blob's git hash checked against USM's index; root `snponly.efi` untouched. Item 1 done; Craig's go was the instruction above |
+| `7933b0b` | **Identity contract** - object, helpers, USM's three runtime files byte-identical, 20 sites + all prose converted, Ipc StrictMode-safe verbose gates. Item 2 done; the `AppElevation`/`AppNativeProcess` thread is closed (USM took them, de-identified, and they came back identical) |
+| `79f6e26` | Data root = slug `windeploykit` on every platform (USM rule; we had no installed base) |
+
+Gates after: ascii clean (234 files), strictmode clean, storage policy holds, psmodules
+OK, tsc clean, stdio smoke (`Ping`, `GetSidecarStatus`, `GetSecretVaultStatus` ready /
+6 secrets).
+
+**Item 4 decision (the two macOS credential-cache commands):** USM's
+`Handle-PrefetchMacOsAdminCredential` / cache-status handlers exist because USM's
+Netboot panel shows the cached-admin state; nothing in this frontend references them
+(`rg MacOsAdminCredential app/src` is empty), so they stay out until a panel needs
+them. The functions are in `AppElevation.ps1` already; a handler is four lines when
+the time comes.
+
+**Still open:** item 3 (confirm the app end to end on this Mac after `npm run
+tauri:dev` - not done in this pass), then 5-10 as listed. The contract's widened grep
+(section 0) is the drift check to run before touching any lib USM also carries.

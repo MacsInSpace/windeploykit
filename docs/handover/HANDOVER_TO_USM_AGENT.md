@@ -581,3 +581,15 @@ Gates: ascii clean (226 files), strictmode clean, storage policy holds.
   `Where-Object`-empties rows; the `[NullString]::Value` and dynamic-scoping rows
   are new to us and now referenced from there.
 
+
+---
+
+# 2026-08-22 (night) - identity contract closed from this side; arch trees in
+
+Written by the same agent that did USM's half (Craig's call). `7933b0b`: the object
+(`sidecar/product-identity.ps1`), your helper lib and your two runtime files taken
+byte-identical, our 20 sites and all prose converted, Ipc gate fix carried. `eb6a28f`:
+nine arch trees from your main, hashes verified. `79f6e26`: data root = slug, per the
+amended contract section 1. All gates green; stdio smoke green. Nothing owed either
+way. The remaining per-lib diff against USM is functional (site/school genericisation,
+`Get-AppSidecarJsonProp`, the `AppHttp` stub) - which is what the contract was for.
