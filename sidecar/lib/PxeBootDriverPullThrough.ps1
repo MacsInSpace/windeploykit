@@ -5,9 +5,11 @@
 #
 #   * Pull-through: the housekeeping tick spots an active imaging client whose model
 #     resolves in a vendor catalog but has no pack in the driver store, and starts
-#     the verified direct download ONCE per make|model (ledger, no auto-retry). The
-#     first device deploys as today (ImageDeployer's own client-side vendor download
-#     fallback); every later device of that model cache-hits the store.
+#     the verified direct download. A ledger keeps one entry per make|model: a
+#     failed fetch is retried on the NEXT device / imaging session of that model,
+#     never in a loop on the one that saw it fail (Craig, 2026-08-22). The first
+#     device deploys as today (ImageDeployer's own client-side vendor download
+#     fallback where the vendor has one); every later device cache-hits the store.
 #
 #   * Alias map: Drivers/aliases.json maps model names / Lenovo machine types /
 #     seed wmiPatterns to the pack folder actually on disk - the baked ImageDeployer
@@ -79,13 +81,78 @@ function Get-AppPxeBootPullThroughLedgerPath {
     Join-Path (Get-AppAria2StoreRoot) 'driver-pull-through.json'
 }
 
+function Get-AppPxeBootPullThroughLedger {
+    # make|model -> hashtable entry. Tolerant of the pre-retry shape (no serial/session/attempts).
+    param([string]$Path)
+    $ledger = @{}
+    if (-not (Test-Path -LiteralPath $Path)) { return $ledger }
+    try {
+        $raw = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($p in @($raw.PSObject.Properties)) {
+            $entry = @{}
+            $value = $p.Value
+            if ($value -is [System.Collections.IDictionary]) {
+                foreach ($k in @($value.Keys)) { $entry[[string]$k] = $value[$k] }
+            } elseif ($null -ne $value) {
+                foreach ($q in @($value.PSObject.Properties)) { $entry[[string]$q.Name] = $q.Value }
+            }
+            $ledger[[string]$p.Name] = $entry
+        }
+    } catch { $ledger = @{} }
+    return $ledger
+}
+
+function Get-AppPxeBootPullThroughEntryValue {
+    param([hashtable]$Entry, [string]$Name)
+    if ($null -eq $Entry) { return $null }
+    if ($Entry.ContainsKey($Name)) { return $Entry[$Name] }
+    return $null
+}
+
+function ConvertTo-AppPxeBootPullThroughUtc {
+    # Ledger timestamps come back from ConvertFrom-Json as [DateTime] (PS 7 hydrates ISO
+    # strings) or as text from older files; either way -> UTC, MinValue when unreadable.
+    param($Raw)
+    if ($Raw -is [DateTime]) { return ([DateTime]$Raw).ToUniversalTime() }
+    $parsed = [DateTime]::MinValue
+    $ok = [DateTime]::TryParse([string]$Raw, [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AdjustToUniversal, [ref]$parsed)
+    if (-not $ok) { return [DateTime]::MinValue }
+    return $parsed
+}
+
+function Get-AppPxeBootPullThroughClientValue {
+    # Imaging-client rows are ordered hashtables; older snapshots may lack newer fields.
+    param($Client, [string]$Name)
+    if ($null -eq $Client) { return $null }
+    if ($Client -is [System.Collections.IDictionary]) {
+        if ($Client.Contains($Name)) { return $Client[$Name] }
+        return $null
+    }
+    $p = $Client.PSObject.Properties[$Name]
+    if ($p) { return $p.Value }
+    return $null
+}
+
 function Sync-AppPxeBootDriverPullThrough {
     <#
     .SYNOPSIS
         Housekeeping tick (30s throttle): for each imaging client active in the last
-        10 minutes, fetch its catalog driver pack ONCE if the store lacks it. Every
-        outcome is recorded in the ledger so a make|model is never retried
-        automatically - a tech re-downloads from the Drivers tab if needed.
+        10 minutes, fetch its catalog driver pack when the store lacks it. One ledger
+        entry per make|model keeps this from ever looping on a single device:
+
+          * download-started is reconciled on later ticks against the direct-download
+            job and becomes 'downloaded' or 'download-failed: <why>' (a sidecar restart
+            before the download finished counts as a failure);
+          * a failed fetch is retried once per NEW device / imaging session of that
+            model (Craig, 2026-08-22) - never again for the session that saw it fail;
+          * already-present / downloaded entries fetch again if the pack leaves the disk
+            (delete the folder to force a refresh);
+          * no-catalog-match / no-download-source entries are re-evaluated after the
+            catalog cache TTL (14 days) so a refreshed catalog gets its chance.
+
+        A tech can always fetch by hand from the Drivers tab; the next device then
+        records 'already-present'.
     #>
     $now = (Get-Date).ToUniversalTime()
     if (($now - $script:AppPxeBootPullThroughLastSyncUtc).TotalSeconds -lt 30) { return }
@@ -97,60 +164,141 @@ function Sync-AppPxeBootDriverPullThrough {
     if ($clients.Count -eq 0) { return }
 
     $ledgerPath = Get-AppPxeBootPullThroughLedgerPath
-    $ledger = @{}
-    if (Test-Path -LiteralPath $ledgerPath) {
-        try {
-            $raw = Get-Content -LiteralPath $ledgerPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            foreach ($p in @($raw.PSObject.Properties)) { $ledger[[string]$p.Name] = $p.Value }
-        } catch { $ledger = @{} }
-    }
-
+    $ledger = Get-AppPxeBootPullThroughLedger -Path $ledgerPath
+    $stamp = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')
     $changed = $false
+
     foreach ($client in $clients) {
-        $lkey = ("$($client.make)|$($client.model)").ToLowerInvariant()
-        if ($ledger.ContainsKey($lkey)) { continue }
-        $entry = @{
-            at    = $now.ToString('yyyy-MM-ddTHH:mm:ssZ')
-            make  = [string]$client.make
-            model = [string]$client.model
-        }
-        $row = Resolve-AppPxeBootDriverRowForDevice -Make $client.make -Model $client.model
-        if (-not $row) {
-            $entry.result = 'no-catalog-match'
-        } else {
+        $make = [string]$client.make
+        $model = [string]$client.model
+        $lkey = ("$make|$model").ToLowerInvariant()
+        $clientSerial = [string](Get-AppPxeBootPullThroughClientValue -Client $client -Name 'serial')
+        $clientSession = [string](Get-AppPxeBootPullThroughClientValue -Client $client -Name 'session')
+        $entry = if ($ledger.ContainsKey($lkey)) { $ledger[$lkey] } else { $null }
+        $result = [string](Get-AppPxeBootPullThroughEntryValue -Entry $entry -Name 'result')
+
+        $row = Resolve-AppPxeBootDriverRowForDevice -Make $make -Model $model
+        $vendor = $null
+        $folder = $null
+        $uri = $null
+        $progressKey = $null
+        $havePack = $false
+        if ($row) {
             $vendor = [string](Get-AppAria2JsonProp -Item $row -Name 'vendor')
             $folder = [string](Get-AppAria2JsonProp -Item $row -Name 'folder')
             $uri = [string](Get-AppAria2JsonProp -Item $row -Name 'uri')
-            $entry.vendor = $vendor
-            $entry.folder = $folder
+            $progressKey = "$vendor|$folder"
             $modelDir = Join-Path (Join-Path (Get-AppPxeBootFieldIsoDriversOsRoot) $vendor) $folder
-            $havePack = (Test-Path -LiteralPath $modelDir) -and (Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $modelDir)
-            if ($havePack) {
-                $entry.result = 'already-present'
-            } elseif ([string]::IsNullOrWhiteSpace($uri) -or -not [bool](Get-AppAria2JsonProp -Item $row -Name 'downloadable')) {
-                $entry.result = 'no-download-source'
+            $havePack = (Test-Path -LiteralPath $modelDir) -and [bool](Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $modelDir)
+        }
+
+        # 1. Reconcile an attempt that was in flight: still running -> wait; otherwise
+        #    settle the entry from the download outcome (or the pack on disk).
+        if ($entry -and $result -eq 'download-started') {
+            if ($progressKey -and (Test-AppAria2DirectDownloadActive -Key $progressKey)) { continue }
+            $outcome = if ($progressKey) { Get-AppAria2DirectDownloadOutcome -Key $progressKey } else { $null }
+            if ($outcome -and [string]$outcome.status -eq 'failed') {
+                $result = "download-failed: $($outcome.error)"
+            } elseif ($havePack) {
+                $result = 'downloaded'
+            } else {
+                $result = 'download-failed: interrupted (the download did not finish - sidecar restarted?)'
+            }
+            $entry['result'] = $result
+            $entry['settledAt'] = $stamp
+            $changed = $true
+            Write-SidecarLog "PXE boot: driver pull-through $result for $make $model"
+        }
+
+        # 2. Should this client (re)start an attempt?
+        $attempt = $false
+        $reason = ''
+        if ($havePack) {
+            # Nothing to fetch (a tech may have pulled it by hand): note it and move on.
+            if (-not $entry) {
+                $ledger[$lkey] = @{
+                    at       = $stamp
+                    make     = $make
+                    model    = $model
+                    serial   = $clientSerial
+                    session  = $clientSession
+                    attempts = 0
+                    vendor   = $vendor
+                    folder   = $folder
+                    result   = 'already-present'
+                }
+                $changed = $true
+                Write-SidecarLog "PXE boot: driver pull-through already-present for $make $model (announced by $clientSerial)"
+            } elseif ($result -notin @('already-present', 'downloaded')) {
+                $entry['result'] = 'already-present'
+                $entry['settledAt'] = $stamp
+                $changed = $true
+            }
+            continue
+        } elseif (-not $entry) {
+            $attempt = $true
+            $reason = 'first sighting'
+        } elseif ($result -like 'download-failed*') {
+            $entrySerial = [string](Get-AppPxeBootPullThroughEntryValue -Entry $entry -Name 'serial')
+            $entrySession = [string](Get-AppPxeBootPullThroughEntryValue -Entry $entry -Name 'session')
+            $sameSession = ($clientSerial -eq $entrySerial) -and ($clientSession -eq $entrySession)
+            if (-not $sameSession) {
+                $attempt = $true
+                $reason = "retry after earlier failure ($result)"
+            }
+        } elseif ($result -in @('already-present', 'downloaded')) {
+            $attempt = $true
+            $reason = 'pack no longer on disk'
+        } elseif ($result -in @('no-catalog-match', 'no-download-source')) {
+            $at = ConvertTo-AppPxeBootPullThroughUtc -Raw (Get-AppPxeBootPullThroughEntryValue -Entry $entry -Name 'at')
+            if (($now - $at).TotalDays -ge 14) {
+                $attempt = $true
+                $reason = 'catalog re-check'
+            }
+        }
+        if (-not $attempt) { continue }
+
+        # 3. Attempt (or re-attempt) the fetch and record it.
+        $attempts = 1 + [int](Get-AppPxeBootPullThroughEntryValue -Entry $entry -Name 'attempts')
+        $new = @{
+            at       = $stamp
+            make     = $make
+            model    = $model
+            serial   = $clientSerial
+            session  = $clientSession
+            attempts = $attempts
+        }
+        if ($result -like 'download-failed*') { $new['lastFailure'] = $result }
+        if (-not $row) {
+            $new['result'] = 'no-catalog-match'
+        } else {
+            $new['vendor'] = $vendor
+            $new['folder'] = $folder
+            if ([string]::IsNullOrWhiteSpace($uri) -or -not [bool](Get-AppAria2JsonProp -Item $row -Name 'downloadable')) {
+                $new['result'] = 'no-download-source'
             } else {
                 try {
                     # Same key the Drivers tab uses, so the row lights up live there.
                     $null = Add-AppAria2DirectHttpDownload `
                         -Uris @($uri) `
                         -AssetKind 'driver' `
-                        -ModelAlias ([string]$client.model) `
+                        -ModelAlias $model `
                         -Vendor $vendor `
                         -Folder $folder `
                         -FileNameHint ([string](Get-AppAria2JsonProp -Item $row -Name 'expectedArchive')) `
-                        -ProgressKey "$vendor|$folder" `
+                        -ProgressKey $progressKey `
                         -ExpectedHash ([string](Get-AppAria2JsonProp -Item $row -Name 'expectedHash')) `
                         -ExpectedHashAlgorithm ([string](Get-AppAria2JsonProp -Item $row -Name 'expectedHashAlgorithm'))
-                    $entry.result = 'download-started'
+                    $new['result'] = 'download-started'
                 } catch {
-                    $entry.result = "download-failed: $($_.Exception.Message)"
+                    $new['result'] = "download-failed: $($_.Exception.Message)"
                 }
             }
         }
-        $ledger[$lkey] = $entry
+        $ledger[$lkey] = $new
         $changed = $true
-        Write-SidecarLog "PXE boot: driver pull-through $($entry.result) for $($client.make) $($client.model) (announced by $($client.serial))"
+        $suffix = if ($attempts -gt 1) { ", attempt $attempts - $reason" } else { '' }
+        Write-SidecarLog "PXE boot: driver pull-through $($new['result']) for $make $model (announced by $clientSerial$suffix)"
     }
     if ($changed) {
         ($ledger | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $ledgerPath -Encoding UTF8

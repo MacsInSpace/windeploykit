@@ -6951,6 +6951,12 @@ function Start-AppPxeBootImagingLogIngest {
                     "$([DateTime]::UtcNow.ToString('o')) $msg" | Out-File -Append -FilePath $errorLog -Encoding utf8
                 } catch { }
             }
+            function Get-IngestProp($Obj, [string]$Name) {
+                if ($null -eq $Obj) { return $null }
+                $p = $Obj.PSObject.Properties[$Name]
+                if ($p) { return $p.Value }
+                return $null
+            }
             $encoding = [System.Text.Encoding]::UTF8
             while ($true) {
                 try {
@@ -7033,19 +7039,43 @@ function Start-AppPxeBootImagingLogIngest {
                                 }
                             } catch { }
                             $statusPath = Join-Path $LogDir "$serial.json"
+                            $previous = $null
+                            try {
+                                $previous = Get-Content -LiteralPath $statusPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+                            } catch { $previous = $null }
                             if (-not $clientIp) {
                                 # No X-Forwarded-For on this push - keep the last known IP.
-                                try {
-                                    $previous = Get-Content -LiteralPath $statusPath -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
-                                    $prevIp = Get-AppSidecarJsonProp -Item $previous -Name 'ip'
-                                    if ($prevIp) { $clientIp = [string]$prevIp }
-                                } catch { }
+                                $previousIp = [string](Get-IngestProp $previous 'ip')
+                                if ($previousIp) { $clientIp = $previousIp }
+                            }
+                            # Imaging-session identity: newer ImageDeployer builds send one id per
+                            # WinPE boot; for older clients the host derives one that rolls over
+                            # when a serial reappears after 10 quiet minutes. The driver
+                            # pull-through uses it to retry a failed pack fetch on the NEXT
+                            # session of a model instead of looping on the same device.
+                            $session = [string](Get-IngestProp $payload 'session')
+                            if ([string]::IsNullOrWhiteSpace($session)) {
+                                $previousSession = [string](Get-IngestProp $previous 'session')
+                                $previousSeenRaw = Get-IngestProp $previous 'lastSeenUtc'
+                                $previousSeen = [DateTime]::MinValue
+                                if ($previousSeenRaw -is [DateTime]) {
+                                    $previousSeen = [DateTime]$previousSeenRaw
+                                } else {
+                                    [void][DateTime]::TryParse([string]$previousSeenRaw, [ref]$previousSeen)
+                                }
+                                $quietMinutes = ([DateTime]::UtcNow - $previousSeen.ToUniversalTime()).TotalMinutes
+                                if ($previousSession -and $quietMinutes -lt 10) {
+                                    $session = $previousSession
+                                } else {
+                                    $session = 'host-' + [DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')
+                                }
                             }
                             $statusInfo = [ordered]@{
                                 serial      = $serialRaw.Trim()
-                                make        = [string](Get-AppSidecarJsonProp -Item $payload -Name 'make')
-                                model       = [string](Get-AppSidecarJsonProp -Item $payload -Name 'model')
+                                make        = [string]$payload.make
+                                model       = [string]$payload.model
                                 ip          = [string]$clientIp
+                                session     = $session
                                 lastSeenUtc = [DateTime]::UtcNow.ToString('o')
                                 lastLine    = [string]($newLines | Select-Object -Last 1)
                             }
@@ -7145,6 +7175,7 @@ function Get-AppPxeBootImagingClients {
             make       = [string](Get-ImagingSnapshotProp -Info $info -Name 'make')
             model      = [string](Get-ImagingSnapshotProp -Info $info -Name 'model')
             ip         = [string](Get-ImagingSnapshotProp -Info $info -Name 'ip')
+            session    = [string](Get-ImagingSnapshotProp -Info $info -Name 'session')
             lastSeen   = $lastSeen.ToUniversalTime().ToString('o')
             ageSeconds = $ageSeconds
             active     = ($ageSeconds -le 180)

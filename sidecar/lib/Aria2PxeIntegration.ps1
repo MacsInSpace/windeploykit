@@ -633,6 +633,38 @@ $script:AppAria2DirectDownloadJobs = @{}
 # so a tech can line packs up and prune the line when bandwidth gets tight.
 $script:AppAria2DirectDownloadMaxActive = 10
 $script:AppAria2DirectDownloadQueue = [System.Collections.Generic.List[hashtable]]::new()
+# Terminal outcome of the last direct download per progress key ('failed' | 'promoted' |
+# 'done'), kept in memory for the Netboot driver pull-through ledger, which reconciles
+# its 'download-started' entries against it and retries a failed model on the next
+# device of that model (Craig, 2026-08-22). A new start for the same key clears it.
+$script:AppAria2DirectDownloadOutcomes = @{}
+
+function Test-AppAria2DirectDownloadActive {
+    # True while a direct download for the key is running or queued.
+    param([string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key)) { return $false }
+    if ($script:AppAria2DirectDownloadJobs.ContainsKey($Key)) { return $true }
+    return (@($script:AppAria2DirectDownloadQueue | Where-Object { [string]$_.key -eq $Key }).Count -gt 0)
+}
+
+function Get-AppAria2DirectDownloadOutcome {
+    # @{ status; error; fileName; at } for the last finished direct download of the key, or $null.
+    param([string]$Key)
+    if ([string]::IsNullOrWhiteSpace($Key)) { return $null }
+    if ($script:AppAria2DirectDownloadOutcomes.ContainsKey($Key)) { return $script:AppAria2DirectDownloadOutcomes[$Key] }
+    return $null
+}
+
+function Set-AppAria2DirectDownloadOutcome {
+    param([string]$Key, [string]$Status, [string]$Error, [string]$FileName)
+    if ([string]::IsNullOrWhiteSpace($Key)) { return }
+    $script:AppAria2DirectDownloadOutcomes[$Key] = @{
+        status   = [string]$Status
+        error    = [string]$Error
+        fileName = [string]$FileName
+        at       = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    }
+}
 
 $script:AppAria2DirectDownloadWorker = {
     # Runs in a bare runspace: NO sidecar function exists here. Everything it needs - the
@@ -732,11 +764,13 @@ function Sync-AppAria2DirectDownloadJobs {
             Write-SidecarLog "aria2: direct download failed for $($job.fileName) - $err"
             # A bad file must never look Downloaded: purge the partial/corrupt file so
             # no store scan or staging-recovery sweep can promote it. The row keeps a
-            # failed note and the USER retries - no auto-retry (Craig, 2026-08-20).
+            # failed note and the USER retries (the Netboot pull-through retries on the
+            # next device of the same model, see PxeBootDriverPullThrough.ps1) - no auto-retry (Craig, 2026-08-20).
             # (v1 promoted the partial here, replacing a good pack with a truncated one.)
             if (Test-Path -LiteralPath $job.destPath) {
                 Remove-Item -LiteralPath $job.destPath -Force -ErrorAction SilentlyContinue
             }
+            Set-AppAria2DirectDownloadOutcome -Key ([string]$key) -Status 'failed' -Error ([string]$err) -FileName ([string]$job.fileName)
             if ($canEmit) {
                 Write-SidecarEvent -EventName 'driver-download-progress' -Data @{
                     key        = [string]$key
@@ -767,6 +801,7 @@ function Sync-AppAria2DirectDownloadJobs {
                     promoteTarget = $plan.promoteTarget
                 }
                 $null = Invoke-AppAria2PromoteJobFiles -JobRecord $jobRecord
+                Set-AppAria2DirectDownloadOutcome -Key ([string]$key) -Status 'promoted' -FileName ([string]$job.fileName)
                 if ($canEmit) {
                     Write-SidecarEvent -EventName 'aria2-promote' -Data @{
                         ok        = $true
@@ -778,6 +813,7 @@ function Sync-AppAria2DirectDownloadJobs {
                 }
             } catch {
                 Write-SidecarLog "aria2: promote failed for $($job.fileName) - $($_.Exception.Message)"
+                Set-AppAria2DirectDownloadOutcome -Key ([string]$key) -Status 'failed' -Error ('promote failed: ' + $_.Exception.Message) -FileName ([string]$job.fileName)
                 if ($canEmit) {
                     Write-SidecarEvent -EventName 'aria2-promote' -Data @{
                         ok       = $false
@@ -788,7 +824,10 @@ function Sync-AppAria2DirectDownloadJobs {
                     }
                 }
             }
-        } elseif ($canEmit) {
+        } else {
+            Set-AppAria2DirectDownloadOutcome -Key ([string]$key) -Status 'done' -FileName ([string]$job.fileName)
+        }
+        if (-not $plan.useStaging -and $canEmit) {
             # No staging route - the file already sits at its final destination,
             # but the row still needs releasing.
             Write-SidecarEvent -EventName 'aria2-promote' -Data @{
@@ -877,6 +916,7 @@ function Add-AppAria2DirectHttpDownload {
         }
     }
 
+    $script:AppAria2DirectDownloadOutcomes.Remove([string]$ProgressKey)
     $entry = @{
         key                   = [string]$ProgressKey
         uri                   = $uri

@@ -825,3 +825,24 @@ tauri:dev` - not done in this pass), then 5-10 as listed. The contract's widened
   resets the rejection when a credential is saved. USM field bug 2026-08-22 (stale saved
   password: TFTP failed, no dialog).
 - Gates: ascii, strictmode, parse clean; both harnesses pass here.
+
+### 9d. Update 2026-08-22 (late) - driver pull-through retries, imaging-session id, worker UA fix
+
+Mirrored from USM the same night (converged libs, ASCII-clean, all three gates green):
+
+- `sidecar/lib/Aria2PxeIntegration.ps1`: the direct-download worker runs in a bare runspace and
+  must not call any App* helper - the user agent is now passed in as its seventh argument (the
+  convergence had put `(Get-AppUserAgent)` inside it, which made every pack download fail
+  silently). New `$script:AppAria2DirectDownloadOutcomes` + `Get-AppAria2DirectDownloadOutcome`
+  / `Test-AppAria2DirectDownloadActive` record the terminal state per progress key.
+- `sidecar/lib/PxeBootDriverPullThrough.ps1`: the ledger reconciles `download-started` into
+  `downloaded` / `download-failed: <why>` and retries a failed model once per NEW device or
+  imaging session (serial + session differ), re-fetches when a pack leaves the disk, and
+  re-checks `no-catalog-match` after 14 days. Rule from Craig: "Failed downloads should be
+  marked and retried on the next of the same model."
+- `sidecar/lib/PxeBootPlugin.ps1`: the imaging-log ingest stamps a `session` on each client
+  snapshot (from the client payload when present, else host-derived, rolling over after 10
+  quiet minutes); `Get-AppPxeBootImagingClients` exposes it.
+- Decision tests live in USM (`sidecar/tests/PxeBootDriverPullThroughLedger.Tests.ps1`, 11
+  cases, every dependency stubbed) - port them when this repo grows a Pester tree.
+
