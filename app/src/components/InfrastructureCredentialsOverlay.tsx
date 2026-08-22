@@ -1,18 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+/**
+ * Credentials - the local administrator for this machine, plus any other logins
+ * worth keeping.
+ *
+ * Rewritten 2026-08-22 (Craig: "its a mess... redo the overlays"). What went, and why:
+ *
+ *  - Site filtering. Every credential was passed through filterCredentialsForSite,
+ *    which returns [] when there is no site - and this product has no sites. Saving
+ *    worked; the list simply never rendered what you saved, which read as "cannot add
+ *    more than one set of creds". Gone, along with the site default section.
+ *  - The explanatory paragraphs (store location, what host elevation does, what SSH /
+ *    RDP / web logins are). A credential manager should show credentials.
+ *
+ * What is left is the whole feature: a local administrator, and a list of label /
+ * username / password rows.
+ */
+import { useCallback, useEffect, useState } from "react";
 
 import { Modal } from "./Modal";
-import { CredentialSelect } from "./CredentialSelect";
-import { sidecar, SidecarError } from "../lib/ipc";
-import {
-  isDefaultInfraCredentialId,
-  filterCredentialsForSite,
-  siteDefaultCredentials,
-  sortCredentialsForSite,
-  getSiteDefaultCredentialId,
-  setSiteDefaultCredentialId,
-} from "../lib/infrastructureDefaultCredentials";
-import { clearCredentialAssignmentsForId } from "../lib/infrastructureCredentialAssignments";
-import { resolveInfraCredentialLoginName } from "../lib/infrastructureCredentials";
+import { sidecar } from "../lib/ipc";
 import { toast } from "../state/toastStore";
 import type {
   InfraSshCredentialSummary,
@@ -20,381 +25,155 @@ import type {
   LocalMachineCredentialStatus,
 } from "../lib/types";
 
-const INFRA_LOGIN_USERNAME_PLACEHOLDER = `Username for this device (e.g. DOMAIN\\deployadmin)`;
-const LOCAL_ADMIN_USERNAME_PLACEHOLDER = "Local admin username (e.g. st00447)";
-
 interface InfrastructureCredentialsOverlayProps {
   open: boolean;
   onClose: () => void;
-  siteId?: string;
   onVaultChange?: () => void;
 }
 
-function CredentialPasswordRow({
-  cred,
-  busy,
-  loginName,
-  password,
-  onLoginNameChange,
-  loginNameEditable = false,
-  onPasswordChange,
-  onSave,
-  onClear,
-  onDelete,
-}: {
-  cred: InfraSshCredentialSummary;
-  busy: boolean;
+/** A row being edited. Passwords are write-only: what is stored is never sent back. */
+interface DraftRow {
+  id: string;
+  label: string;
   loginName: string;
   password: string;
-  onLoginNameChange?: (value: string) => void;
-  loginNameEditable?: boolean;
-  onPasswordChange: (value: string) => void;
-  onSave: () => void;
-  onClear?: () => void;
-  onDelete?: () => void;
-}) {
-  const resolvedLogin = resolveInfraCredentialLoginName(cred) ?? "";
-  return (
-    <div
-      className="flex flex-col gap-2 rounded-sm px-3 py-2"
-      style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="mono text-[12px] font-medium" style={{ color: "var(--text)" }}>
-          {cred.label}
-        </span>
-        {cred.isDefault && <span className="badge badge-info">Default</span>}
-        {!cred.configured && (
-          <span className="badge badge-warn">Password not set</span>
-        )}
-        {onDelete && (
-          <button
-            type="button"
-            className="btn btn-danger ml-auto shrink-0"
-            style={{ padding: "2px 8px", fontSize: "10px" }}
-            disabled={busy}
-            onClick={onDelete}
-          >
-            Delete
-          </button>
-        )}
-      </div>
-      {loginNameEditable ? (
-        <div className="input-box w-full">
-          <input
-            className="mono w-full bg-transparent text-[11px] outline-none"
-            placeholder={INFRA_LOGIN_USERNAME_PLACEHOLDER}
-            value={loginName}
-            disabled={busy}
-            onChange={(e) => onLoginNameChange?.(e.target.value)}
-          />
-        </div>
-      ) : (
-        <div className="text-[10px]" style={{ color: "var(--text3)" }}>
-          Login: <span className="mono" style={{ color: "var(--text2)" }}>{resolvedLogin || "-"}</span>
-        </div>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="input-box min-w-[10rem] flex-1">
-          <input
-            type="password"
-            className="mono w-full bg-transparent text-[11px] outline-none"
-            placeholder={cred.configured ? "Enter new password" : "SSH / RDP / web password"}
-            value={password}
-            disabled={busy}
-            onChange={(e) => onPasswordChange(e.target.value)}
-          />
-        </div>
-        <button
-          type="button"
-          className="btn btn-primary shrink-0"
-          style={{ fontSize: "11px" }}
-          disabled={busy}
-          onClick={onSave}
-        >
-          Save
-        </button>
-        {cred.configured && onClear && (
-          <button
-            type="button"
-            className="btn shrink-0"
-            style={{ fontSize: "11px" }}
-            disabled={busy}
-            onClick={onClear}
-          >
-            Clear
-          </button>
-        )}
-      </div>
-    </div>
-  );
+  configured: boolean;
+  isNew?: boolean;
+}
+
+let newRowSeq = 0;
+
+function toDraft(c: InfraSshCredentialSummary): DraftRow {
+  return {
+    id: c.id,
+    label: c.label ?? "",
+    loginName: c.loginName ?? "",
+    password: "",
+    configured: Boolean(c.configured),
+  };
 }
 
 export function InfrastructureCredentialsOverlay({
   open,
   onClose,
-  siteId,
   onVaultChange,
 }: InfrastructureCredentialsOverlayProps) {
-  const [credentials, setCredentials] = useState<InfraSshCredentialSummary[]>([]);
-  const [storePath, setStorePath] = useState<string>("");
-  const [loading, setLoading] = useState(false);
+  const [rows, setRows] = useState<DraftRow[]>([]);
+  const [local, setLocal] = useState<LocalMachineCredentialStatus | null>(null);
+  const [localUser, setLocalUser] = useState("");
+  const [localPassword, setLocalPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [newLabel, setNewLabel] = useState("");
-  const [newLoginName, setNewLoginName] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [passwordDrafts, setPasswordDrafts] = useState<Record<string, string>>({});
-  const [loginDrafts, setLoginDrafts] = useState<Record<string, string>>({});
-  const [localMachine, setLocalMachine] = useState<LocalMachineCredentialStatus | null>(null);
-  const [localLoginDraft, setLocalLoginDraft] = useState("");
-  const [localPasswordDraft, setLocalPasswordDraft] = useState("");
 
-  const reload = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async () => {
     try {
-      const [infraResult, localResult] = await Promise.all([
-        sidecar.invoke<ListInfraSshCredentialsResult>("ListInfraSshCredentials", {
-          siteId,
-        }),
+      const [list, localStatus] = await Promise.all([
+        sidecar.invoke<ListInfraSshCredentialsResult>("ListInfraSshCredentials", {}),
         sidecar.invoke<LocalMachineCredentialStatus>("GetLocalMachineCredential", {}),
       ]);
-      const sorted = sortCredentialsForSite(
-        filterCredentialsForSite(infraResult.credentials ?? [], siteId),
-        siteId,
-      );
-      setCredentials(sorted);
-      setStorePath(infraResult.storePath ?? "");
-      setLocalMachine(localResult);
-      setLocalLoginDraft((prev) =>
-        prev && localResult.configured ? prev : (localResult.loginName ?? ""),
-      );
-    } catch (err) {
-      const e = err instanceof SidecarError ? err : new Error(String(err));
-      toast.error("Could not load credentials", e.message);
-      setCredentials([]);
-    } finally {
-      setLoading(false);
+      // No site filter: everything saved on this machine is shown.
+      setRows((list?.credentials ?? []).filter((c) => !c.builtIn).map(toDraft));
+      setLocal(localStatus ?? null);
+      setLocalUser(localStatus?.loginName ?? "");
+    } catch (e) {
+      toast.error("Credentials", e instanceof Error ? e.message : String(e));
     }
-  }, [siteId]);
+  }, []);
 
   useEffect(() => {
-    if (open) void reload();
-  }, [open, reload]);
+    if (!open) return;
+    setLocalPassword("");
+    void load();
+  }, [open, load]);
 
-  const siteDefaults = useMemo(
-    () => siteDefaultCredentials(credentials, siteId),
-    [credentials, siteId],
-  );
-  const customCredentials = useMemo(
-    // builtIn = app-provided virtual entries (signed-in DE account) - offered in
-    // pickers but not managed here: nothing on disk to edit or delete.
-    () => credentials.filter((c) => !isDefaultInfraCredentialId(c.id) && !c.builtIn),
-    [credentials],
-  );
-  const siteSwitchDefaultId = siteId
-    ? getSiteDefaultCredentialId(siteId)
-    : undefined;
+  const patch = (id: string, change: Partial<DraftRow>) =>
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...change } : r)));
 
-  const savePassword = async (cred: InfraSshCredentialSummary) => {
-    const password = passwordDrafts[cred.id]?.trim();
-    const loginDraft = loginDrafts[cred.id]?.trim();
-    const savedLogin = resolveInfraCredentialLoginName(cred) ?? "";
-    const loginName = loginDraft || (cred.isDefault ? savedLogin : undefined);
-    const loginChanged = loginDraft !== undefined && loginDraft !== savedLogin;
-
-    if (!password && !cred.configured) {
-      toast.warn("Infrastructure credentials", "Enter a password to save.");
-      return;
-    }
-    if (!password && cred.configured && !loginChanged) {
-      toast.warn("Infrastructure credentials", "Enter a new password or change the username.");
-      return;
-    }
-    if (!loginName) {
-      toast.warn(
-        "Infrastructure credentials",
-        cred.isDefault ? "Username is required." : "Username is required for additional credentials.",
-      );
-      return;
-    }
-    setBusy(true);
-    try {
-      await sidecar.invoke("SetInfraSshCredential", {
-        id: cred.id,
-        label: cred.label,
-        password: password || undefined,
-        loginName,
-        siteId,
-      });
-      setPasswordDrafts((s) => {
-        const next = { ...s };
-        delete next[cred.id];
-        return next;
-      });
-      setLoginDrafts((s) => {
-        const next = { ...s };
-        delete next[cred.id];
-        return next;
-      });
-      await reload();
-      onVaultChange?.();
-      toast.success("Credential saved", cred.label);
-    } catch (err) {
-      const e = err instanceof SidecarError ? err : new Error(String(err));
-      toast.error("Could not save credential", e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const clearPassword = async (cred: InfraSshCredentialSummary) => {
-    setBusy(true);
-    try {
-      await sidecar.invoke("ClearInfraSshCredentialPassword", { id: cred.id });
-      await reload();
-      onVaultChange?.();
-      toast.success("Password cleared", cred.label);
-    } catch (err) {
-      const e = err instanceof SidecarError ? err : new Error(String(err));
-      toast.error("Could not clear password", e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addCredential = async () => {
-    if (!siteId) {
-      toast.warn("Infrastructure credentials", "Connect a site before adding site credentials.");
-      return;
-    }
-    if (!newLabel.trim() || !newLoginName.trim() || !newPassword) {
-      toast.warn("Infrastructure credentials", "Label, username, and password are required.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await sidecar.invoke("SetInfraSshCredential", {
-        label: newLabel.trim(),
-        loginName: newLoginName.trim(),
-        password: newPassword,
-        siteId,
-      });
-      setNewLabel("");
-      setNewLoginName("");
-      setNewPassword("");
-      await reload();
-      onVaultChange?.();
-      toast.success("Credential saved", "Encrypted on this device for your user account.");
-    } catch (err) {
-      const e = err instanceof SidecarError ? err : new Error(String(err));
-      toast.error("Could not save credential", e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveLocalMachineCredential = async () => {
-    const loginName = localLoginDraft.trim();
-    const password = localPasswordDraft.trim();
-    const loginChanged = loginName !== (localMachine?.loginName ?? "").trim();
-    if (!loginName) {
-      toast.warn("Local administrator", "Username is required.");
-      return;
-    }
-    if (!password && !localMachine?.configured) {
-      toast.warn("Local administrator", "Enter a password to save.");
-      return;
-    }
-    if (!password && localMachine?.configured && !loginChanged) {
-      toast.warn("Local administrator", "Enter a new password or change the username.");
-      return;
-    }
+  const saveLocal = useCallback(async () => {
     setBusy(true);
     try {
       await sidecar.invoke("SetLocalMachineCredential", {
-        loginName,
-        password: password || undefined,
+        loginName: localUser.trim(),
+        password: localPassword,
       });
-      setLocalPasswordDraft("");
-      await reload();
+      toast.success("Credentials", "Local administrator saved.");
+      setLocalPassword("");
+      await load();
       onVaultChange?.();
-      toast.success(
-        "Local administrator saved",
-        "Encrypted on this device. Used for host elevation and SMB share setup; clients can auth with this account.",
-      );
-    } catch (err) {
-      const e = err instanceof SidecarError ? err : new Error(String(err));
-      toast.error("Could not save local administrator", e.message);
+    } catch (e) {
+      toast.error("Credentials", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  };
+  }, [localUser, localPassword, load, onVaultChange]);
 
-  const clearLocalMachinePassword = async () => {
+  const clearLocal = useCallback(async () => {
     setBusy(true);
     try {
       await sidecar.invoke("ClearLocalMachineCredentialPassword", {});
-      setLocalPasswordDraft("");
-      await reload();
+      toast.info("Credentials", "Local administrator password cleared.");
+      setLocalPassword("");
+      await load();
       onVaultChange?.();
-      toast.success("Local administrator cleared", "Password removed from this device.");
-    } catch (err) {
-      const e = err instanceof SidecarError ? err : new Error(String(err));
-      toast.error("Could not clear local administrator", e.message);
+    } catch (e) {
+      toast.error("Credentials", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  };
+  }, [load, onVaultChange]);
 
-  const loadLocalMachineToSession = async () => {
-    setBusy(true);
-    try {
-      const result = await sidecar.invoke<{ loaded: boolean; sessionCached: boolean }>(
-        "LoadLocalMachineCredentialToSession",
-        {},
-      );
-      await reload();
-      onVaultChange?.();
-      if (result.loaded || result.sessionCached) {
-        toast.success("Local administrator loaded", "Session cache ready for sudo elevation.");
-      } else {
-        toast.warn("Local administrator", "Save a password first, then load into session.");
+  const saveRow = useCallback(
+    async (row: DraftRow) => {
+      if (!row.label.trim()) {
+        toast.error("Credentials", "A label is required.");
+        return;
       }
-    } catch (err) {
-      const e = err instanceof SidecarError ? err : new Error(String(err));
-      toast.error("Could not load local administrator", e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
+      setBusy(true);
+      try {
+        await sidecar.invoke("SetInfraSshCredential", {
+          // A new row has no server id yet: sending an empty one mints a fresh
+          // credential instead of overwriting whichever row was edited last.
+          id: row.isNew ? "" : row.id,
+          label: row.label.trim(),
+          loginName: row.loginName.trim(),
+          password: row.password,
+        });
+        toast.success("Credentials", `${row.label.trim()} saved.`);
+        await load();
+        onVaultChange?.();
+      } catch (e) {
+        toast.error("Credentials", e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load, onVaultChange],
+  );
 
-  const deleteCredential = async (cred: InfraSshCredentialSummary) => {
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(`Delete "${cred.label}"? Device assignments will be cleared.`)
-    ) {
-      return;
-    }
-    setBusy(true);
-    try {
-      await sidecar.invoke("DeleteInfraSshCredential", { id: cred.id });
-      clearCredentialAssignmentsForId(cred.id);
-      await reload();
-      onVaultChange?.();
-      toast.success("Credential deleted", cred.label);
-    } catch (err) {
-      const e = err instanceof SidecarError ? err : new Error(String(err));
-      toast.error("Could not delete credential", e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const removeRow = useCallback(
+    async (row: DraftRow) => {
+      if (row.isNew) {
+        setRows((prev) => prev.filter((r) => r.id !== row.id));
+        return;
+      }
+      setBusy(true);
+      try {
+        await sidecar.invoke("DeleteInfraSshCredential", { id: row.id });
+        toast.info("Credentials", `${row.label || row.id} removed.`);
+        await load();
+        onVaultChange?.();
+      } catch (e) {
+        toast.error("Credentials", e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load, onVaultChange],
+  );
 
   return (
     <Modal
       open={open}
-      title="Infrastructure credentials"
-      subtitle="SSH, RDP, web logins, and optional local administrator - encrypted on this device (Export-Clixml)."
+      title="Credentials"
       onClose={onClose}
       lock={busy}
       width={620}
@@ -406,285 +185,99 @@ export function InfrastructureCredentialsOverlay({
     >
       <div className="flex flex-col gap-5">
         <section>
-          <div
-            className="mono mb-2 text-[9px] font-medium uppercase"
-            style={{ color: "var(--text3)", letterSpacing: "0.15em" }}
-          >
-            Store location
-          </div>
-          <div
-            className="rounded-sm px-3 py-2 text-[10.5px]"
-            style={{ background: "var(--surface2)", border: "1px solid var(--border)", color: "var(--text2)" }}
-          >
-            <span className="mono" style={{ color: "var(--text)" }}>
-              {storePath || ".../WinDeployKit/plugins/infrastructure-ssh/"}
-            </span>
-            <div className="mt-1" style={{ color: "var(--text3)" }}>
-              Site-scoped passwords for off-domain servers, network gear, and similar.
-              Local administrator credentials are stored separately (see below).
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <div
-            className="mono mb-2 text-[9px] font-medium uppercase"
-            style={{ color: "var(--text3)", letterSpacing: "0.15em" }}
-          >
+          <div className="mono mb-2 text-[9px] font-medium uppercase" style={{ color: "var(--text3)", letterSpacing: "0.15em" }}>
             This computer - local administrator
           </div>
-          <p className="mb-3 text-[10.5px] leading-snug" style={{ color: "var(--text3)" }}>
-            Optional password for this workstation - not tied to a site. Same account you use to
-            administer this machine. WinDeployKit uses it for host-side elevation (PXE TFTP on port
-            69, SMB share create/remove via <span className="mono">sharing</span>, routes, and
-            similar) without prompting every time. When Site Build or other workflows export an SMB
-            share, Windows and Linux clients connect with this username and the password saved here
-            (not guest). Windows host elevation from this vault is planned; share creation still
-            uses your current admin token when you are already elevated. Session cache loads on save
-            until you quit or choose Forget password in PXE.
-          </p>
-          {loading && !localMachine ? (
-            <div className="text-[11px]" style={{ color: "var(--text3)" }}>
-              Loading...
-            </div>
-          ) : (
-            <div
-              className="flex flex-col gap-2 rounded-sm px-3 py-2"
-              style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="mono text-[12px] font-medium" style={{ color: "var(--text)" }}>
-                  {localMachine?.label ?? "Local administrator (this computer)"}
-                </span>
-                {!localMachine?.configured && (
-                  <span className="badge badge-warn">Password not set</span>
-                )}
-                {localMachine?.configured && localMachine.sessionCached && (
-                  <span className="badge badge-info">Session cached</span>
-                )}
-                {localMachine?.wiredForMacOs && (
-                  <span className="badge">Host admin</span>
-                )}
-              </div>
-              {localMachine?.storePath && (
-                <div className="text-[10px]" style={{ color: "var(--text3)" }}>
-                  Store:{" "}
-                  <span className="mono" style={{ color: "var(--text2)" }}>
-                    {localMachine.storePath}
-                  </span>
-                </div>
-              )}
-              <div className="input-box w-full">
-                <input
-                  className="mono w-full bg-transparent text-[11px] outline-none"
-                  placeholder={LOCAL_ADMIN_USERNAME_PLACEHOLDER}
-                  value={localLoginDraft}
-                  disabled={busy}
-                  onChange={(e) => setLocalLoginDraft(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="input-box min-w-[10rem] flex-1">
-                  <input
-                    type="password"
-                    className="mono w-full bg-transparent text-[11px] outline-none"
-                    placeholder={
-                      localMachine?.configured
-                        ? "Enter new password"
-                        : "Local administrator password"
-                    }
-                    value={localPasswordDraft}
-                    disabled={busy}
-                    onChange={(e) => setLocalPasswordDraft(e.target.value)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-primary shrink-0"
-                  style={{ fontSize: "11px" }}
-                  disabled={busy}
-                  onClick={() => void saveLocalMachineCredential()}
-                >
-                  Save
-                </button>
-                {localMachine?.configured && (
-                  <button
-                    type="button"
-                    className="btn shrink-0"
-                    style={{ fontSize: "11px" }}
-                    disabled={busy}
-                    onClick={() => void clearLocalMachinePassword()}
-                  >
-                    Clear
-                  </button>
-                )}
-                {localMachine?.configured && !localMachine.sessionCached && (
-                  <button
-                    type="button"
-                    className="btn shrink-0"
-                    style={{ fontSize: "11px" }}
-                    disabled={busy}
-                    onClick={() => void loadLocalMachineToSession()}
-                  >
-                    Load session
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section>
-          <div
-            className="mono mb-2 text-[9px] font-medium uppercase"
-            style={{ color: "var(--text3)", letterSpacing: "0.15em" }}
-          >
-            Default credentials
-            {siteId ? ` | site ${siteId}` : ""}
-          </div>
-          <p className="mb-3 text-[10.5px] leading-snug" style={{ color: "var(--text3)" }}>
-            The site default password is site-specific. If yours
-            is missing, request it from the service desk. Save them here when you have them;
-            you&apos;ll need these for switch config backups and Wi-Fi insights. Edit the
-            username when a site uses a non-standard spelling (e.g. {`{sn}`}WLCCmonitor).
-          </p>
-          {!siteId ? (
-            <div className="text-[11px]" style={{ color: "var(--text3)" }}>
-              Connect a site to manage its default credential.
-            </div>
-          ) : loading ? (
-            <div className="text-[11px]" style={{ color: "var(--text3)" }}>
-              Loading...
-            </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {siteDefaults.map((cred) => (
-                <CredentialPasswordRow
-                  key={cred.id}
-                  cred={cred}
-                  busy={busy}
-                  loginNameEditable
-                  loginName={loginDrafts[cred.id] ?? resolveInfraCredentialLoginName(cred) ?? ""}
-                  password={passwordDrafts[cred.id] ?? ""}
-                  onLoginNameChange={(value) =>
-                    setLoginDrafts((s) => ({ ...s, [cred.id]: value }))
-                  }
-                  onPasswordChange={(value) =>
-                    setPasswordDrafts((s) => ({ ...s, [cred.id]: value }))
-                  }
-                  onSave={() => void savePassword(cred)}
-                  onClear={() => void clearPassword(cred)}
-                />
-              ))}
-              <div
-                className="mt-2 rounded-sm px-3 py-2"
-                style={{ background: "var(--surface2)", border: "1px solid var(--border)" }}
-              >
-                <div className="mb-1 text-[10.5px] font-semibold" style={{ color: "var(--text)" }}>
-                  Default for discovered switches
-                </div>
-                <p className="mb-2 text-[10px] leading-snug" style={{ color: "var(--text3)" }}>
-                  Inherited when CDP/LLDP finds a switch that has no Infrastructure row or per-device assignment.
-                  This does not automatically add the switch to Infrastructure.
-                </p>
-                <CredentialSelect
-                  credentials={credentials}
-                  value={siteSwitchDefaultId}
-                  disabled={busy}
-                  className="input-box w-full text-[11px]"
-                  onChange={(credentialId) => {
-                    if (!siteId) return;
-                    setSiteDefaultCredentialId(siteId, credentialId);
-                    onVaultChange?.();
-                    toast.success(
-                      "Site switch default updated",
-                      credentialId
-                        ? "Newly discovered switches will inherit this credential."
-                        : `The ${siteId} site default will be used as the fallback.`,
-                    );
-                  }}
-                />
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section>
-          <div
-            className="mono mb-2 text-[9px] font-medium uppercase"
-            style={{ color: "var(--text3)", letterSpacing: "0.15em" }}
-          >
-            Additional credentials
-          </div>
-          <p className="mb-3 text-[10.5px] leading-snug" style={{ color: "var(--text3)" }}>
-            Off-domain servers, legacy gear, local admin accounts - label is for your reference;
-            username is what SSH / RDP / web clients use at login.
-          </p>
-          <div className="mb-3 flex flex-col gap-2">
-            <div className="input-box w-full">
-              <input
-                className="w-full bg-transparent text-[11px] outline-none"
-                placeholder="Label (e.g. ESXi host, backup NAS)"
-                value={newLabel}
-                disabled={busy}
-                onChange={(e) => setNewLabel(e.target.value)}
-              />
-            </div>
-            <div className="input-box w-full">
-              <input
-                className="mono w-full bg-transparent text-[11px] outline-none"
-                placeholder={INFRA_LOGIN_USERNAME_PLACEHOLDER}
-                value={newLoginName}
-                disabled={busy}
-                onChange={(e) => setNewLoginName(e.target.value)}
-              />
-            </div>
-            <div className="input-box w-full">
-              <input
-                type="password"
-                className="mono w-full bg-transparent text-[11px] outline-none"
-                placeholder="SSH / RDP / web password"
-                value={newPassword}
-                disabled={busy}
-                onChange={(e) => setNewPassword(e.target.value)}
-              />
-            </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <input
+              className="input-box mono h-[26px] min-w-[11rem] flex-1 text-[11px]"
+              placeholder="Username"
+              value={localUser}
+              spellCheck={false}
+              onChange={(e) => setLocalUser(e.target.value)}
+            />
+            <input
+              type="password"
+              className="input-box h-[26px] min-w-[11rem] flex-1 text-[11px]"
+              placeholder={local?.configured ? "Saved - type to replace" : "Password"}
+              value={localPassword}
+              onChange={(e) => setLocalPassword(e.target.value)}
+            />
             <button
               type="button"
-              className="btn btn-primary self-start"
-              style={{ fontSize: "11px" }}
-              disabled={busy}
-              onClick={() => void addCredential()}
+              className="btn btn-primary px-2 py-0.5 text-[11px]"
+              disabled={busy || !localUser.trim() || !localPassword}
+              onClick={() => void saveLocal()}
             >
-              Save credential
+              Save
+            </button>
+            {local?.configured ? (
+              <button type="button" className="btn px-2 py-0.5 text-[11px]" disabled={busy} onClick={() => void clearLocal()}>
+                Clear
+              </button>
+            ) : null}
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-2 flex items-center gap-2">
+            <span className="mono text-[9px] font-medium uppercase" style={{ color: "var(--text3)", letterSpacing: "0.15em" }}>
+              Additional credentials
+            </span>
+            <button
+              type="button"
+              className="btn ml-auto px-2 py-0.5 text-[10px]"
+              disabled={busy}
+              onClick={() =>
+                setRows((prev) => [
+                  ...prev,
+                  { id: `new-${newRowSeq++}`, label: "", loginName: "", password: "", configured: false, isNew: true },
+                ])
+              }
+            >
+              + Add
             </button>
           </div>
-          {customCredentials.length === 0 ? (
-            <div className="text-[11px]" style={{ color: "var(--text3)" }}>
-              No extra credentials - use defaults above or add site-specific passwords here.
-            </div>
+          {rows.length === 0 ? (
+            <p className="text-[11px]" style={{ color: "var(--text2)" }}>
+              None yet.
+            </p>
           ) : (
-            <div className="flex flex-col gap-2">
-              {customCredentials.map((cred) => (
-                <CredentialPasswordRow
-                  key={cred.id}
-                  cred={cred}
-                  busy={busy}
-                  loginNameEditable
-                  loginName={
-                    loginDrafts[cred.id] ?? resolveInfraCredentialLoginName(cred) ?? ""
-                  }
-                  password={passwordDrafts[cred.id] ?? ""}
-                  onLoginNameChange={(value) =>
-                    setLoginDrafts((s) => ({ ...s, [cred.id]: value }))
-                  }
-                  onPasswordChange={(value) =>
-                    setPasswordDrafts((s) => ({ ...s, [cred.id]: value }))
-                  }
-                  onSave={() => void savePassword(cred)}
-                  onClear={() => void clearPassword(cred)}
-                  onDelete={() => void deleteCredential(cred)}
-                />
+            <div className="flex flex-col gap-1.5">
+              {rows.map((row) => (
+                <div key={row.id} className="flex flex-wrap items-center gap-1.5">
+                  <input
+                    className="input-box h-[26px] w-[9rem] text-[11px]"
+                    placeholder="Label"
+                    value={row.label}
+                    onChange={(e) => patch(row.id, { label: e.target.value })}
+                  />
+                  <input
+                    className="input-box mono h-[26px] w-[11rem] text-[11px]"
+                    placeholder="Username"
+                    value={row.loginName}
+                    spellCheck={false}
+                    onChange={(e) => patch(row.id, { loginName: e.target.value })}
+                  />
+                  <input
+                    type="password"
+                    className="input-box h-[26px] min-w-[9rem] flex-1 text-[11px]"
+                    placeholder={row.configured ? "Saved - type to replace" : "Password"}
+                    value={row.password}
+                    onChange={(e) => patch(row.id, { password: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary px-2 py-0.5 text-[11px]"
+                    disabled={busy || !row.label.trim()}
+                    onClick={() => void saveRow(row)}
+                  >
+                    Save
+                  </button>
+                  <button type="button" className="btn px-2 py-0.5 text-[11px]" disabled={busy} onClick={() => void removeRow(row)}>
+                    Remove
+                  </button>
+                </div>
               ))}
             </div>
           )}

@@ -46,7 +46,6 @@ import type {
   StopPxeBootServicesParams,
 } from "../lib/types";
 import { getImageLibraryRoot } from "../lib/imageLibrary";
-import { useSiteIdForQueries } from "../state/appStore";
 import { toast } from "../state/toastStore";
 
 const PLUGIN_TITLE = "Netboot";
@@ -271,7 +270,6 @@ export function PxeWorkspace({
   // A section that owns its whole panel doesn't need a heading (the panel title
   // says it) or a disclosure caret (there is nothing to collapse away from).
   const solo = sections.length === 1;
-  const siteId = useSiteIdForQueries();
   const {
     data,
     loading: configLoading,
@@ -3162,7 +3160,6 @@ export function PxeWorkspace({
       <InfrastructureCredentialsOverlay
         open={credentialsOpen}
         onClose={() => setCredentialsOpen(false)}
-        siteId={siteId ?? undefined}
         onVaultChange={() => reloadConfig()}
       />
     </>
