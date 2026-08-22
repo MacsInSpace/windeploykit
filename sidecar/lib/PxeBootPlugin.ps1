@@ -7016,11 +7016,18 @@ function Start-AppPxeBootImagingLogIngest {
                         try { $payload = $encoding.GetString($body, 0, $read) | ConvertFrom-Json } catch { $payload = $null }
                         # StrictMode: a bare $payload.lines THROWS when the client omits
                         # the key, and `-and $payload.lines` does NOT guard it - the
-                        # property read happens before the comparison. The agent contract
-                        # is still in flux, so read every field defensively.
-                        $payloadLines = @(Get-AppSidecarJsonProp -Item $payload -Name 'lines')
-                        if ($payload -and $payloadLines.Count -gt 0 -and $null -ne $payloadLines[0]) {
-                            $serialRaw = [string](Get-AppSidecarJsonProp -Item $payload -Name 'serial')
+                        # property read happens before the comparison. Read every field
+                        # through Get-IngestProp, defined INSIDE this scriptblock: the
+                        # worker runs in a bare runspace where no sidecar function exists
+                        # (Get-AppSidecarJsonProp here made every push fail - field bug
+                        # found 2026-08-22 by a harness that starts the listener for real).
+                        # A push carries log lines, or is a heartbeat (no lines) from a
+                        # client parked at the deployment window - heartbeats keep the row
+                        # live and let the driver pull-through start fetching early.
+                        $payloadLines = @(Get-IngestProp $payload 'lines' | ForEach-Object { [string]$_ })
+                        $isHeartbeat = ($payloadLines.Count -eq 0) -and [bool](Get-IngestProp $payload 'heartbeat')
+                        if ($payload -and ($payloadLines.Count -gt 0 -or $isHeartbeat)) {
+                            $serialRaw = [string](Get-IngestProp $payload 'serial')
                             if ([string]::IsNullOrWhiteSpace($serialRaw)) { $serialRaw = 'UNKNOWN' }
                             # Leading dots would make the file hidden on macOS (and invisible to
                             # the non -Force Get-ChildItem readers) - trim them off too.
@@ -7028,8 +7035,10 @@ function Start-AppPxeBootImagingLogIngest {
                             if ([string]::IsNullOrWhiteSpace($serial)) { $serial = 'UNKNOWN' }
                             if ($serial.Length -gt 64) { $serial = $serial.Substring(0, 64) }
                             $logPath = Join-Path $LogDir "$serial.log"
-                            $newLines = @($payloadLines | ForEach-Object { [string]$_ })
-                            $newLines | Out-File -Append -FilePath $logPath -Encoding utf8
+                            $newLines = $payloadLines
+                            if ($newLines.Count -gt 0) {
+                                $newLines | Out-File -Append -FilePath $logPath -Encoding utf8
+                            }
                             # Cap runaway logs: keep the newest 1500 lines past 4MB.
                             try {
                                 $item = Get-Item -LiteralPath $logPath -ErrorAction SilentlyContinue
@@ -7072,12 +7081,17 @@ function Start-AppPxeBootImagingLogIngest {
                             }
                             $statusInfo = [ordered]@{
                                 serial      = $serialRaw.Trim()
-                                make        = [string]$payload.make
-                                model       = [string]$payload.model
+                                make        = [string](Get-IngestProp $payload 'make')
+                                model       = [string](Get-IngestProp $payload 'model')
                                 ip          = [string]$clientIp
                                 session     = $session
                                 lastSeenUtc = [DateTime]::UtcNow.ToString('o')
-                                lastLine    = [string]($newLines | Select-Object -Last 1)
+                                # A heartbeat carries no new line - keep the last one we saw.
+                                lastLine    = if ($newLines.Count -gt 0) {
+                                    [string]($newLines | Select-Object -Last 1)
+                                } else {
+                                    [string](Get-IngestProp $previous 'lastLine')
+                                }
                             }
                             ($statusInfo | ConvertTo-Json -Compress) | Set-Content -LiteralPath $statusPath -Encoding utf8 -Force
                             $status = "HTTP/1.1 204 No Content`r`nConnection: close`r`n`r`n"

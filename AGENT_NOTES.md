@@ -848,4 +848,14 @@ Mirrored from USM the same night (converged libs, ASCII-clean, all three gates g
 - Also mirrored: the direct-download worker writes `<name>.part` and the archive is renamed only
   after verified completion; the staging-recovery sweep skips active staging folders and archives
   modified in the last two minutes. A half-downloaded pack can no longer be promoted into the store.
+- **Ingest bug found and fixed here (2026-08-22):** this repo's imaging-log ingest read the
+  payload with `Get-AppSidecarJsonProp`, which lives in `Ipc.ps1` and does NOT exist inside the
+  worker's bare runspace - every push threw "not recognized" and no imaging client could ever
+  appear. Now uses the in-scriptblock `Get-IngestProp`, matching USM. Same class as the
+  download-worker regression: nothing inside `[powershell]::Create()` + `AddScript` may call a
+  sidecar function. Verified with a harness that starts the real listener and posts to it.
+- Ingest also accepts a heartbeat push (`lines: []`, `heartbeat: true`): it advances the row's
+  last-seen and keeps the previous last line, so a client parked at its deployment window stays
+  visible and the driver pull-through can start fetching early. USM's ImageDeployer sends one
+  every 60 s; any client this repo bakes should do the same.
 
