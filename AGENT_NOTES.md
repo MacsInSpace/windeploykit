@@ -1106,3 +1106,31 @@ single-threaded dispatch loop. Measured here: 421 ms cold, 4 ms cached.
 Still open: a vault editor overlay, so join credentials can be created from inside the app
 rather than only selected.
 
+### Vault editor + join credentials from the vault (2026-08-22)
+
+**Vault editor overlay** (`components/VaultEditorOverlay.tsx`, commands `ListVaultSecrets` /
+`SetVaultSecret` / `RemoveVaultSecret`). The sidecar lists names and metadata and will write
+or delete, but **never hands a value back to the UI** - a secret leaves the sidecar only when
+a publish step needs it. That is what keeps "from the vault" different from typing a password
+into a sequence, so the editor shows set/not-set and offers Replace, never Reveal. Names are
+restricted to `[A-Za-z0-9._-]{1,128}`; a user name turns the entry into a PSCredential, which
+is what a domain join needs (both halves).
+
+**Join credentials now have three sources**, and the default stores nothing:
+
+| value | behaviour |
+|---|---|
+| blank | fill at deploy time - `{{JoinDom}}/{{JoinUser}}/{{JoinPw}}` stay literal and the device supplies one coherent credential |
+| `vault:<name>` | read from the shared vault at publish time and written into the unattend |
+| credential-store id | the original path, unchanged |
+
+A join account is not a LAPS-rotated local account, so nothing is ever stored in the sequence
+file itself: "typed here" means "put it in the vault and reference it". A missing or
+user-name-less secret logs and falls back to deploy-time fill rather than publishing half a
+credential.
+
+**Bug this uncovered:** `Get-AppPxeBootTsOobeShell -Accounts` was `[Parameter(Mandatory)]`
+without `[AllowEmptyString()]`. Once the accounts block could legitimately be empty (no local
+account, no profile password - the commonest corporate sequence), building the unattend threw.
+Fixed in both repos.
+

@@ -218,6 +218,34 @@ function Get-AppVaultPlainSecret {
     finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
 }
 
+function Get-AppVaultSecretList {
+    <#
+    .SYNOPSIS
+        Every secret in the shared vault: names and metadata only, never values.
+        Used by the vault editor so a technician can see and manage what is stored
+        without the app ever handing a secret back to the UI.
+    #>
+    if (-not (Test-AppSharedSecretVaultReady)) { return @() }
+    $out = [System.Collections.Generic.List[hashtable]]::new()
+    try {
+        foreach ($info in @(Get-SecretInfo -Vault $script:AppSharedSecretVaultName -ErrorAction Stop)) {
+            $meta = @{}
+            try { if ($info.Metadata) { foreach ($k in $info.Metadata.Keys) { $meta[[string]$k] = [string]$info.Metadata[$k] } } } catch { }
+            [void]$out.Add([ordered]@{
+                name      = [string]$info.Name
+                type      = [string]$info.Type
+                updatedAt = [string]$meta['updatedAt']
+                createdBy = [string]$meta['createdBy']
+                note      = [string]$meta['note']
+            })
+        }
+    } catch {
+        Write-SidecarLog "Secret vault: listing failed - $($_.Exception.Message)"
+        return @()
+    }
+    @($out | Sort-Object { [string]$_.name })
+}
+
 function Set-AppVaultSecret {
     # $true when written; $false when the vault is not ready. Throws only on a real
     # vault error.

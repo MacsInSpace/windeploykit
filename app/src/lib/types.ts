@@ -78,6 +78,9 @@ export type SidecarCommand =
   | "ImportPxeBootWim"
   | "ImportPxeBootWimBootAssets"
   | "ImportPxeBootWimFromIso"
+  | "ListVaultSecrets"
+  | "RemoveVaultSecret"
+  | "SetVaultSecret"
   | "ListInfraSshCredentials"
   | "ListPxeBootIsoWims"
   | "LoadLocalMachineCredentialToSession"
@@ -557,6 +560,22 @@ export interface TaskSequenceLibraryLists {
   client: TaskSequenceLibraryEntry[];
   server: TaskSequenceLibraryEntry[];
   counts: { client: number; server: number; total: number };
+}
+
+/** A secret in the shared vault - name and metadata only; values never leave the sidecar. */
+export interface VaultSecretSummary {
+  name: string;
+  type: string;
+  updatedAt?: string;
+  createdBy?: string;
+  note?: string;
+}
+
+export interface VaultSecretsResponse {
+  vault?: { vault?: string; ready?: boolean; error?: string | null; secretCount?: number };
+  secrets: VaultSecretSummary[];
+  saved?: boolean;
+  removed?: boolean;
 }
 
 export interface PxeBootTaskSequence {

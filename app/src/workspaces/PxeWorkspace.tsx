@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { DataTable, type DataTableColumn } from "../components/DataTable";
 import type { MaybeInfoTipRow } from "../components/InfoTip";
+import { VaultEditorOverlay } from "../components/VaultEditorOverlay";
 import { InfrastructureCredentialsOverlay } from "../components/InfrastructureCredentialsOverlay";
 import { PanelShell } from "../components/PanelShell";
 import { SEP } from "../components/ContextMenu";
@@ -36,6 +37,7 @@ import type {
   PxeBootTaskSequencesPayload,
   TaskSequenceLibraryEntry,
   TaskSequenceLibraryLists,
+  VaultSecretsResponse,
   PxeBootWimEntry,
   PxeBootWimLibraryResponse,
   SessionState,
@@ -348,6 +350,22 @@ export function PxeWorkspace({
   // "joining" when it has a domain set, or when the operator has just ticked the box
   // and has not typed one yet.
   const [tsJoinOptIn, setTsJoinOptIn] = useState<Set<string>>(new Set());
+  // Vault secrets offered as join credentials, and the editor that manages them.
+  const [vaultSecretNames, setVaultSecretNames] = useState<string[]>([]);
+  const [vaultEditor, setVaultEditor] = useState<{ open: boolean; seqId?: string }>({ open: false });
+
+  const loadVaultSecrets = useCallback(async () => {
+    try {
+      const data = await sidecar.invoke<VaultSecretsResponse>("ListVaultSecrets");
+      setVaultSecretNames((data?.secrets ?? []).map((s) => s.name));
+    } catch {
+      /* vault may be unavailable - the picker just offers deploy-time fill */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadVaultSecrets();
+  }, [loadVaultSecrets]);
 
   /** The library list that applies to a sequence: client sequences get the client list. */
   const libraryFor = useCallback(
@@ -2378,19 +2396,49 @@ export function PxeWorkspace({
                                         <option value="static">Static IP</option>
                                       </select>
                                     ) : key === "joinCredential" ? (
-                                      <select
-                                        className="input-box mono h-[26px] text-[11px]"
-                                        value={seq.fields[key]}
-                                        onChange={(e) => setField(e.target.value)}
-                                      >
-                                        <option value="">Dept (this session)</option>
-                                        {(tsPayload?.credentialOptions ?? []).map((c) => (
-                                          <option key={c.id} value={c.id}>
-                                            {c.label}
-                                            {c.loginName ? ` (${c.loginName})` : ""}
-                                          </option>
-                                        ))}
-                                      </select>
+                                      <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-1.5">
+                                          <select
+                                            className="input-box mono h-[26px] flex-1 text-[11px]"
+                                            value={seq.fields[key]}
+                                            onChange={(e) => setField(e.target.value)}
+                                          >
+                                            <option value="">Fill at deploy time</option>
+                                            {vaultSecretNames.length > 0 ? (
+                                              <optgroup label="From the vault">
+                                                {vaultSecretNames.map((n) => (
+                                                  <option key={`vault:${n}`} value={`vault:${n}`}>
+                                                    {n}
+                                                  </option>
+                                                ))}
+                                              </optgroup>
+                                            ) : null}
+                                            {(tsPayload?.credentialOptions ?? []).length > 0 ? (
+                                              <optgroup label="Credential store">
+                                                {(tsPayload?.credentialOptions ?? []).map((c) => (
+                                                  <option key={c.id} value={c.id}>
+                                                    {c.label}
+                                                    {c.loginName ? ` (${c.loginName})` : ""}
+                                                  </option>
+                                                ))}
+                                              </optgroup>
+                                            ) : null}
+                                          </select>
+                                          <button
+                                            type="button"
+                                            className="btn px-1.5 py-0 text-[10px]"
+                                            title="Add, replace or delete secrets in the vault"
+                                            onClick={() => setVaultEditor({ open: true, seqId: seq.id })}
+                                          >
+                                            Vault...
+                                          </button>
+                                        </div>
+                                        <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                          {seq.fields[key]
+                                            ? "Resolved when the sequence is published; the password is written into the unattend on the share."
+                                            : "Nothing is stored: the tokens stay literal and the device fills them from whoever starts the deployment."}
+                                        </span>
+                                      </div>
                                     ) : key === "joinDomain" ? (
                                       (() => {
                                         // Suggestions come from this host's DNS search suffixes;
@@ -3097,6 +3145,20 @@ export function PxeWorkspace({
 
       {menuRebuildMessage ? <PxeMenuRebuildOverlay message={menuRebuildMessage} /> : null}
 
+      <VaultEditorOverlay
+        open={vaultEditor.open}
+        onClose={() => setVaultEditor({ open: false })}
+        onChange={() => void loadVaultSecrets()}
+        onPick={(secretName) => {
+          const seqId = vaultEditor.seqId;
+          if (!seqId) return;
+          setTsEdit((prev) =>
+            (prev ?? []).map((s) =>
+              s.id === seqId ? { ...s, fields: { ...s.fields, joinCredential: `vault:${secretName}` } } : s,
+            ),
+          );
+        }}
+      />
       <InfrastructureCredentialsOverlay
         open={credentialsOpen}
         onClose={() => setCredentialsOpen(false)}

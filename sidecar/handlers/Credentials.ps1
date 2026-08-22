@@ -125,3 +125,61 @@ function Handle-ClearMacOsAdminCredentialCache {
     Clear-AppMacOsAdminCredentialCache
     Write-SidecarResponse -Id $Id -Data (Get-AppMacOsAdminCredentialCacheStatus)
 }
+
+# --- Vault editor -------------------------------------------------------------
+# The UI can list, write and delete secrets, but can never READ one back: a value
+# leaves the sidecar only when a publish step needs it. That is what keeps "from the
+# vault" meaningfully different from typing a password into a sequence.
+
+function Handle-ListVaultSecrets {
+    param([int]$Id, $Params)
+    Write-SidecarResponse -Id $Id -Data @{
+        vault   = (Get-AppSharedSecretVaultStatus)
+        secrets = @(Get-AppVaultSecretList)
+    }
+}
+
+function Handle-SetVaultSecret {
+    param([int]$Id, $Params)
+    $name = ([string](Get-AppSidecarParam -Params $Params -Name 'name')).Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) { throw 'SetVaultSecret: name required.' }
+    # Vault names travel into file names and menus; keep them boring.
+    if ($name -notmatch '^[A-Za-z0-9._-]{1,128}$') {
+        throw 'SetVaultSecret: use letters, numbers, dot, dash or underscore (max 128).'
+    }
+    $secret = [string](Get-AppSidecarParam -Params $Params -Name 'secret')
+    if ([string]::IsNullOrEmpty($secret)) { throw 'SetVaultSecret: secret required.' }
+    $userName = ([string](Get-AppSidecarParam -Params $Params -Name 'userName')).Trim()
+    $note = ([string](Get-AppSidecarParam -Params $Params -Name 'note')).Trim()
+
+    # A user name makes it a credential (domain joins need both halves); otherwise a
+    # plain secret. Get-AppVaultCredential reads either shape back.
+    $value = if ($userName) {
+        New-Object pscredential($userName, (ConvertTo-SecureString -String $secret -AsPlainText -Force))
+    } else {
+        ConvertTo-SecureString -String $secret -AsPlainText -Force
+    }
+    $meta = @{}
+    if ($note) { $meta['note'] = $note }
+    $written = Set-AppVaultSecret -Name $name -Secret $value -Metadata $meta
+    if (-not $written) { throw 'SetVaultSecret: the secret vault is not available.' }
+    Write-SidecarLog "Secret vault: wrote '$name'$(if ($userName) { " (credential for $userName)" })"
+    Write-SidecarResponse -Id $Id -Data @{
+        saved   = $true
+        vault   = (Get-AppSharedSecretVaultStatus)
+        secrets = @(Get-AppVaultSecretList)
+    }
+}
+
+function Handle-RemoveVaultSecret {
+    param([int]$Id, $Params)
+    $name = ([string](Get-AppSidecarParam -Params $Params -Name 'name')).Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) { throw 'RemoveVaultSecret: name required.' }
+    $removed = Remove-AppVaultSecret -Name $name
+    if ($removed) { Write-SidecarLog "Secret vault: removed '$name'" }
+    Write-SidecarResponse -Id $Id -Data @{
+        removed = [bool]$removed
+        vault   = (Get-AppSharedSecretVaultStatus)
+        secrets = @(Get-AppVaultSecretList)
+    }
+}

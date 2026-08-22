@@ -831,7 +831,10 @@ $domainAccounts				<LocalAccounts>
 }
 
 function Get-AppPxeBootTsOobeShell {
-    param([Parameter(Mandatory)][string]$Accounts, [bool]$Joining)
+    # AllowEmptyString: with no local account configured and no profile password, the
+    # accounts block is legitimately empty, and Mandatory alone rejected that - it threw
+    # while building the unattend for the commonest corporate sequence (caught 2026-08-22).
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Accounts, [bool]$Joining)
     # Joined machines hide the online-account screens; unjoined (workgroup) leave
     # them visible so the operator can enrol / sign in.
     $hideOnline = if ($Joining) { "				<HideOnlineAccountScreens>true</HideOnlineAccountScreens>`n" } else { '' }
@@ -928,8 +931,36 @@ $oobeShell	</settings>
     # --- Publish-time token fills -----------------------------------------------
     $xml = $xml.Replace('{{JoinDomain}}', (ConvertTo-AppPxeBootTsXmlEscaped $joinDomainName))
 
+    # Join credentials, three sources (Craig, 2026-08-22):
+    #   blank            - fill at deploy time; the tokens stay literal and the WinPE
+    #                      agent supplies one coherent credential. The default, and the
+    #                      only one that puts nothing on the share.
+    #   vault:<name>     - a credential read from the shared vault at publish time.
+    #   the credential store id - the original path, kept as-is.
+    # A join account is not a LAPS-rotated local account, so nothing is ever stored in
+    # the sequence file itself: "typed here" writes to the vault and stores the name.
     $joinCredId = & $get 'joinCredential' ''
-    if ($joining -and $joinCredId) {
+    if ($joining -and $joinCredId -like 'vault:*') {
+        $secretName = $joinCredId.Substring(6).Trim()
+        $cred = $null
+        if ($secretName -and (Get-Command Get-AppVaultCredential -ErrorAction SilentlyContinue)) {
+            $cred = Get-AppVaultCredential -Name $secretName
+        }
+        $vaultUser = if ($cred) { [string]$cred.UserName } else { '' }
+        $vaultPass = if ($cred -and (Get-Command Get-AppVaultPlainSecret -ErrorAction SilentlyContinue)) {
+            Get-AppVaultPlainSecret -Name $secretName
+        } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($vaultUser) -and -not [string]::IsNullOrWhiteSpace($vaultPass) -and $vaultUser.Trim() -ne '') {
+            $jDom = $joinDomainName
+            if ($vaultUser -match '^(.+?)\\(.+)$') { $jDom = $matches[1]; $vaultUser = $matches[2] }
+            elseif ($vaultUser -match '^(.+?)@(.+)$') { $vaultUser = $matches[1]; $jDom = $matches[2] }
+            $xml = $xml.Replace('{{JoinDom}}', (ConvertTo-AppPxeBootTsXmlEscaped $jDom))
+            $xml = $xml.Replace('{{JoinUser}}', (ConvertTo-AppPxeBootTsXmlEscaped $vaultUser))
+            $xml = $xml.Replace('{{JoinPw}}', (ConvertTo-AppPxeBootTsXmlEscaped $vaultPass))
+        } else {
+            Write-SidecarLog "PXE boot: task sequence '$($rec.id)' vault secret '$secretName' is missing, empty, or has no user name - falling back to deploy-time fill"
+        }
+    } elseif ($joining -and $joinCredId) {
         try {
             $joinUser = Get-AppInfraSshCredentialLoginNameById -Id $joinCredId
             $joinPass = Get-AppInfraSshPlainPassword -Id $joinCredId
