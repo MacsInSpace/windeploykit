@@ -501,11 +501,125 @@ function Get-AppPxeBootTsTimeZone {
     return [string]$v
 }
 
+function ConvertTo-AppPxeBootTsUnattendPassword {
+    <#
+    .SYNOPSIS
+        Windows Setup's own obfuscation for unattend passwords: base64 of
+        UTF-16LE(password + <element name>), with PlainText false.
+    .NOTES
+        This is OBFUSCATION, NOT ENCRYPTION - anyone with the file can decode it in one
+        line. It exists so a password is not sitting in clear text on the deploy share
+        where a shoulder-surfer reads it. Craig's call (2026-08-22): acceptable because
+        LAPS rotates the account afterwards. The element name really is part of the
+        payload - "Password" for LocalAccount/AutoLogon, "AdministratorPassword" for the
+        administrator element - and Setup rejects the value if it does not match.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Password,
+        [ValidateSet('Password', 'AdministratorPassword')][string]$ElementName = 'Password'
+    )
+    if ([string]::IsNullOrEmpty($Password)) { return '' }
+    [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($Password + $ElementName))
+}
+
+function ConvertFrom-AppPxeBootTsUnattendPassword {
+    # Inverse, for tests and for showing an operator what is actually in a file.
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value,
+        [ValidateSet('Password', 'AdministratorPassword')][string]$ElementName = 'Password'
+    )
+    if ([string]::IsNullOrEmpty($Value)) { return '' }
+    $decoded = [System.Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Value))
+    if ($decoded.EndsWith($ElementName)) { return $decoded.Substring(0, $decoded.Length - $ElementName.Length) }
+    return $decoded
+}
+
+function Get-AppPxeBootTsLocalAccountConfig {
+    <#
+    .SYNOPSIS
+        A sequence's local account, with defaults filled in. Shape:
+        enabled, name, displayName, description, group, passwordSource
+        ('vault'|'manual'), vaultSecret, password (base64 at rest), autoLogon.
+    #>
+    param($Sequence)
+    $raw = Get-AppPxeBootTsProp -Item $Sequence -Name 'localAccount'
+    $get = {
+        param([string]$Name, $Fallback)
+        $v = Get-AppPxeBootTsProp -Item $raw -Name $Name
+        if ($null -eq $v -or ($v -is [string] -and [string]::IsNullOrWhiteSpace($v))) { return $Fallback }
+        return $v
+    }
+    [ordered]@{
+        enabled        = if ($null -eq $raw) { $false } else { [bool](& $get 'enabled' $false) }
+        name           = [string](& $get 'name' 'localadmin')
+        displayName    = [string](& $get 'displayName' 'Local Admin')
+        description    = [string](& $get 'description' 'Created by the imaging task sequence')
+        group          = [string](& $get 'group' 'Administrators')
+        passwordSource = [string](& $get 'passwordSource' 'manual')
+        vaultSecret    = [string](& $get 'vaultSecret' '')
+        password       = [string](& $get 'password' '')
+        autoLogon      = [bool](& $get 'autoLogon' $false)
+    }
+}
+
+function Resolve-AppPxeBootTsLocalAccountPassword {
+    <#
+    .SYNOPSIS
+        The account's password in clear, from the vault or from the stored value.
+        Returns '' when it cannot be resolved - the caller then omits the account
+        rather than publishing a blank-password administrator.
+    .NOTES
+        Manual passwords are stored base64 in the sequence store: obfuscation so the
+        JSON is not readable over a shoulder, nothing more.
+    #>
+    param($Account)
+    if (-not $Account -or -not [bool]$Account.enabled) { return '' }
+    if ([string]$Account.passwordSource -eq 'vault') {
+        $secretName = [string]$Account.vaultSecret
+        if ([string]::IsNullOrWhiteSpace($secretName)) { return '' }
+        if (-not (Get-Command Get-AppVaultPlainSecret -ErrorAction SilentlyContinue)) { return '' }
+        $plain = Get-AppVaultPlainSecret -Name $secretName
+        if ([string]::IsNullOrEmpty($plain)) {
+            Write-SidecarLog "Task sequences: vault secret '$secretName' is missing or empty - local account omitted"
+            return ''
+        }
+        return [string]$plain
+    }
+    $stored = [string]$Account.password
+    if ([string]::IsNullOrEmpty($stored)) { return '' }
+    try {
+        return [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($stored))
+    } catch {
+        # Older stores kept it in clear; accept that rather than losing the account.
+        return $stored
+    }
+}
+
 function Get-AppPxeBootTsOobeAccounts {
-    # oobeSystem accounts + autologon. Admin groups are an explicit optional list
-    # (Craig, 2026-08-19) - emitted only when joining a domain and groups are set.
-    # {{LocalAdminPw}} comes from the Site Profile.
-    param([string[]]$AdminGroups = @(), [bool]$EmitGroups)
+    <#
+    .SYNOPSIS
+        oobeSystem accounts + autologon.
+    .NOTES
+        Three shapes, in order:
+          1. A configured local account (Craig, 2026-08-22) - name/group from the
+             sequence, password from the vault or typed in, written with Windows'
+             own base64 obfuscation. AutoLogon only when the sequence asks for it,
+             and only once (LogonCount 1).
+          2. No configured account, but the product can supply a local admin password
+             (the {{LocalAdminPw}} token, filled at publish time) - the original
+             behaviour, unchanged.
+          3. Neither - emit NOTHING. Publishing the literal token as a password (which
+             is what happened with no profile behind it) produces an unattend that
+             cannot work.
+        Admin groups are an explicit optional list, emitted only when joining a domain.
+    #>
+    param(
+        [string[]]$AdminGroups = @(),
+        [bool]$EmitGroups,
+        $LocalAccount,
+        [string]$LocalPassword,
+        [bool]$LegacyLocalAdminAvailable
+    )
     $domainAccounts = ''
     if ($EmitGroups -and $AdminGroups -and $AdminGroups.Count -gt 0) {
         $groupLines = ''
@@ -520,6 +634,54 @@ $groupLines					</DomainAccountList>
 
 "@
     }
+
+    $useConfigured = $LocalAccount -and [bool]$LocalAccount.enabled -and -not [string]::IsNullOrEmpty($LocalPassword)
+    if ($useConfigured) {
+        $name = [string]$LocalAccount.name
+        $encoded = ConvertTo-AppPxeBootTsUnattendPassword -Password $LocalPassword -ElementName 'Password'
+        $autoLogon = ''
+        if ([bool]$LocalAccount.autoLogon) {
+            $autoLogon = @"
+			<AutoLogon>
+				<Password>
+					<Value>$encoded</Value>
+					<PlainText>false</PlainText>
+				</Password>
+				<Username>$(ConvertTo-AppPxeBootTsXmlEscaped $name)</Username>
+				<LogonCount>1</LogonCount>
+				<Enabled>true</Enabled>
+			</AutoLogon>
+"@
+        }
+        return @"
+			<UserAccounts>
+$domainAccounts				<LocalAccounts>
+					<LocalAccount wcm:action="add">
+						<Password>
+							<Value>$encoded</Value>
+							<PlainText>false</PlainText>
+						</Password>
+						<Description>$(ConvertTo-AppPxeBootTsXmlEscaped ([string]$LocalAccount.description))</Description>
+						<DisplayName>$(ConvertTo-AppPxeBootTsXmlEscaped ([string]$LocalAccount.displayName))</DisplayName>
+						<Group>$(ConvertTo-AppPxeBootTsXmlEscaped ([string]$LocalAccount.group))</Group>
+						<Name>$(ConvertTo-AppPxeBootTsXmlEscaped $name)</Name>
+					</LocalAccount>
+				</LocalAccounts>
+			</UserAccounts>
+$autoLogon
+"@
+    }
+
+    if (-not $LegacyLocalAdminAvailable) {
+        if ($domainAccounts) {
+            return @"
+			<UserAccounts>
+$domainAccounts			</UserAccounts>
+"@
+        }
+        return ''
+    }
+
     @"
 			<UserAccounts>
 				<AdministratorPassword>
@@ -550,6 +712,7 @@ $domainAccounts				<LocalAccounts>
 			</AutoLogon>
 "@
 }
+
 function Get-AppPxeBootTsOobeShell {
     param([Parameter(Mandatory)][string]$Accounts, [bool]$Joining)
     # Joined machines hide the online-account screens; unjoined (workgroup) leave
@@ -629,7 +792,12 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     # sequence actually lists groups (TODO(Site Profile): per-domain group policy).
     $centralJoin = $joining -and @($rec.adminGroups).Count -gt 0
     $specialize = (Get-AppPxeBootTsSpecializeRunSync -Steps @($rec.steps)) + $dnsComponent + (Get-AppPxeBootTsIntlSpecialize) + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey) + $ipComponent + $joinComponent
-    $accounts = Get-AppPxeBootTsOobeAccounts -AdminGroups @($rec.adminGroups | ForEach-Object { [string]$_ }) -EmitGroups $centralJoin
+    $localAccount = Get-AppPxeBootTsLocalAccountConfig -Sequence $rec
+    $localAccountPw = Resolve-AppPxeBootTsLocalAccountPassword -Account $localAccount
+    # The {{LocalAdminPw}} token is only worth emitting if something will fill it.
+    $legacyLocalPw = if ($role -eq 'server') { $ctx.serverAdmPw } else { $ctx.clientAdmPw }
+    $accounts = Get-AppPxeBootTsOobeAccounts -AdminGroups @($rec.adminGroups | ForEach-Object { [string]$_ }) -EmitGroups $centralJoin `
+        -LocalAccount $localAccount -LocalPassword $localAccountPw -LegacyLocalAdminAvailable ([bool]$legacyLocalPw)
     $oobeShell = Get-AppPxeBootTsOobeShell -Accounts $accounts -Joining $joining
 
     $xml = @"
@@ -675,7 +843,7 @@ $oobeShell	</settings>
     # deploy-time: the WinPE agent fills the full triplet from the operator who
     # armed the job, so the join is one coherent credential. (Never freeze the
     # PUBLISHER's identity and mix it with the DEPLOYER's password.)
-    $localPw = if ($role -eq 'server') { $ctx.serverAdmPw } else { $ctx.clientAdmPw }
+    $localPw = $legacyLocalPw
     if ($localPw) { $xml = $xml.Replace('{{LocalAdminPw}}', (ConvertTo-AppPxeBootTsXmlEscaped $localPw)) }
 
     $xml
