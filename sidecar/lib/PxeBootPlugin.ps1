@@ -6190,20 +6190,37 @@ function Read-AppPxeBootDnsmasqLogTail {
 function Clear-AppPxeBootLogTail {
     <#
     .SYNOPSIS
-        Truncate the PXE activity log (dnsmasq/TFTP) shown in Monitoring.
-        Truncates in place rather than deleting so a running dnsmasq keeps its
-        open handle and continues appending.
+        Truncate the PXE activity log (dnsmasq/TFTP) shown in the Netboot panel.
+        Truncates in place rather than deleting so a running dnsmasq keeps its open
+        handle and continues appending. On macOS dnsmasq runs as root and the log is
+        usually root-owned, so a plain truncate fails with permission denied; then the
+        same cached administrator credential that started TFTP truncates it via sudo.
     #>
     $storeRoot = Get-AppPxeBootStoreRoot
     $logPath = Join-Path $storeRoot 'dnsmasq.log'
-    $result = [ordered]@{ cleared = $false; path = $logPath }
+    $result = [ordered]@{ cleared = $false; path = $logPath; error = $null }
     if (-not (Test-Path -LiteralPath $logPath)) { return $result }
     try {
         Set-Content -LiteralPath $logPath -Value '' -NoNewline -ErrorAction Stop
         $result.cleared = $true
-        Write-SidecarLog 'PXE boot: activity log cleared.'
     } catch {
-        Write-SidecarLog "PXE boot: could not clear activity log - $($_.Exception.Message)"
+        $direct = $_.Exception.Message
+        if (($IsMacOS -or $IsDarwin) -and (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue)) {
+            try {
+                $logQ = ConvertTo-AppUnixShellSingleQuotedString -Value $logPath
+                $null = Invoke-AppMacOsAdminShellCommand -ShellCommand ": > $logQ" -PromptMessage 'Clearing the PXE activity log needs your macOS administrator password (the log is owned by root).'
+                $result.cleared = $true
+            } catch {
+                $result.error = $_.Exception.Message
+            }
+        } else {
+            $result.error = $direct
+        }
+    }
+    if ($result.cleared) {
+        Write-SidecarLog 'PXE boot: activity log cleared.'
+    } else {
+        Write-SidecarLog "PXE boot: could not clear activity log - $($result.error)"
     }
     return $result
 }

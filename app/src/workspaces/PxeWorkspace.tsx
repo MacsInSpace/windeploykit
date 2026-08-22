@@ -1893,10 +1893,11 @@ export function PxeWorkspace({
                       <button
                         type="button"
                         className="btn btn-danger py-0.5 text-[10px]"
+                        disabled={!logTail?.available || (logTail?.lines?.length ?? 0) === 0}
                         title="Truncate the dnsmasq/TFTP activity log on this host"
                         onClick={() => void clearPxeLog()}
                       >
-                        Clear
+                        Clear log
                       </button>
                     </div>
                     <div className="rounded border" style={{ borderColor: "var(--border)", background: "#05080d" }}>
