@@ -1186,7 +1186,7 @@ getting any logs back". Both were gaps in the first cut of the deploy client.
   Win32_ComputerSystem). There is no serial in the registry, so the device id the
   panel files the log under is the first NIC MAC from `ipconfig /all`.
 - **Pack lookup** mirrors ImageDeployer's search of `Z:\Drivers\<Make>\<Model>`:
-  exact folder, model-starts-with-folder (Lenovo `21F…`), folder-contained-in-model
+  exact folder, model-starts-with-folder (Lenovo `21F...`), folder-contained-in-model
   (Acer), then `Z:\Drivers\aliases.txt` (`alias=Make\Folder`, exact - the JSON map
   the panel already writes, flattened because cmd cannot parse JSON), then `_default`.
 - **Expand**: an INF tree is used in place; `.cab` via `expand.exe` (in every WinPE);
