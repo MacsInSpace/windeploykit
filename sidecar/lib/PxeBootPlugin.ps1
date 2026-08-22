@@ -122,6 +122,7 @@ function Read-AppPxeBootConfig {
         smbOverlayEnabled    = $false
         deployOverlayCreds = 'throwaway'
         deployOverlayShare = 'Deploy$'
+        deployClientInject = $true
         isoMountServe        = $true
         updatedAt            = $null
     }
@@ -183,6 +184,7 @@ function Write-AppPxeBootConfig {
         [bool]$SmbOverlayEnabled,
         [string]$DeployOverlayCreds,
         [string]$DeployOverlayShare,
+        [bool]$DeployClientInject,
         [bool]$IsoMountServe
     )
     $existing = Read-AppPxeBootConfig
@@ -265,6 +267,13 @@ function Write-AppPxeBootConfig {
             ([string]$existing.deployOverlayCreds).Trim()
         } else {
             'throwaway'
+        }
+        deployClientInject = if ($PSBoundParameters.ContainsKey('DeployClientInject')) {
+            [bool]$DeployClientInject
+        } elseif ($null -ne $existing.PSObject.Properties['deployClientInject']) {
+            [bool]$existing.deployClientInject
+        } else {
+            $true
         }
         deployOverlayShare = if ($PSBoundParameters.ContainsKey('DeployOverlayShare')) {
             if ([string]::IsNullOrWhiteSpace($DeployOverlayShare)) { 'Deploy$' } else { ([string]$DeployOverlayShare).Trim() }
@@ -1087,7 +1096,14 @@ function Get-AppPxeBootWimOverlayProfiles {
             # independent. This machine needs the local Deploy$ share; an on-site WDS
             # only needs the runtime UNC/cred injection.
             IsEnabled     = { Test-AppPxeBootDeployOverlayEnabled }
+            # The whole corporate story, and not one byte written into the user's WIM:
+            # wimboot serves these as initrd files and WinPE sees them in System32,
+            # startnet.cmd included - so a stock Windows boot.wim (which has dism,
+            # diskpart, bcdboot and net, but no PowerShell and no curl) runs our
+            # cmd-only client instead of `wpeinit` and a prompt. The WIM on disk stays
+            # exactly as imported, and editing the client is a file copy, not a rebake.
             Runtime       = @(
+                @{ ServedName = 'startnet.cmd'; WinPeName = 'startnet.cmd'; Required = $false }
                 @{ ServedName = 'deploy.unc';  WinPeName = 'deploy.unc';  Required = $true }
                 @{ ServedName = 'deploy.cred'; WinPeName = 'deploy.cred'; Required = $false }
                 @{ ServedName = 'loghost';     WinPeName = 'deploy.loghost'; Required = $false }
@@ -3501,6 +3517,44 @@ function Write-AppPxeBootWimOverlayRuntimeAssets {
     }
 }
 
+function Get-AppPxeBootDeployClientStartnetSource {
+    <#
+    .SYNOPSIS
+        Path to the cmd-only deploy client that gets baked in as startnet.cmd.
+    #>
+    # Test-Path on a script: variable, not a bare read - StrictMode throws on the
+    # latter when the sidecar has not set it (the gates dot-source the libs alone).
+    $root = if (Test-Path variable:script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($SidecarRoot) { Split-Path -Parent $SidecarRoot } else { $null }
+    $candidates = @()
+    if ($SidecarRoot) { $candidates += (Join-Path $SidecarRoot 'pxe/deploy-client/startnet.cmd') }
+    if ($root) {
+        $candidates += (Join-Path $root 'sidecar/pxe/deploy-client/startnet.cmd')
+        $candidates += (Join-Path $root 'pxe/deploy-client/startnet.cmd')
+    }
+    foreach ($rel in $candidates) {
+        $path = ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
+        if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
+    }
+    return $null
+}
+
+function Test-AppPxeBootDeployClientInjectEnabled {
+    <#
+    .SYNOPSIS
+        Whether imported boot WIMs get the deploy client baked into them.
+    .NOTES
+        On by default: without it an imported boot.wim boots to a WinPE prompt and
+        this product does nothing at all (Craig, 2026-08-23 - "how is the install.wim
+        installed via the boot.wim"). The panel can turn it off for anyone who boots
+        their own client and only wants the share and the published sequences.
+    #>
+    param($Cfg = $(Read-AppPxeBootConfig))
+    if ($null -eq $Cfg) { return $true }
+    $prop = $Cfg.PSObject.Properties['deployClientInject']
+    if (-not $prop) { return $true }
+    return [bool]$prop.Value
+}
+
 function Test-AppPxeBootDeployOverlayCredsModeValue {
     param([string]$Value)
     $v = ([string]$Value).Trim()
@@ -3637,6 +3691,28 @@ function Write-AppPxeBootDeployOverlayFiles {
         [Parameter(Mandatory)][string]$Dir,
         [string]$LanIp
     )
+    # The deploy client itself. Not Required in the profile: with the toggle off this
+    # file is absent, the initrd line is skipped, and WinPE runs its own startnet.cmd
+    # (the plain prompt) while the share and credential files still land.
+    $startnetFile = Join-Path $Dir 'startnet.cmd'
+    if (Test-AppPxeBootDeployClientInjectEnabled) {
+        $startnetSource = Get-AppPxeBootDeployClientStartnetSource
+        if ($startnetSource) {
+            # CRLF on the wire, whatever git did to the source: cmd.exe skips `goto`
+            # labels and leaves a stray CR in `for /f` tokens on an LF-only batch file.
+            $want = (([System.IO.File]::ReadAllText($startnetSource) -replace "`r`n", "`n") -replace "`n", "`r`n")
+            $have = if (Test-Path -LiteralPath $startnetFile) { [System.IO.File]::ReadAllText($startnetFile) } else { $null }
+            if ($have -ne $want) {
+                [System.IO.File]::WriteAllText($startnetFile, $want, (New-Object System.Text.UTF8Encoding $false))
+                Write-SidecarLog 'PXE boot: published the deploy client (startnet.cmd) for imported boot WIMs'
+            }
+        } else {
+            Write-SidecarLog 'PXE boot: deploy client source missing - imported boot WIMs will boot to a WinPE prompt'
+        }
+    } elseif (Test-Path -LiteralPath $startnetFile) {
+        Remove-Item -LiteralPath $startnetFile -Force -ErrorAction SilentlyContinue
+    }
+
     $uncFile = Join-Path $Dir 'deploy.unc'
     $credFile = Join-Path $Dir 'deploy.cred'
     $logHostFile = Join-Path $Dir 'loghost'
@@ -9438,6 +9514,7 @@ function Set-AppPxeBootPluginConfig {
         [bool]$SmbOverlayEnabled,
         [string]$DeployOverlayCreds,
         [string]$DeployOverlayShare,
+        [bool]$DeployClientInject,
         [bool]$IsoMountServe,
         [switch]$SkipMenuRegen
     )
@@ -9467,6 +9544,9 @@ function Set-AppPxeBootPluginConfig {
     }
     if ($PSBoundParameters.ContainsKey('DeployOverlayShare')) {
         $writeParams['DeployOverlayShare'] = [string]$DeployOverlayShare
+    }
+    if ($PSBoundParameters.ContainsKey('DeployClientInject')) {
+        $writeParams['DeployClientInject'] = [bool]$DeployClientInject
     }
     if ($PSBoundParameters.ContainsKey('IsoMountServe')) {
         $writeParams['IsoMountServe'] = [bool]$IsoMountServe

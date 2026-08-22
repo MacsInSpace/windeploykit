@@ -1175,6 +1175,44 @@ block; `StopPxeBootServices` broke exactly this way and only an IPC round-trip c
 What is left: `GetPxeBootWimLibrary` (642 ms warm) and `GetPxeBootPluginConfig` (418 ms) both
 still rebuild status-shaped data. Worth another look only if the panel still feels slow.
 
+### How a corporate user's boot.wim installs install.wim (2026-08-23)
+
+Craig: "When a corporate person downloads WDK, how is the install.wim installed via
+the boot.wim? You seem to forget corporate will not have FieldIso.wim." Correct - and
+before this there was NO answer: FieldIso is USM lineage (needs an ADK PowerShell
+tree), and an imported stock boot.wim booted to `wpeinit` and a prompt.
+
+The answer is `sidecar/pxe/deploy-client/startnet.cmd`, and it is an **overlay, not a
+bake** (Craig: "can't this just be an overlay rather than rewriting every and any
+boot.wim that is imported?"):
+
+- The `deploy-share` profile lists it as a Runtime entry. Caddy serves it from
+  `http/deploy/`, iPXE adds `initrd -n startnet.cmd ...`, and wimboot drops it into
+  WinPE's System32 - shadowing the WIM's own `startnet.cmd`. The WIM on disk is
+  byte-identical to what was imported; `Sync-AppPxeBootWimOverlays` bakes nothing.
+- It is **cmd-only on purpose**. A stock Windows boot.wim ships dism, diskpart,
+  bcdboot, net and robocopy, and ships NO PowerShell and NO curl (checked with wimlib
+  on the Server 2025 boot.wim). Anything richer means an ADK - a download, a licence
+  and a Windows box. `test-deploy-overlay` fails if the client ever invokes
+  powershell/pwsh/curl.
+- The chain: wpeinit -> `net use Z:` with deploy.cred -> `_default.txt` (or
+  `deploy.tsid` from iPXE) -> `Z:\TaskSequences\<id>.env` -> diskpart (GPT, EFI 260M,
+  MSR, Windows; asks for WIPE unless `deploy.autoprep` is present) ->
+  `dism /Apply-Image` with the sequence's index -> `bcdboot /f UEFI` -> copy
+  `<id>.xml` to `Windows\Panther\unattend.xml` -> `wpeutil reboot`. Every failure
+  drops to a prompt with the reason and `X:\Windows\Temp\deploy.log`; never a reboot loop.
+- `<id>.env` is published beside `<id>.xml` because cmd cannot parse JSON: KEY=VALUE,
+  CRLF, `for /f "tokens=1,* delims=="`. index.json stays for clients that can.
+- Config `deployClientInject` (default on) removes the served file when off; the
+  entry is not Required, so the share/cred files still inject and WinPE runs its own
+  startnet.cmd.
+- Published with CRLF regardless of what git did to the source: cmd.exe skips `goto`
+  labels and leaves a stray CR in `for /f` tokens on an LF-only batch file.
+
+Not yet booted on hardware - the generated boot.ipxe carries the four initrd lines
+and the .env is on the share with the Server 2025 binding; the next Proxmox boot is
+the real test.
+
 ### A task sequence names its own install.wim (2026-08-23)
 
 Craig: "The task sequence should have the Install.Wim so we can selact it in the Task

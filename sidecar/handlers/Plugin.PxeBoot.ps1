@@ -96,6 +96,9 @@ function Handle-SetPxeBootPluginConfig {
     if (Test-AppSidecarParamPresent -Params $Params -Name 'deployOverlayCreds') {
         $setParams['DeployOverlayCreds'] = [string]$deployOverlayCreds
     }
+    if (Test-AppSidecarParamPresent -Params $Params -Name 'deployClientInject') {
+        $setParams['DeployClientInject'] = [bool](Get-AppSidecarParam -Params $Params -Name 'deployClientInject')
+    }
     if (Test-AppSidecarParamPresent -Params $Params -Name 'deployOverlayShare') {
         $setParams['DeployOverlayShare'] = [string]$deployOverlayShare
     }

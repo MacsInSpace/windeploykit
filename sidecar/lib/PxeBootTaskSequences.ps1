@@ -1102,10 +1102,34 @@ function Sync-AppPxeBootTaskSequenceStore {
             }
         }
         $indexRows += , $row
+
+        # <id>.env - the same row, in the only shape a cmd-only client can read.
+        # WinPE has no PowerShell and no JSON parser; `for /f "tokens=1,* delims=="`
+        # is what the deploy client uses, so the panel writes KEY=VALUE and nothing
+        # clever. index.json stays for clients that can parse it.
+        $envLines = [System.Collections.Generic.List[string]]::new()
+        [void]$envLines.Add("TS_ID=$($rec.id)")
+        [void]$envLines.Add("TS_NAME=$($rec.name)")
+        [void]$envLines.Add("TS_UNATTEND=$($rec.id).xml")
+        if ($row.image -and -not [bool]$row.image['missing']) {
+            [void]$envLines.Add("TS_IMAGE=$($row.image.sharePath)")
+            [void]$envLines.Add("TS_INDEX=$($row.image.index)")
+            if ($row.image.editionName) { [void]$envLines.Add("TS_EDITION=$($row.image.editionName)") }
+        }
+        $envFile = Join-Path $dir "$($rec.id).env"
+        # CRLF: cmd's `for /f` on a LF-only file leaves a stray CR in the last token.
+        $envBody = (($envLines -join "`r`n") + "`r`n")
+        $haveEnv = if (Test-Path -LiteralPath $envFile) { Get-Content -LiteralPath $envFile -Raw -ErrorAction SilentlyContinue } else { $null }
+        if ($haveEnv -ne $envBody) {
+            [System.IO.File]::WriteAllText($envFile, $envBody, (New-Object System.Text.UTF8Encoding $false))
+        }
+        [void]$keep.Add("$($rec.id).env")
     }
-    foreach ($existing in @(Get-ChildItem -LiteralPath $dir -File -Filter '*.xml' -ErrorAction SilentlyContinue)) {
-        if (-not $keep.Contains($existing.Name)) {
-            Remove-Item -LiteralPath $existing.FullName -Force -ErrorAction SilentlyContinue
+    foreach ($pattern in @('*.xml', '*.env')) {
+        foreach ($existing in @(Get-ChildItem -LiteralPath $dir -File -Filter $pattern -ErrorAction SilentlyContinue)) {
+            if (-not $keep.Contains($existing.Name)) {
+                Remove-Item -LiteralPath $existing.FullName -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 

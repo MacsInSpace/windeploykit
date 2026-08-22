@@ -186,6 +186,55 @@ try {
         if ($null -ne (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $obj -Name 'Bakes')) { throw 'missing key on an object should be null' }
     }
 
+    Test-Case 'the deploy client rides in as an overlay file, never baked into the WIM' {
+        # Craig, 2026-08-23: "cant this just be an overlay rather than rewriting every
+        # and any boot.wim that is imported?" The client is a Runtime entry (served by
+        # Caddy, injected by wimboot as an initrd), and the profile bakes nothing.
+        $p = @(Get-AppPxeBootWimOverlayProfiles) | Where-Object { $_.Id -eq 'deploy-share' }
+        $names = @($p.Runtime | ForEach-Object { $_.WinPeName })
+        if ($names -notcontains 'startnet.cmd') { throw "startnet.cmd is not a runtime overlay entry (have: $($names -join ', '))" }
+        $entry = $p.Runtime | Where-Object { $_.WinPeName -eq 'startnet.cmd' } | Select-Object -First 1
+        if ([bool]$entry.Required) { throw 'startnet.cmd must not be Required - turning the client off must not suppress the share files' }
+        if ($null -ne (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $p -Name 'Bakes')) { throw 'the deploy-share profile must bake nothing' }
+    }
+
+    Test-Case 'the published client is CRLF and runs through the whole chain' {
+        $src = Get-AppPxeBootDeployClientStartnetSource
+        if (-not $src) { throw 'deploy client source not found' }
+        $dir = Join-Path ([IO.Path]::GetTempPath()) ("deploy-" + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -Path $dir -ItemType Directory -Force
+        try {
+            Write-AppPxeBootDeployOverlayFiles -Dir $dir -LanIp '10.0.1.147'
+            $served = Join-Path $dir 'startnet.cmd'
+            if (-not (Test-Path -LiteralPath $served)) { throw 'startnet.cmd was not published' }
+            $text = [System.IO.File]::ReadAllText($served)
+            if ($text -match "(?<!`r)`n") { throw 'published startnet.cmd has LF-only line endings' }
+            # The client must do each stage of the deployment, in this order.
+            $stages = @('wpeinit', 'net use Z:', 'TaskSequences\_default.txt', '.env', 'diskpart', 'dism /Apply-Image', 'bcdboot', 'Panther\unattend.xml', 'wpeutil reboot')
+            $pos = -1
+            foreach ($s in $stages) {
+                $next = $text.IndexOf($s, [Math]::Max(0, $pos), [StringComparison]::OrdinalIgnoreCase)
+                if ($next -lt 0) { throw "client is missing stage '$s'" }
+                $pos = $next
+            }
+            # And it must only use what a stock WinPE carries - no PowerShell, no curl.
+            foreach ($tool in @('powershell', 'pwsh', 'curl')) {
+                if ($text -match "(?im)^\s*$tool(\.exe)?\b") { throw "client invokes '$tool', which a stock boot.wim does not have" }
+            }
+        } finally {
+            Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Test-Case 'the .env a sequence publishes is what the client parses' {
+        $rows = @(
+            'TS_ID=server-standard', 'TS_NAME=Server', 'TS_UNATTEND=server-standard.xml',
+            'TS_IMAGE=.mounts\srv-a38406a3\sources\install.wim', 'TS_INDEX=2'
+        )
+        # KEY=VALUE, one per line, value may contain backslashes and spaces, no quoting.
+        foreach ($r in $rows) { if ($r -notmatch '^[A-Z_]+=[^\r\n]+$') { throw "row '$r' is not KEY=VALUE" } }
+    }
+
     Test-Case 'no profile carries the old name' {
         foreach ($p in @(Get-AppPxeBootWimOverlayProfiles)) {
             if ("$($p.Id)$($p.ServedSubdir)" -match '(?i)imagedeployer') { throw "profile '$($p.Id)' still carries the old name" }
