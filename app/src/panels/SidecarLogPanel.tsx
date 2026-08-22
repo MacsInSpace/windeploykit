@@ -6,21 +6,31 @@
  * sidecar said was visible in the app. That made "No LAN IP" and "vault
  * unavailable" undiagnosable from inside it.
  *
- * Live-only: lines arrive from the moment the app is open. There is no history
- * command yet, so a restart empties it.
+ * History is collected from app start by lib/sidecarLogBuffer (not from when this
+ * panel mounts), so the boot lines are here when you come looking. A sidecar
+ * restart keeps the buffer; Clear empties it.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { PanelShell } from "../components/PanelShell";
-import { sidecar } from "../lib/ipc";
 import { isTauri } from "../lib/tauriEnv";
+import {
+  clearSidecarLogBuffer,
+  getSidecarLogSnapshot,
+  subscribeSidecarLog,
+} from "../lib/sidecarLogBuffer";
 import { restartSidecarNow, useSidecarBootState } from "../lib/sidecarBoot";
 import { useConsoleActions, type ConsoleNodeActions } from "../state/consoleActions";
 
 const MAX_LINES = 2000;
 
 export function SidecarLogPanel() {
-  const [lines, setLines] = useState<string[]>([]);
+  // History lives outside the panel, so opening it shows what the sidecar already
+  // said (boot, vault, LAN) rather than starting from nothing.
+  const buffered = useSyncExternalStore(subscribeSidecarLog, getSidecarLogSnapshot, getSidecarLogSnapshot);
+  // Pause freezes what is shown without dropping lines from the buffer.
+  const [frozen, setFrozen] = useState<string[] | null>(null);
+  const lines = frozen ?? buffered;
   const boot = useSidecarBootState();
   const [paused, setPaused] = useState(false);
   const [filter, setFilter] = useState("");
@@ -29,33 +39,22 @@ export function SidecarLogPanel() {
   pausedRef.current = paused;
 
   useEffect(() => {
-    if (!isTauri()) return;
-    let live = true;
-    let unlisten: (() => void) | undefined;
-    void sidecar
-      .onLog((line) => {
-        if (!live || pausedRef.current) return;
-        setLines((prev) => {
-          const next = prev.length >= MAX_LINES ? prev.slice(prev.length - MAX_LINES + 1) : prev.slice();
-          next.push(line);
-          return next;
-        });
-      })
-      .then((fn) => {
-        unlisten = fn;
-      });
-    return () => {
-      live = false;
-      unlisten?.();
-    };
-  }, []);
-
-  useEffect(() => {
     if (!paused) bottomRef.current?.scrollIntoView({ block: "end" });
   }, [lines, paused]);
 
-  const clear = useCallback(() => setLines([]), []);
-  const togglePause = useCallback(() => setPaused((p) => !p), []);
+  const clear = useCallback(() => {
+    clearSidecarLogBuffer();
+    setFrozen(null);
+  }, []);
+  const togglePause = useCallback(
+    () =>
+      setPaused((p) => {
+        // Freeze the current view rather than discarding what arrives while paused.
+        setFrozen(p ? null : getSidecarLogSnapshot());
+        return !p;
+      }),
+    [],
+  );
 
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -84,7 +83,7 @@ export function SidecarLogPanel() {
       subtitle={<span>{shown.length === lines.length ? `${lines.length} lines` : `${shown.length} of ${lines.length}`}</span>}
       details={[
         { label: "Sidecar", value: boot.lifecycle + (boot.detail ? ` - ${boot.detail}` : ""), tone: boot.lifecycle === "ready" || boot.lifecycle === "starting" || boot.lifecycle === "checking" ? "normal" : "bad" },
-        { label: "Source", value: "sidecar stderr, live" },
+        { label: "Source", value: "sidecar stderr, from app start" },
         { label: "Buffer", value: `last ${MAX_LINES} lines` },
         errors > 0 && { label: "Flagged", value: `${errors} line(s)`, tone: "warn" },
         !isTauri() && { label: "Note", value: "no sidecar outside the desktop app" },
@@ -102,7 +101,7 @@ export function SidecarLogPanel() {
             />
           </div>
           {paused && (
-            <span className="badge badge-warn" title="New lines are being dropped while paused">
+            <span className="badge badge-warn" title="The view is frozen; lines are still being collected">
               PAUSED
             </span>
           )}

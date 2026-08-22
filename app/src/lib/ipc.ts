@@ -1,7 +1,7 @@
 // Thin, typed wrapper around the Tauri commands exposed by src-tauri/src/sidecar.rs.
 // The Rust side handles process lifecycle, request/response correlation, and event forwarding.
 // This file exists so React components can call:
-//   const rows = await sidecar.invoke("GetServiceAccounts");
+//   const rows = await sidecar.invoke("GetPxeBootPluginStatus");
 // and stay both ergonomic and type-safe.
 
 import { invoke } from "@tauri-apps/api/core";

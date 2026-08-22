@@ -1058,3 +1058,28 @@ Four things Craig hit, all fixed:
    The dead torrent UI (`imagesView`, `soeRows`, `torrentColumns`, `downloadTorrentRow`) is
    deleted; the sidecar keeps its torrent support for USM.
 
+### Two field faults, 2026-08-22 evening
+
+**"Unknown command: PrefetchMacOsAdminCredential" on every service start.** The panel warms
+the macOS admin credential before anything that needs sudo, so the password dialog (or the
+vault read) happens up front rather than mid-start. The handler had never been ported here,
+so the ladder got no head start and the bottom of the window showed an error every time.
+Added `Handle-PrefetchMacOsAdminCredential`, `Handle-GetMacOsAdminCredentialCacheStatus` and
+`Handle-ClearMacOsAdminCredentialCache` to `handlers/Credentials.ps1` - the backing functions
+were already in `AppElevation.ps1`.
+
+**Handler load order is a trap.** `handlers/*.ps1` are dot-sourced at line ~68, and the main
+script defines its own core handlers AFTER that - so a duplicate in `windeploykit-sidecar.ps1`
+silently WINS over one in a handler file. `Handle-ApplyRuntimeConfig` already existed in the
+main script; a second copy added in a handler file looked correct, parsed fine, and never ran.
+Before adding a handler, grep BOTH places:
+
+    grep -ho '^function Handle-[A-Za-z]*' sidecar/windeploykit-sidecar.ps1 sidecar/handlers/*.ps1
+
+**"Nothing from the sidecar yet" on a healthy sidecar.** The log panel subscribed to stderr on
+mount, so everything said before someone opened it was gone - boot, vault status, LAN
+discovery, i.e. exactly the lines you open the panel to read. History now lives in
+`lib/sidecarLogBuffer.ts`, started from `wireEvents()` at boot and kept whether or not anyone
+is looking; the panel renders the buffer on mount. Pause freezes the view without dropping
+lines, and Clear empties the shared buffer.
+

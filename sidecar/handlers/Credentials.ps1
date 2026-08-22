@@ -81,3 +81,47 @@ function Handle-GetSecretVaultStatus {
     param([int]$Id, $Params)
     Write-SidecarResponse -Id $Id -Data (Get-AppSharedSecretVaultStatus)
 }
+
+function Handle-PrefetchMacOsAdminCredential {
+    <#
+    .SYNOPSIS
+        Warm the macOS administrator credential before a step that needs sudo.
+    .NOTES
+        The panel calls this before starting Netboot services so the password
+        dialog (or the vault read) happens up front rather than mid-start. It was
+        missing here, so every service start answered "Unknown command" and the
+        credential ladder never got its head start (field, 2026-08-22).
+    #>
+    param([int]$Id, $Params)
+    $purpose = Get-AppSidecarParam -Params $Params -Name 'purpose'
+    if ([string]::IsNullOrWhiteSpace($purpose)) { $purpose = 'pxe' }
+    if ($purpose -notin @('pxe', 'general')) { $purpose = 'pxe' }
+    $started = $false
+    if (Get-Command Start-AppMacOsAdminCredentialPrefetch -ErrorAction SilentlyContinue) {
+        $state = Start-AppMacOsAdminCredentialPrefetch -Purpose $purpose
+        $started = ($null -ne $state)
+    }
+    $cache = if (Get-Command Get-AppMacOsAdminCredentialCacheStatus -ErrorAction SilentlyContinue) {
+        Get-AppMacOsAdminCredentialCacheStatus
+    } else {
+        @{ cached = $false }
+    }
+    Write-SidecarResponse -Id $Id -Data @{
+        started       = $started
+        cached        = [bool]$cache.cached
+        username      = $cache.username
+        # The saved credential was refused by sudo this session; the dialog is being used.
+        savedRejected = [bool]$cache.savedRejected
+    }
+}
+
+function Handle-GetMacOsAdminCredentialCacheStatus {
+    param([int]$Id, $Params)
+    Write-SidecarResponse -Id $Id -Data (Get-AppMacOsAdminCredentialCacheStatus)
+}
+
+function Handle-ClearMacOsAdminCredentialCache {
+    param([int]$Id, $Params)
+    Clear-AppMacOsAdminCredentialCache
+    Write-SidecarResponse -Id $Id -Data (Get-AppMacOsAdminCredentialCacheStatus)
+}

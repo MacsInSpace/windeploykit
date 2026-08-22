@@ -16,6 +16,7 @@ import { useSyncExternalStore } from "react";
 import { sidecar } from "./ipc";
 import { pushImageLibraryRoot } from "./imageLibrary";
 import { buildRuntimeConfigForSidecar, buildSidecarSpawnEnv } from "./runtimeConfig";
+import { startSidecarLogBuffer } from "./sidecarLogBuffer";
 import { isTauri } from "./tauriEnv";
 
 export type SidecarLifecycle =
@@ -78,6 +79,8 @@ async function onReady() {
 async function wireEvents() {
   if (eventsWired) return;
   eventsWired = true;
+  // Collect stderr from the first line, not from whenever someone opens the panel.
+  startSidecarLogBuffer();
   await sidecar.onEvent((ev) => {
     if (ev.event === "ready") void onReady();
     else if (ev.event === "exited") set({ lifecycle: "stopped", detail: "The sidecar process exited." });
