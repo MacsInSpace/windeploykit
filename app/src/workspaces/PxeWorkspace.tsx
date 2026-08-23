@@ -2325,6 +2325,29 @@ export function PxeWorkspace({
                             </button>
                             <button
                               type="button"
+                              className="btn px-1.5 py-0 text-[10px]"
+                              title="Duplicate this sequence (a copy you can rename and edit)"
+                              disabled={(tsEdit?.length ?? 0) >= 8}
+                              onClick={() => {
+                                const id = `custom-${Date.now().toString(36)}`;
+                                setTsEdit((prev) => {
+                                  const src = (prev ?? []).find((s) => s.id === seq.id);
+                                  if (!src) return prev ?? [];
+                                  const copy = {
+                                    ...structuredClone(src),
+                                    id,
+                                    name: `${src.name} (copy)`,
+                                    enabled: false,
+                                  };
+                                  return [...(prev ?? []), copy];
+                                });
+                                setTsSelectedId(id);
+                              }}
+                            >
+                              Duplicate
+                            </button>
+                            <button
+                              type="button"
                               className="btn btn-danger px-1.5 py-0 text-[10px]"
                               title="Remove this sequence (applies on Save & publish)"
                               onClick={() =>
