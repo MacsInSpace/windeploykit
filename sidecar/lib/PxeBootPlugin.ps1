@@ -8403,6 +8403,52 @@ function Ensure-AppPxeBootMacOsImageLibraryShare {
     $u = $cred.User
     $p = $cred.Pass
     $rootEsc = $Root -replace "'", "'\''"
+
+    # Fast path. The root script below re-mints the account, re-tests SMB auth and
+    # removes/re-adds the share EVERY time - about 11 of the 17 seconds a Start took
+    # (Craig, 2026-08-23: "IPC: StartPxeBootServices ok +17017ms SLOW", and because the
+    # dispatcher is single-threaded every panel he clicked queued behind it). When the
+    # share already points at this root and the account still exists, there is nothing
+    # to do. Both checks are read-only and need no elevation, so a Start with
+    # everything in place costs ~50 ms instead of ~11 s.
+    # It is not skipped forever: the marker records when the heavy path last verified
+    # this share+account, and it runs again if that is missing or older than 7 days, or
+    # if either check fails.
+    $markerPath = Join-Path (Get-AppPxeBootStoreRoot) 'smb-share-verified.json'
+    $verifiedRecently = $false
+    try {
+        if (Test-Path -LiteralPath $markerPath) {
+            $m = Get-Content -LiteralPath $markerPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $sameShape = ([string]$m.root -eq [string]$Root) -and ([string]$m.user -eq [string]$u) -and ([string]$m.share -eq [string]$name)
+            if ($sameShape -and $m.verifiedAt) {
+                $verifiedRecently = ([DateTime]::UtcNow - [DateTime]::Parse([string]$m.verifiedAt).ToUniversalTime()).TotalDays -lt 7
+            }
+        }
+    } catch { $verifiedRecently = $false }
+    if ($verifiedRecently) {
+        $shareOk = $false
+        try {
+            $listing = (& /usr/sbin/sharing -l 2>$null | Out-String)
+            # sharing -l prints "name:<tab><share>" and "path:<tab><root>" per entry.
+            if ($listing -match "(?m)^name:\s+$([regex]::Escape($name))\s*$") {
+                foreach ($block in ($listing -split '(?m)^name:\s+')) {
+                    if ($block -match "^$([regex]::Escape($name))\s") {
+                        $shareOk = $block -match "(?m)^path:\s+$([regex]::Escape($Root))\s*$"
+                        break
+                    }
+                }
+            }
+        } catch { $shareOk = $false }
+        $userOk = $false
+        try {
+            $null = & dscl . -read "/Users/$u" RecordName 2>$null
+            $userOk = ($LASTEXITCODE -eq 0)
+        } catch { $userOk = $false }
+        if ($shareOk -and $userOk) {
+            Write-SidecarLogVerbose "PXE boot: Deploy`$ share and throwaway account already in place - skipping the elevated re-provision"
+            return $true
+        }
+    }
     # PowerShell here-string: $u/$p/$name/$aa/$rootEsc interpolate; `$U etc are sh vars.
     # Verify-first, recreate-on-broken. The old re-run path (pwpolicy sethashtypes
     # + dscl -passwd on every start) was DESTRUCTIVE on macOS 26: pwpolicy silently
@@ -8466,6 +8512,12 @@ echo SM_SMB_OK
             Write-SidecarLog "PXE boot: WARNING - throwaway SMB account $u STILL fails local SMB auth after remediation; WinPE Deploy`$ mounts will fail (see AGENT_NOTES_WINPE_SMB_AUTH_MACOS.md)"
         }
         Write-SidecarLog "PXE boot: macOS SMB share $name -> $Root (read-only, guest off; auth WORKGROUP\$u)"
+        try {
+            (@{ root = $Root; user = $u; share = $name; verifiedAt = [DateTime]::UtcNow.ToString('o') } | ConvertTo-Json) |
+                Set-Content -LiteralPath $markerPath -Encoding UTF8
+        } catch {
+            Write-SidecarLogVerbose "PXE boot: could not record the SMB verification marker - $($_.Exception.Message)"
+        }
         return $true
     }
     Write-SidecarLog "PXE boot: macOS SMB share provisioning did not confirm - $out"
