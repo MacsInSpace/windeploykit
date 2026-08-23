@@ -124,12 +124,10 @@ function Get-AppPxeBootTaskSequenceDefaults {
     # expires in 180 days, so every Server sequence gets the conversion step. It is a
     # no-op on anything that is not an evaluation edition (see ServerEvalConversion.ps1,
     # which also records why the original hand-written version could not work).
-    if (Get-Command Get-AppServerEvalConversionStep -ErrorAction SilentlyContinue) {
-        foreach ($sequence in $defaults) {
-            if ([string]$sequence.kind -ne 'server') { continue }
-            $sequence.steps = @(@($sequence.steps) + (Get-AppServerEvalConversionStep))
-        }
-    }
+    # NB: the eval->licensed conversion is NOT a task-sequence step any more. The deploy
+    # client drops Convert-EvalEdition.ps1 + SetupComplete.cmd into the applied image for
+    # server sequences (see Sync-AppPxeBootTaskSequenceStore / the deploy client). Keeping
+    # it out of the unattend is what fixed the invalid-answer-file at specialize.
     $defaults
 }
 function Get-AppPxeBootTaskSequenceDefaultId {
@@ -550,10 +548,62 @@ function Get-AppPxeBootTsStepCommandLine {
     }
 }
 
+function Test-AppPxeBootTsIsEvalConversionStep {
+    # The eval->licensed conversion no longer rides in the unattend: it is a 9KB
+    # EncodedCommand, /Set-Edition is a servicing op that belongs at SetupComplete, and
+    # Z:\ is not mounted during specialize anyway. The deploy client writes
+    # Convert-EvalEdition.ps1 + SetupComplete.cmd into the image instead. Any such step
+    # already saved in a store is skipped here so it never reaches the answer file
+    # (Craig, 2026-08-23: "answer file is invalid for [specialize]").
+    param($Step)
+    if (-not $Step) { return $false }
+    # Get-AppPxeBootTsProp, not $Step.command: a reg step has no command property and a
+    # bare read throws under StrictMode.
+    $cmd = [string](Get-AppPxeBootTsProp -Item $Step -Name 'command')
+    return ($cmd -like '*Convert-EvalEdition.ps1*')
+}
+
+function Get-AppPxeBootTsFirstBootScript {
+    <#
+    .SYNOPSIS
+        The sequence's reg/cmd/pwsh steps as a batch that runs from SetupComplete.cmd -
+        NOT baked into the unattend. Empty when the sequence has no steps.
+    .NOTES
+        Craig, 2026-08-23: "move any/all commands/regkeys in the unattend to the server
+        from the library." The answer file keeps only what an unattend is FOR - identity,
+        locale, OOBE, the local account, domain join, static IP - and every command/reg
+        step is applied by this script instead. It runs as SYSTEM after setup, before
+        anyone logs on (the standard place for post-install config), logs to
+        C:\Windows\Setup\Scripts\firstboot.log, and never stops on a failing step.
+        The eval-conversion step is excluded here - it is its own Convert-EvalEdition.ps1.
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+    $steps = @(@($Sequence.steps) | Where-Object { -not (Test-AppPxeBootTsIsEvalConversionStep -Step $_) })
+    if ($steps.Count -eq 0) { return '' }
+    $lines = [System.Collections.Generic.List[string]]::new()
+    [void]$lines.Add('@echo off')
+    [void]$lines.Add('rem WinDeployKit first-boot steps - run from SetupComplete.cmd as SYSTEM.')
+    [void]$lines.Add('set "LOG=%SystemRoot%\Setup\Scripts\firstboot.log"')
+    [void]$lines.Add('echo %DATE% %TIME% first-boot steps start>>"%LOG%"')
+    $n = 0
+    foreach ($step in $steps) {
+        $n++
+        $desc = [string](Get-AppPxeBootTsProp -Item $step -Name 'description')
+        if (-not $desc) { $desc = "Step $n" }
+        # A one-line echo of the step name, then the step itself, both logged. The step
+        # line is the same one the unattend used to carry (reg/cmd/pwsh/encoded).
+        [void]$lines.Add("echo %DATE% %TIME% [$n] $($desc -replace '[<>|&%]', ' ')>>`"%LOG%`"")
+        [void]$lines.Add((Get-AppPxeBootTsStepCommandLine -Step $step) + ' >>"%LOG%" 2>&1')
+    }
+    [void]$lines.Add('echo %DATE% %TIME% first-boot steps done>>"%LOG%"')
+    ($lines -join "`r`n") + "`r`n"
+}
+
 function Get-AppPxeBootTsSpecializeRunSync {
     # The sequence's ordered steps as a specialize RunSynchronous component.
     # Empty steps list -> no component at all.
     param([object[]]$Steps)
+    $Steps = @($Steps | Where-Object { -not (Test-AppPxeBootTsIsEvalConversionStep -Step $_) })
     if (-not $Steps -or $Steps.Count -eq 0) { return '' }
     $cmds = ''
     for ($i = 0; $i -lt $Steps.Count; $i++) {
@@ -955,10 +1005,11 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     $staticIp = ((& $get 'network' 'dhcp') -eq 'static')
     $joinDomainName = & $get 'joinDomain' ''
     $joining = -not [string]::IsNullOrWhiteSpace($joinDomainName)
-    # Empty default, NOT the role GVLK: an unrequested build-mismatched key breaks the
-    # unattend, and licensing is the eval-conversion step's job. A key the user picks
-    # from the dropdown is still honoured.
-    $productKey = & $get 'productKey' ''
+    # Server licensing is convert-eval.ps1's job (DISM /Set-Edition with a build-matched
+    # GVLK, and the ONLY way on an evaluation image - a key in specialize, even a
+    # build-matched GVLK, makes Setup reject the answer file on eval media). So a server
+    # unattend never carries a key. A client key is emitted only when explicitly set.
+    $productKey = if ($role -eq 'server') { '' } else { & $get 'productKey' '' }
 
     # --- Static-IP section -------------------------------------------------------
     $dnsComponent = ''
@@ -986,7 +1037,10 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     # Admin-group block is emitted whenever we are joining a domain and the
     # sequence actually lists groups (TODO(Site Profile): per-domain group policy).
     $centralJoin = $joining -and @($rec.adminGroups).Count -gt 0
-    $specialize = (Get-AppPxeBootTsSpecializeRunSync -Steps @($rec.steps)) + $dnsComponent + (Get-AppPxeBootTsIntlSpecialize) + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey) + $ipComponent + $joinComponent
+    # Steps (reg/cmd/pwsh) are NOT in the unattend any more - they run from
+    # SetupComplete.cmd via <id>.firstboot.cmd, dropped into the image by the deploy
+    # client. The answer file keeps only identity/locale/account/join/IP.
+    $specialize = $dnsComponent + (Get-AppPxeBootTsIntlSpecialize) + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey) + $ipComponent + $joinComponent
     $localAccount = Get-AppPxeBootTsLocalAccountConfig -Sequence $rec
     $localAccountPw = Resolve-AppPxeBootTsLocalAccountPassword -Account $localAccount
     # The {{LocalAdminPw}} token is only worth emitting if something will fill it.
@@ -1154,6 +1208,7 @@ function Sync-AppPxeBootTaskSequenceStore {
         $envLines = [System.Collections.Generic.List[string]]::new()
         [void]$envLines.Add("TS_ID=$($rec.id)")
         [void]$envLines.Add("TS_NAME=$($rec.name)")
+        [void]$envLines.Add("TS_KIND=$($rec.kind)")
         [void]$envLines.Add("TS_UNATTEND=$($rec.id).xml")
         if ($row.image -and -not [bool]$row.image['missing']) {
             [void]$envLines.Add("TS_IMAGE=$($row.image.sharePath)")
@@ -1168,12 +1223,40 @@ function Sync-AppPxeBootTaskSequenceStore {
             [System.IO.File]::WriteAllText($envFile, $envBody, (New-Object System.Text.UTF8Encoding $false))
         }
         [void]$keep.Add("$($rec.id).env")
+
+        # <id>.firstboot.cmd - the sequence's steps, run from SetupComplete by the client.
+        $firstBoot = Get-AppPxeBootTsFirstBootScript -Sequence $rec
+        $fbFile = Join-Path $dir "$($rec.id).firstboot.cmd"
+        if ($firstBoot) {
+            $haveFb = if (Test-Path -LiteralPath $fbFile) { Get-Content -LiteralPath $fbFile -Raw -ErrorAction SilentlyContinue } else { $null }
+            if ($haveFb -ne $firstBoot) {
+                [System.IO.File]::WriteAllText($fbFile, $firstBoot, (New-Object System.Text.UTF8Encoding $false))
+            }
+            [void]$keep.Add("$($rec.id).firstboot.cmd")
+        }
     }
-    foreach ($pattern in @('*.xml', '*.env')) {
+    foreach ($pattern in @('*.xml', '*.env', '*.firstboot.cmd')) {
         foreach ($existing in @(Get-ChildItem -LiteralPath $dir -File -Filter $pattern -ErrorAction SilentlyContinue)) {
             if (-not $keep.Contains($existing.Name)) {
                 Remove-Item -LiteralPath $existing.FullName -Force -ErrorAction SilentlyContinue
             }
+        }
+    }
+
+    # convert-eval.ps1 - the server eval->licensed script the deploy client copies into
+    # C:\Windows\Setup\Scripts on a server deploy (it no-ops on a non-evaluation image).
+    # Written here, once, so it rides the same Deploy$ share as the sequences.
+    if (Get-Command Get-AppServerEvalConversionPayload -ErrorAction SilentlyContinue) {
+        try {
+            $convFile = Join-Path $dir 'convert-eval.ps1'
+            $convBody = ((Get-AppServerEvalConversionPayload) -replace "`r`n", "`n") -replace "`n", "`r`n"
+            $haveConv = if (Test-Path -LiteralPath $convFile) { Get-Content -LiteralPath $convFile -Raw -ErrorAction SilentlyContinue } else { $null }
+            if ($haveConv -ne $convBody) {
+                [System.IO.File]::WriteAllText($convFile, $convBody, (New-Object System.Text.UTF8Encoding $false))
+            }
+            [void]$keep.Add('convert-eval.ps1')
+        } catch {
+            Write-SidecarLogVerbose "PXE boot: convert-eval.ps1 publish failed - $($_.Exception.Message)"
         }
     }
 

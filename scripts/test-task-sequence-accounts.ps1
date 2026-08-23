@@ -167,10 +167,30 @@ Test-Case 'A pwshEncoded step survives a save' {
     Assert-True ([string]$rec.steps[0].type -eq 'pwshEncoded') "type came back as '$($rec.steps[0].type)'"
     Assert-True ([string]$rec.steps[0].command -eq 'Write-Host hello') 'the script body was lost'
 }
-Test-Case 'The seeded Server sequence keeps its conversion step through a save' {
+Test-Case 'The seeded Server sequence carries no eval-conversion step (it moved out of the unattend)' {
+    # 2026-08-23: the eval->licensed conversion is no longer a task-sequence step / a
+    # 9KB EncodedCommand in the unattend (that made Setup reject the answer file at
+    # specialize). It is convert-eval.ps1 + SetupComplete, installed into the image by
+    # the deploy client. The seed must NOT re-add it as a step.
     $server = @(@(Get-AppPxeBootTaskSequenceDefaults) | Where-Object { $_.kind -eq 'server' })[0]
     $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $server
-    Assert-True (@(@($rec.steps) | Where-Object { [string]$_.type -eq 'pwshEncoded' }).Count -eq 1) 'the evaluation conversion step was dropped on save'
+    foreach ($s in @($rec.steps)) {
+        Assert-True (-not (Test-AppPxeBootTsIsEvalConversionStep -Step $s)) 'the seed still injects the eval-conversion step'
+    }
+}
+Test-Case 'A server unattend has no RunSynchronous and no ProductKey; the conversion is a separate script' {
+    $server = @(@(Get-AppPxeBootTaskSequenceDefaults) | Where-Object { $_.kind -eq 'server' })[0]
+    $xml = Build-AppPxeBootTaskSequenceUnattendXml -Sequence $server
+    Assert-True (([regex]::Matches($xml, 'RunSynchronous')).Count -eq 0) 'steps are still baked into the unattend'
+    Assert-True (([regex]::Matches($xml, 'EncodedCommand')).Count -eq 0) 'an EncodedCommand is still in the unattend'
+    Assert-True (([regex]::Matches($xml, '<ProductKey>')).Count -eq 0) 'a server unattend must carry no product key (conversion licenses it)'
+    # The conversion script itself is still produced, and it is real PowerShell.
+    $payload = Get-AppServerEvalConversionPayload
+    Assert-True ($payload -match '(?i)Set-Edition') 'convert-eval payload lost its /Set-Edition call'
+    # And the first-boot script carries the ordinary steps instead.
+    $fb = Get-AppPxeBootTsFirstBootScript -Sequence (ConvertTo-AppPxeBootTaskSequenceRecord -Item $server)
+    Assert-True ($fb -match '(?i)reg add') 'the first-boot script lost the reg steps'
+    Assert-True (-not ($fb -match '(?i)Convert-EvalEdition.ps1')) 'the eval conversion leaked into the first-boot steps'
 }
 
 Write-Host ''

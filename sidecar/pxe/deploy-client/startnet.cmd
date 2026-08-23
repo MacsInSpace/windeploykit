@@ -132,12 +132,14 @@ set "TS_IMAGE="
 set "TS_INDEX="
 set "TS_UNATTEND="
 set "TS_AUTOPREP="
+set "TS_KIND="
 for /f "usebackq tokens=1,* delims==" %%K in ("Z:\TaskSequences\%TSID%.env") do (
     if /i "%%K"=="TS_NAME"     set "TS_NAME=%%L"
     if /i "%%K"=="TS_IMAGE"    set "TS_IMAGE=%%L"
     if /i "%%K"=="TS_INDEX"    set "TS_INDEX=%%L"
     if /i "%%K"=="TS_UNATTEND" set "TS_UNATTEND=%%L"
     if /i "%%K"=="TS_AUTOPREP" set "TS_AUTOPREP=%%L"
+    if /i "%%K"=="TS_KIND"     set "TS_KIND=%%L"
 )
 call :log "Task sequence: %TS_NAME% (%TSID%)"
 
@@ -262,6 +264,32 @@ if defined TS_UNATTEND (
         )
     ) else (
         call :log "WARNING: %TS_UNATTEND% is not on the share - Windows will boot to plain OOBE."
+    )
+)
+
+rem --- first-boot steps + eval conversion (run from SetupComplete, not the unattend) ---
+rem The reg/cmd steps and the server eval->licensed conversion are scripts on the share,
+rem copied into the image here and chained from SetupComplete.cmd (SYSTEM, after setup,
+rem before logon). Keeping them out of the unattend is what stopped Setup rejecting the
+rem answer file at specialize (Craig, 2026-08-23).
+set "SCR=%APPLYDIR%Windows\Setup\Scripts"
+set "SETUPCOMPLETE=%SCR%\SetupComplete.cmd"
+set "NEEDSC="
+if exist "Z:\TaskSequences\%TSID%.firstboot.cmd" set "NEEDSC=1"
+if /i "%TS_KIND%"=="server" if exist "Z:\TaskSequences\convert-eval.ps1" set "NEEDSC=1"
+if defined NEEDSC (
+    if not exist "%SCR%" md "%SCR%" >nul 2>&1
+    rem SetupComplete.cmd runs each helper from its own folder (%~dp0 = ...\Setup\Scripts).
+    > "%SETUPCOMPLETE%" echo @echo off
+    if exist "Z:\TaskSequences\%TSID%.firstboot.cmd" (
+        copy /y "Z:\TaskSequences\%TSID%.firstboot.cmd" "%SCR%\%TSID%.firstboot.cmd" >nul
+        >>"%SETUPCOMPLETE%" echo if exist "%%~dp0%TSID%.firstboot.cmd" call "%%~dp0%TSID%.firstboot.cmd"
+        call :log "First-boot steps staged (%TSID%.firstboot.cmd -> Setup\Scripts)"
+    )
+    if /i "%TS_KIND%"=="server" if exist "Z:\TaskSequences\convert-eval.ps1" (
+        copy /y "Z:\TaskSequences\convert-eval.ps1" "%SCR%\Convert-EvalEdition.ps1" >nul
+        >>"%SETUPCOMPLETE%" echo if exist "%%~dp0Convert-EvalEdition.ps1" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%%~dp0Convert-EvalEdition.ps1"
+        call :log "Eval->licensed conversion staged (Convert-EvalEdition.ps1 -> Setup\Scripts)"
     )
 )
 
