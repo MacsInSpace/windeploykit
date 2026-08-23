@@ -572,11 +572,16 @@ export interface TaskSequenceLibraryLists {
 
 /** A secret in the shared vault - name and metadata only; values never leave the sidecar. */
 export interface VaultSecretSummary {
+  /** Storage key. Derived from the label - plumbing, not something a person types. */
   name: string;
   type: string;
   updatedAt?: string;
   createdBy?: string;
   note?: string;
+  /** What menus show. Falls back to the storage key for entries saved before labels. */
+  label?: string;
+  fullName?: string;
+  userName?: string;
 }
 
 export interface VaultSecretsResponse {

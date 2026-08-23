@@ -140,27 +140,54 @@ function Handle-ListVaultSecrets {
 }
 
 function Handle-SetVaultSecret {
+    <#
+    .SYNOPSIS
+        Store a credential (or, for internal callers, a bare secret) in the shared vault.
+    .NOTES
+        The UI asks for Label / Full name / Username / Password (Craig, 2026-08-23:
+        "Name v Username are confusing... 'Value' means nothing and wheres the password
+        field?"). The storage key is DERIVED from the label so nobody has to invent one,
+        and the label is what every picker shows - the key is plumbing.
+    #>
     param([int]$Id, $Params)
+    $label = ([string](Get-AppSidecarParam -Params $Params -Name 'label')).Trim()
     $name = ([string](Get-AppSidecarParam -Params $Params -Name 'name')).Trim()
-    if ([string]::IsNullOrWhiteSpace($name)) { throw 'SetVaultSecret: name required.' }
-    # Vault names travel into file names and menus; keep them boring.
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        # Derive a storage key from the label: lower case, non-word runs to a dash.
+        if ([string]::IsNullOrWhiteSpace($label)) { throw 'SetVaultSecret: a label is required.' }
+        $slug = ($label.ToLowerInvariant() -replace '[^a-z0-9]+', '-').Trim('-')
+        if ($slug.Length -gt 96) { $slug = $slug.Substring(0, 96).Trim('-') }
+        if ([string]::IsNullOrWhiteSpace($slug)) { throw 'SetVaultSecret: that label has no letters or numbers in it.' }
+        $name = $slug
+        # Do not silently overwrite a different credential that happens to slug the same.
+        $existingNames = @(Get-AppVaultSecretList | ForEach-Object { [string]$_.name })
+        if ($existingNames -contains $name) {
+            $n = 2
+            while ($existingNames -contains "$name-$n") { $n++ }
+            $name = "$name-$n"
+        }
+    }
     if ($name -notmatch '^[A-Za-z0-9._-]{1,128}$') {
         throw 'SetVaultSecret: use letters, numbers, dot, dash or underscore (max 128).'
     }
     $secret = [string](Get-AppSidecarParam -Params $Params -Name 'secret')
-    if ([string]::IsNullOrEmpty($secret)) { throw 'SetVaultSecret: secret required.' }
+    if ([string]::IsNullOrEmpty($secret)) { throw 'SetVaultSecret: a password is required.' }
     $userName = ([string](Get-AppSidecarParam -Params $Params -Name 'userName')).Trim()
-    $note = ([string](Get-AppSidecarParam -Params $Params -Name 'note')).Trim()
+    if ($userName -match '\s') { throw 'SetVaultSecret: a user name cannot contain spaces.' }
+    $fullName = ([string](Get-AppSidecarParam -Params $Params -Name 'fullName')).Trim()
 
-    # A user name makes it a credential (domain joins need both halves); otherwise a
-    # plain secret. Get-AppVaultCredential reads either shape back.
+    # A user name makes it a PSCredential (both halves), which is what a domain join and
+    # a local account need. Without one it is a bare secret - still supported for
+    # internal callers, but the editor always sends a user name.
     $value = if ($userName) {
         New-Object pscredential($userName, (ConvertTo-SecureString -String $secret -AsPlainText -Force))
     } else {
         ConvertTo-SecureString -String $secret -AsPlainText -Force
     }
     $meta = @{}
-    if ($note) { $meta['note'] = $note }
+    if ($label) { $meta['label'] = $label }
+    if ($fullName) { $meta['fullName'] = $fullName }
+    if ($userName) { $meta['userName'] = $userName }
     $written = Set-AppVaultSecret -Name $name -Secret $value -Metadata $meta
     if (-not $written) { throw 'SetVaultSecret: the secret vault is not available.' }
     Write-SidecarLog "Secret vault: wrote '$name'$(if ($userName) { " (credential for $userName)" })"

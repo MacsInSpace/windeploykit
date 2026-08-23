@@ -21,7 +21,7 @@ interface VaultEditorOverlayProps {
   onChange?: () => void;
   /** When set, the overlay offers "Use" on each row and hands the name back. */
   onPick?: (name: string) => void;
-  /** Pre-fills the name field - used by "create the secret this field needs". */
+  /** Pre-fills the label - used by "create the credential this field needs". */
   suggestedName?: string;
 }
 
@@ -30,10 +30,14 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
   const [vaultReady, setVaultReady] = useState(true);
   const [vaultError, setVaultError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [name, setName] = useState(suggestedName ?? "");
+  // Label / Full name / Username / Password. The storage key is derived from the
+  // label by the sidecar - nobody should have to invent one (Craig, 2026-08-23).
+  // `replaceKey` is set only when replacing an existing entry's password.
+  const [label, setLabel] = useState(suggestedName ?? "");
+  const [fullName, setFullName] = useState("");
   const [userName, setUserName] = useState("");
   const [secret, setSecret] = useState("");
-  const [note, setNote] = useState("");
+  const [replaceKey, setReplaceKey] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const apply = useCallback(
@@ -55,34 +59,37 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
 
   useEffect(() => {
     if (!open) return;
-    setName(suggestedName ?? "");
+    setLabel(suggestedName ?? "");
+    setReplaceKey("");
     setConfirmDelete(null);
     void load();
   }, [open, suggestedName, load]);
 
   const save = useCallback(async () => {
-    if (!name.trim() || !secret) return;
+    if (!label.trim() || !userName.trim() || !secret) return;
     setBusy(true);
     try {
       apply(
         await sidecar.invoke<VaultSecretsResponse>("SetVaultSecret", {
-          name: name.trim(),
-          secret,
+          // name only when replacing: otherwise the sidecar derives the key from the label.
+          name: replaceKey,
+          label: label.trim(),
+          fullName: fullName.trim(),
           userName: userName.trim(),
-          note: note.trim(),
+          secret,
         }),
       );
-      toast.success("Vault", `${name.trim()} saved.`);
-      // Never keep the typed secret around once it is in the vault.
+      toast.success("Vault", `${label.trim()} saved.`);
+      // Never keep the typed password around once it is in the vault.
       setSecret("");
-      setNote("");
+      setReplaceKey("");
       onChange?.();
     } catch (e) {
       toast.error("Vault", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [name, secret, userName, note, apply, onChange]);
+  }, [label, fullName, userName, secret, replaceKey, apply, onChange]);
 
   const remove = useCallback(
     async (target: string) => {
@@ -101,13 +108,13 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
     [apply, onChange],
   );
 
-  const existing = secrets.some((s) => s.name === name.trim());
+  const existing = secrets.some((s) => (s.label || s.name) === label.trim());
 
   return (
     <Modal
       open={open}
       title="Vault"
-      subtitle="Secrets this machine keeps. Values are never shown - only replaced."
+      subtitle="Credentials this machine keeps. Passwords are never shown - only replaced."
       onClose={onClose}
       lock={busy}
       width={640}
@@ -126,7 +133,7 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
 
         <section>
           <div className="mono mb-2 text-[9px] font-medium uppercase" style={{ color: "var(--text3)", letterSpacing: "0.15em" }}>
-            Stored secrets ({secrets.length})
+            Stored ({secrets.length})
           </div>
           {secrets.length === 0 ? (
             <p className="text-[11px]" style={{ color: "var(--text2)" }}>
@@ -140,10 +147,16 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
                   className="flex items-center gap-2 rounded border px-2 py-1"
                   style={{ borderColor: "var(--border)" }}
                 >
-                  <span className="mono flex-1 truncate text-[11px]" title={s.note || undefined}>
-                    {s.name}
+                  <span className="flex-1 truncate text-[11px]" title={`${s.name}${s.userName ? ` - ${s.userName}` : ""}`}>
+                    {s.label || s.name}
+                    {s.userName ? (
+                      <span className="mono ml-1.5 text-[10px]" style={{ color: "var(--text3)" }}>
+                        {s.userName}
+                      </span>
+                    ) : null}
                   </span>
                   <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                    {s.fullName ? `${s.fullName} - ` : ""}
                     {s.type === "PSCredential" ? "credential" : "secret"}
                     {s.updatedAt ? ` - ${s.updatedAt}` : ""}
                   </span>
@@ -164,8 +177,14 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
                     type="button"
                     className="btn px-1.5 py-0 text-[10px]"
                     disabled={busy}
-                    onClick={() => setName(s.name)}
-                    title="Load the name into the form below to replace its value"
+                    onClick={() => {
+                      setReplaceKey(s.name);
+                      setLabel(s.label || s.name);
+                      setFullName(s.fullName ?? "");
+                      setUserName(s.userName ?? "");
+                      setSecret("");
+                    }}
+                    title="Load this entry into the form below to replace its password"
                   >
                     Replace
                   </button>
@@ -196,47 +215,61 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
 
         <section>
           <div className="mono mb-2 text-[9px] font-medium uppercase" style={{ color: "var(--text3)", letterSpacing: "0.15em" }}>
-            {existing ? "Replace a secret" : "Add a secret"}
+            {replaceKey || existing ? "Replace a credential" : "Add a credential"}
           </div>
           <div className="flex flex-col gap-1.5">
             <input
-              className="input-box mono h-[26px] text-[11px]"
-              placeholder="Name (letters, numbers, dot, dash, underscore)"
-              value={name}
-              spellCheck={false}
-              onChange={(e) => setName(e.target.value)}
+              className="input-box h-[26px] text-[11px]"
+              placeholder="Label - what you will see in the menus, e.g. Local admin (imaging)"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+            <input
+              className="input-box h-[26px] text-[11px]"
+              placeholder="Full name - e.g. Local Admin"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
             />
             <input
               className="input-box mono h-[26px] text-[11px]"
-              placeholder="User name - optional, e.g. CORP\deployadmin (makes it a credential)"
+              placeholder="Username - no spaces; domain optional, e.g. CORP\\deployadmin"
               value={userName}
               spellCheck={false}
-              onChange={(e) => setUserName(e.target.value)}
+              onChange={(e) => setUserName(e.target.value.replace(/\s+/g, ""))}
             />
             <input
               type="password"
               className="input-box h-[26px] text-[11px]"
-              placeholder={existing ? "New value (replaces the stored one)" : "Value"}
+              placeholder={replaceKey ? "New password (replaces the stored one)" : "Password"}
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
-            />
-            <input
-              className="input-box h-[26px] text-[11px]"
-              placeholder="Note - optional, e.g. what this is for"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
             />
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 className="btn btn-primary px-2 py-0.5 text-[11px]"
-                disabled={busy || !vaultReady || !name.trim() || !secret}
+                disabled={busy || !vaultReady || !label.trim() || !userName.trim() || !secret}
                 onClick={() => void save()}
               >
-                {existing ? "Replace" : "Add"}
+                {replaceKey ? "Replace" : "Add"}
               </button>
+              {replaceKey ? (
+                <button
+                  type="button"
+                  className="btn px-2 py-0.5 text-[11px]"
+                  onClick={() => {
+                    setReplaceKey("");
+                    setLabel("");
+                    setFullName("");
+                    setUserName("");
+                    setSecret("");
+                  }}
+                >
+                  Cancel
+                </button>
+              ) : null}
               <span className="text-[10px]" style={{ color: "var(--text3)" }}>
-                A user name makes it a credential (both halves), which is what a domain join needs.
+                {replaceKey ? `Replacing ${replaceKey}` : "Stored as a credential - both halves, which is what a join or a local account needs."}
               </span>
             </div>
           </div>

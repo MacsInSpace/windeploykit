@@ -294,6 +294,11 @@ function Get-AppVaultSecretList {
                 updatedAt = [string]$meta['updatedAt']
                 createdBy = [string]$meta['createdBy']
                 note      = [string]$meta['note']
+                # What a person should see in a menu. Older entries have no label, so
+                # fall back to the storage key rather than showing nothing.
+                label     = if ($meta['label']) { [string]$meta['label'] } else { [string]$info.Name }
+                fullName  = [string]$meta['fullName']
+                userName  = [string]$meta['userName']
             })
         }
     } catch {

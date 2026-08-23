@@ -40,6 +40,7 @@ import type {
   TaskSequenceLibraryEntry,
   TaskSequenceLibraryLists,
   VaultSecretsResponse,
+  VaultSecretSummary,
   PxeBootWimEntry,
   PxeBootWimLibraryResponse,
   SessionState,
@@ -408,13 +409,13 @@ export function PxeWorkspace({
   // and has not typed one yet.
   const [tsJoinOptIn, setTsJoinOptIn] = useState<Set<string>>(new Set());
   // Vault secrets offered as join credentials, and the editor that manages them.
-  const [vaultSecretNames, setVaultSecretNames] = useState<string[]>([]);
+  const [vaultSecrets, setVaultSecrets] = useState<VaultSecretSummary[]>([]);
   const [vaultEditor, setVaultEditor] = useState<{ open: boolean; seqId?: string; target?: "join" | "account" }>({ open: false });
 
   const loadVaultSecrets = useCallback(async () => {
     try {
       const data = await sidecar.invoke<VaultSecretsResponse>("ListVaultSecrets");
-      setVaultSecretNames((data?.secrets ?? []).map((s) => s.name));
+      setVaultSecrets(data?.secrets ?? []);
     } catch {
       /* vault may be unavailable - the picker just offers deploy-time fill */
     }
@@ -2662,11 +2663,12 @@ export function PxeWorkspace({
                                             onChange={(e) => setField(e.target.value)}
                                           >
                                             <option value="">Fill at deploy time</option>
-                                            {vaultSecretNames.length > 0 ? (
+                                            {vaultSecrets.length > 0 ? (
                                               <optgroup label="From the vault">
-                                                {vaultSecretNames.map((n) => (
-                                                  <option key={`vault:${n}`} value={`vault:${n}`}>
-                                                    {n}
+                                                {vaultSecrets.map((s) => (
+                                                  <option key={`vault:${s.name}`} value={`vault:${s.name}`}>
+                                                    {s.label || s.name}
+                                                    {s.userName ? ` - ${s.userName}` : ""}
                                                   </option>
                                                 ))}
                                               </optgroup>
@@ -3066,19 +3068,26 @@ export function PxeWorkspace({
                                   ) : mode === "vault" ? (
                                     <div className="mt-1.5 flex flex-col gap-1.5">
                                       <div className="flex flex-wrap items-center gap-1.5">
-                                        <input
+                                        <select
                                           className="input-box h-[24px] min-w-[16rem] text-[11px]"
-                                          placeholder="Vault credential (user + password)"
-                                          list={`acctvault-${seq.id}`}
                                           style={tsFieldOutline(seq.id, "account:vaultSecret")}
                                           value={account.vaultSecret ?? ""}
                                           onChange={(e) => patchAccount({ vaultSecret: e.target.value })}
-                                        />
-                                        <datalist id={`acctvault-${seq.id}`}>
-                                          {vaultSecretNames.map((n) => (
-                                            <option key={n} value={n} />
+                                        >
+                                          <option value="">Choose a vault credential...</option>
+                                          {vaultSecrets.map((s) => (
+                                            <option key={s.name} value={s.name}>
+                                              {s.label || s.name}
+                                              {s.userName ? ` - ${s.userName}` : ""}
+                                            </option>
                                           ))}
-                                        </datalist>
+                                          {account.vaultSecret &&
+                                          !vaultSecrets.some((s) => s.name === account.vaultSecret) ? (
+                                            <option value={account.vaultSecret}>
+                                              {account.vaultSecret} (not in the vault)
+                                            </option>
+                                          ) : null}
+                                        </select>
                                         <button
                                           type="button"
                                           className="btn px-1.5 py-0 text-[10px]"
