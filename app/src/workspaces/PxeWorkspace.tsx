@@ -32,6 +32,7 @@ import type {
   PxeBootNetworkAdapter,
   PxeBootPluginConfigResponse,
   PxeBootPluginStatus,
+  PxeBootBrandingStatus,
   PxeBootInstallImageEntry,
   PxeBootTaskSequence,
   PxeBootTaskSequenceStep,
@@ -360,6 +361,36 @@ export function PxeWorkspace({
   // "Read editions" button asks the sidecar to mount and read what it has not seen.
   const [installImages, setInstallImages] = useState<PxeBootInstallImageEntry[]>([]);
   const [installImagesBusy, setInstallImagesBusy] = useState(false);
+  // Boot WIM customisation: the WinPE background, injected as an overlay at boot.
+  const [branding, setBranding] = useState<PxeBootBrandingStatus | null>(null);
+  const loadBranding = useCallback(async () => {
+    try {
+      setBranding(await sidecar.invoke<PxeBootBrandingStatus>("GetPxeBootBrandingStatus"));
+    } catch {
+      /* panel still works without it */
+    }
+  }, []);
+  const pickWinpeBackground = useCallback(async () => {
+    const picked = await open({
+      multiple: false,
+      filters: [{ name: "Picture", extensions: ["jpg", "jpeg", "png", "bmp"] }],
+    });
+    if (!picked || Array.isArray(picked)) return;
+    try {
+      setBranding(await sidecar.invoke<PxeBootBrandingStatus>("SetPxeBootBrandingImage", { sourcePath: picked }));
+      toast.success(PLUGIN_TITLE, "Background set - it applies on the next boot.");
+    } catch (e) {
+      toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+  const clearWinpeBackground = useCallback(async () => {
+    try {
+      setBranding(await sidecar.invoke<PxeBootBrandingStatus>("ClearPxeBootBrandingImage"));
+      toast.success(PLUGIN_TITLE, "Background cleared.");
+    } catch (e) {
+      toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
+    }
+  }, []);
   // Domain join is an optional addition, not part of every sequence: a sequence is
   // "joining" when it has a domain set, or when the operator has just ticked the box
   // and has not typed one yet.
@@ -379,7 +410,8 @@ export function PxeWorkspace({
 
   useEffect(() => {
     void loadVaultSecrets();
-  }, [loadVaultSecrets]);
+    void loadBranding();
+  }, [loadVaultSecrets, loadBranding]);
 
   /** The library list that applies to a sequence: client sequences get the client list. */
   const libraryFor = useCallback(
@@ -2194,6 +2226,27 @@ export function PxeWorkspace({
                     Open WIM folder
                   </button>
                 </div>
+                <div
+                  className="mb-3 flex flex-wrap items-center gap-2 rounded-sm border px-2 py-1.5 text-[12px]"
+                  style={{ borderColor: "var(--border)" }}
+                >
+                  <span className="mono text-[10px] uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                    Background
+                  </span>
+                  <span style={{ color: "var(--text2)" }}>
+                    {branding?.winpeBackground?.present
+                      ? `Set (${Math.max(1, Math.round((branding.winpeBackground.sizeBytes ?? 0) / 1024))} KB)`
+                      : "None"}
+                  </span>
+                  <button className="btn ml-auto" type="button" onClick={() => void pickWinpeBackground()}>
+                    {branding?.winpeBackground?.present ? "Replace..." : "Set background..."}
+                  </button>
+                  {branding?.winpeBackground?.present ? (
+                    <button className="btn" type="button" onClick={() => void clearWinpeBackground()}>
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
                 {wims.length === 0 ? (
                   <p className="text-[12px]" style={{ color: "var(--text2)" }}>
                     No boot WIMs - use Add WIM... to import one.
@@ -2748,7 +2801,7 @@ export function PxeWorkspace({
                                         spellCheck={false}
                                         placeholder={
                                           key === "registeredOrg" || key === "registeredOwner"
-                                            ? "blank = default"
+                                            ? "optional"
                                             : key === "uiLanguage"
                                               ? `blank = ${tsPayload?.regionalDefaults?.uiLanguage ?? "host"}`
                                               : key === "inputLocale"

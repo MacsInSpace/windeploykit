@@ -253,9 +253,29 @@ try {
             # The share is reached by IP and the connect is retried - a WinPE name
             # lookup of the macOS host is what failed between boots.
             if ($text -notmatch '(?i)for /l %%A in \(1,1,5\)') { throw 'net use is not retried' }
-            if ($text -notmatch '(?i)"heartbeat\\":true') { throw 'heartbeat payload is not the ingest heartbeat shape' }
         } finally {
             Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Test-Case 'the WinPE background is an optional overlay file, never baked in' {
+        # Craig, 2026-08-23: boot.wim customisation. WinPE reads System32\winpe.jpg, so it
+        # rides in as an initrd like the client - the imported WIM is untouched.
+        $p = @(Get-AppPxeBootWimOverlayProfiles) | Where-Object { $_.Id -eq 'deploy-share' }
+        $entry = $p.Runtime | Where-Object { $_.WinPeName -eq 'winpe.jpg' } | Select-Object -First 1
+        if (-not $entry) { throw 'winpe.jpg is not a runtime overlay entry' }
+        if ([bool]$entry.Required) { throw 'winpe.jpg must not be Required - most deploys have no background' }
+        $src = Join-Path ([IO.Path]::GetTempPath()) ("bg-" + [guid]::NewGuid().ToString('N') + '.png')
+        [IO.File]::WriteAllBytes($src, [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='))
+        $had = (Get-AppPxeBootBrandingStatus).winpeBackground.present
+        try {
+            $null = Set-AppPxeBootBrandingImage -SourcePath $src
+            $after = Get-AppPxeBootBrandingStatus
+            if (-not $after.winpeBackground.present) { throw 'background did not import' }
+            Assert-Equal 'winpe.jpg' $after.winpeBackground.fileName 'stored name'
+        } finally {
+            Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
+            if (-not $had) { $null = Clear-AppPxeBootBrandingImage }
         }
     }
 

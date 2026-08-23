@@ -437,6 +437,33 @@ function Handle-ClearPxeBootLogTail {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-SetPxeBootBrandingImage {
+    <#
+    .SYNOPSIS
+        Import the WinPE background shown behind the deploy client. Injected as an
+        overlay at boot - the imported boot WIM is not modified.
+    #>
+    param([int]$Id, $Params)
+    $sourcePath = [string](Get-AppSidecarParam -Params $Params -Name 'sourcePath')
+    if ([string]::IsNullOrWhiteSpace($sourcePath)) { throw 'SetPxeBootBrandingImage: sourcePath required.' }
+    $data = Set-AppPxeBootBrandingImage -SourcePath $sourcePath
+    # Republish so it reaches the next boot without a service restart.
+    try { Write-AppPxeBootWimOverlayRuntimeAssets -LanIp (Get-AppPxeBootLanIp) | Out-Null } catch { }
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-ClearPxeBootBrandingImage {
+    param([int]$Id, $Params)
+    $data = Clear-AppPxeBootBrandingImage
+    try { Write-AppPxeBootWimOverlayRuntimeAssets -LanIp (Get-AppPxeBootLanIp) | Out-Null } catch { }
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-GetPxeBootBrandingStatus {
+    param([int]$Id, $Params)
+    Write-SidecarResponse -Id $Id -Data (Get-AppPxeBootBrandingStatus)
+}
+
 function Handle-ListPxeBootInstallImages {
     <#
     .SYNOPSIS

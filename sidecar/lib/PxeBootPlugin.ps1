@@ -1112,6 +1112,8 @@ function Get-AppPxeBootWimOverlayProfiles {
                 @{ ServedName = '7za.dll';  WinPeName = '7za.dll';  Required = $false }
                 @{ ServedName = '7zxa.dll'; WinPeName = '7zxa.dll'; Required = $false }
                 @{ ServedName = 'curl.exe'; WinPeName = 'curl.exe'; Required = $false }
+                # Optional WinPE wallpaper - present only when one has been imported.
+                @{ ServedName = 'winpe.jpg'; WinPeName = 'winpe.jpg'; Required = $false }
                 @{ ServedName = 'deploy.unc';  WinPeName = 'deploy.unc';  Required = $true }
                 @{ ServedName = 'deploy.cred'; WinPeName = 'deploy.cred'; Required = $false }
                 @{ ServedName = 'loghost';     WinPeName = 'deploy.loghost'; Required = $false }
@@ -3771,6 +3773,20 @@ function Write-AppPxeBootDeployOverlayFiles {
             Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
         }
     }
+    # WinPE wallpaper, when one has been imported (Boot Images -> customisation).
+    $bgSrc = Get-AppPxeBootWinPeBackgroundPath
+    $bgDst = Join-Path $Dir $script:AppPxeBootWinPeBackgroundName
+    if (Test-Path -LiteralPath $bgSrc) {
+        $s = Get-Item -LiteralPath $bgSrc
+        $d = Get-Item -LiteralPath $bgDst -ErrorAction SilentlyContinue
+        if (-not $d -or $d.Length -ne $s.Length -or $d.LastWriteTimeUtc -lt $s.LastWriteTimeUtc) {
+            Copy-Item -LiteralPath $bgSrc -Destination $bgDst -Force
+            Write-SidecarLog 'PXE boot: published the WinPE background (winpe.jpg)'
+        }
+    } elseif (Test-Path -LiteralPath $bgDst) {
+        Remove-Item -LiteralPath $bgDst -Force -ErrorAction SilentlyContinue
+    }
+
     if ((Test-AppPxeBootDeployClientInjectEnabled) -and -not (Test-Path -LiteralPath (Join-Path $Dir '7z.exe'))) {
         Write-SidecarLogVerbose 'PXE boot: deploy client tools (7z/curl) not found - .cab packs only, no live log'
     }
@@ -3879,6 +3895,109 @@ function Get-AppPxeBootWanIsoCatalogUrl {
 
 function Get-AppPxeBootSiteIsoCatalogMenuLabel {
     "$(Get-AppProductDisplayName) boot ISO catalog"
+}
+
+$script:AppPxeBootWinPeBackgroundName = 'winpe.jpg'
+
+function Get-AppPxeBootWinPeBackgroundPath {
+    # The WinPE wallpaper. WinPE shows %SystemRoot%\System32\winpe.jpg behind the
+    # deploy client, so this file is injected as an overlay initrd - the imported boot
+    # WIM is never modified (Craig, 2026-08-23: boot "image customisations").
+    Join-Path (Get-AppPxeBootLayoutPaths).brandingDir $script:AppPxeBootWinPeBackgroundName
+}
+
+function Convert-AppPxeBootImageFile {
+    <#
+    .SYNOPSIS
+        Copy $Source to $Destination, converting to jpeg/png when the extension differs.
+    .NOTES
+        macOS has sips built in; Windows has System.Drawing. Neither is downloaded. A
+        source already in the wanted format is just copied.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][ValidateSet('jpeg', 'png')][string]$Format
+    )
+    $srcExt = ([IO.Path]::GetExtension($Source)).ToLowerInvariant()
+    $wantExt = if ($Format -eq 'jpeg') { @('.jpg', '.jpeg') } else { @('.png') }
+    $dir = Split-Path -Parent $Destination
+    if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
+    if ($srcExt -in $wantExt) {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Force
+        return $true
+    }
+    if ($IsMacOS -or $IsDarwin) {
+        & sips -s format $Format $Source --out $Destination 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $Destination)) { return $true }
+        Write-SidecarLog "PXE boot: could not convert $([IO.Path]::GetFileName($Source)) to $Format (sips)"
+        return $false
+    }
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $img = [System.Drawing.Image]::FromFile($Source)
+        try {
+            $fmt = if ($Format -eq 'jpeg') { [System.Drawing.Imaging.ImageFormat]::Jpeg } else { [System.Drawing.Imaging.ImageFormat]::Png }
+            $img.Save($Destination, $fmt)
+        } finally { $img.Dispose() }
+        return (Test-Path -LiteralPath $Destination)
+    } catch {
+        Write-SidecarLog "PXE boot: could not convert to $Format - $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Set-AppPxeBootBrandingImage {
+    <#
+    .SYNOPSIS
+        Import the WinPE background for imported boot WIMs. Converted to jpg with tools
+        already on the machine (sips on macOS, System.Drawing on Windows) because that
+        is what WinPE reads.
+    .NOTES
+        Delivered as an overlay initrd, so the boot WIM itself is never modified - the
+        same mechanism as the deploy client (Craig, 2026-08-23: boot.wim customisation,
+        not iPXE).
+    #>
+    param([Parameter(Mandatory)][string]$SourcePath)
+    if (-not (Test-Path -LiteralPath $SourcePath)) { throw "PXE boot: picture not found - $SourcePath" }
+    $ext = ([IO.Path]::GetExtension($SourcePath)).ToLowerInvariant()
+    if ($ext -notin @('.jpg', '.jpeg', '.png', '.bmp')) {
+        throw 'PXE boot: use a .jpg, .png or .bmp picture.'
+    }
+    $paths = Get-AppPxeBootLayoutPaths
+    if (-not (Test-Path -LiteralPath $paths.brandingDir)) { $null = New-Item -Path $paths.brandingDir -ItemType Directory -Force }
+    $dest = Get-AppPxeBootWinPeBackgroundPath
+    if (-not (Convert-AppPxeBootImageFile -Source $SourcePath -Destination $dest -Format 'jpeg')) {
+        throw 'PXE boot: could not prepare the WinPE background (jpg conversion failed).'
+    }
+    Write-SidecarLog "PXE boot: WinPE background set from $([IO.Path]::GetFileName($SourcePath))"
+    Get-AppPxeBootBrandingStatus
+}
+
+function Clear-AppPxeBootBrandingImage {
+    param()
+    $paths = Get-AppPxeBootLayoutPaths
+    $p = Get-AppPxeBootWinPeBackgroundPath
+    if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+    # Drop the served copy too, so the next boot stops injecting it.
+    $served = Join-Path (Join-Path $paths.httpRoot 'deploy') $script:AppPxeBootWinPeBackgroundName
+    if (Test-Path -LiteralPath $served) { Remove-Item -LiteralPath $served -Force -ErrorAction SilentlyContinue }
+    Write-SidecarLog 'PXE boot: WinPE background cleared'
+    Get-AppPxeBootBrandingStatus
+}
+
+function Get-AppPxeBootBrandingStatus {
+    # What the Boot Images panel shows for the boot WIM background.
+    $winpe = Get-AppPxeBootWinPeBackgroundPath
+    $item = if (Test-Path -LiteralPath $winpe) { Get-Item -LiteralPath $winpe } else { $null }
+    @{
+        winpeBackground = @{
+            present   = [bool]$item
+            fileName  = if ($item) { [string]$item.Name } else { $null }
+            sizeBytes = if ($item) { [long]$item.Length } else { 0 }
+            updatedAt = if ($item) { $item.LastWriteTimeUtc.ToString('o') } else { $null }
+        }
+    }
 }
 
 function Get-AppPxeBootBrandingPictureFileName {

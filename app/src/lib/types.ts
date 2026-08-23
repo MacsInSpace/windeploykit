@@ -80,6 +80,9 @@ export type SidecarCommand =
   | "ImportPxeBootWimFromIso"
   | "ListPxeBootIsos"
   | "ListPxeBootInstallImages"
+  | "SetPxeBootBrandingImage"
+  | "ClearPxeBootBrandingImage"
+  | "GetPxeBootBrandingStatus"
   | "ListVaultSecrets"
   | "RemoveVaultSecret"
   | "SetVaultSecret"
@@ -638,6 +641,16 @@ export interface PxeBootTaskSequenceImage {
   editionName?: string;
   /** Set by the sidecar on a published row when the source is gone. */
   missing?: boolean;
+}
+
+/** Boot WIM customisation: the WinPE background injected at boot (WIM untouched). */
+export interface PxeBootBrandingStatus {
+  winpeBackground: {
+    present: boolean;
+    fileName?: string | null;
+    sizeBytes?: number;
+    updatedAt?: string | null;
+  };
 }
 
 export interface PxeBootTaskSequencesPayload {

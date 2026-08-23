@@ -717,16 +717,15 @@ function Get-AppPxeBootTsShellSpecialize {
         [AllowEmptyString()][string]$TimeZone = ''
     )
     $tz = if ([string]::IsNullOrWhiteSpace($TimeZone)) { (Get-AppPxeBootTsRegionalDefaults).timeZone } else { $TimeZone }
-    $org = if ([string]::IsNullOrWhiteSpace($RegisteredOrg)) { Get-AppPxeBootTsOrgName } else { $RegisteredOrg }
-    $owner = if ([string]::IsNullOrWhiteSpace($RegisteredOwner)) { Get-AppPxeBootTsOrgName } else { $RegisteredOwner }
+    # No fabricated default: an empty org/owner emits no element.
+    $orgLine = if (-not [string]::IsNullOrWhiteSpace($RegisteredOrg)) { "`n			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped $RegisteredOrg)</RegisteredOrganization>" } else { '' }
+    $ownerLine = if (-not [string]::IsNullOrWhiteSpace($RegisteredOwner)) { "`n			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped $RegisteredOwner)</RegisteredOwner>" } else { '' }
     $productKeyLine = if (-not [string]::IsNullOrWhiteSpace($ProductKey)) {
         "`n			<ProductKey>$(ConvertTo-AppPxeBootTsXmlEscaped $ProductKey)</ProductKey>"
     } else { '' }
     @"
 		<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-			<ComputerName>$ComputerName</ComputerName>$productKeyLine
-			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped $org)</RegisteredOrganization>
-			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped $owner)</RegisteredOwner>
+			<ComputerName>$ComputerName</ComputerName>$productKeyLine$orgLine$ownerLine
 			<TimeZone>$(ConvertTo-AppPxeBootTsXmlEscaped $tz)</TimeZone>
 		</component>
 "@
@@ -1095,8 +1094,8 @@ function Get-AppPxeBootTsOobeShell {
         [bool]$HideWireless = $true,
         [bool]$ExpressSettings = $true
     )
-    $org = if ([string]::IsNullOrWhiteSpace($RegisteredOrg)) { Get-AppPxeBootTsOrgName } else { $RegisteredOrg }
-    $owner = if ([string]::IsNullOrWhiteSpace($RegisteredOwner)) { Get-AppPxeBootTsOrgName } else { $RegisteredOwner }
+    $orgLine = if (-not [string]::IsNullOrWhiteSpace($RegisteredOrg)) { "			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped $RegisteredOrg)</RegisteredOrganization>`n" } else { '' }
+    $ownerLine = if (-not [string]::IsNullOrWhiteSpace($RegisteredOwner)) { "			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped $RegisteredOwner)</RegisteredOwner>`n" } else { '' }
     # OOBE screen skips - each optional, default on (a smoother imaging OOBE). The
     # online-account screens are also hidden whenever joining a domain, regardless.
     $oobeLines = [System.Collections.Generic.List[string]]::new()
@@ -1114,9 +1113,7 @@ function Get-AppPxeBootTsOobeShell {
 			<OOBE>
 $oobeBlock
 			</OOBE>
-$Accounts			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped $org)</RegisteredOrganization>
-			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped $owner)</RegisteredOwner>
-		</component>
+$Accounts$orgLine$ownerLine		</component>
 "@
 }
 
