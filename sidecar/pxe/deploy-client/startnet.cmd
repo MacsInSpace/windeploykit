@@ -328,9 +328,13 @@ if defined HBFLAG if exist "%HBFLAG%" del /q "%HBFLAG%" >nul 2>&1
 goto :eof
 
 :log
-echo [deploy] %~1
+rem Timestamp every line - on screen, in the file, and in the push - so the panel and
+rem a photo of the screen both show elapsed time without watching a wall clock
+rem (Craig, 2026-08-23). %TIME% is HH:MM:SS.cc from WinPE.
+set "TS=%TIME: =0%"
+echo [deploy] %TS%  %~1
 >> "%LOG%" echo %DATE% %TIME% %~1
-if defined LOGHOST if defined CURL call :push "%~1"
+if defined LOGHOST if defined CURL call :push "%TS%  %~1"
 goto :eof
 
 :push

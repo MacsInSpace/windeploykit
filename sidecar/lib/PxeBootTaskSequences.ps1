@@ -1005,11 +1005,16 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     $staticIp = ((& $get 'network' 'dhcp') -eq 'static')
     $joinDomainName = & $get 'joinDomain' ''
     $joining = -not [string]::IsNullOrWhiteSpace($joinDomainName)
-    # Server licensing is convert-eval.ps1's job (DISM /Set-Edition with a build-matched
-    # GVLK, and the ONLY way on an evaluation image - a key in specialize, even a
-    # build-matched GVLK, makes Setup reject the answer file on eval media). So a server
-    # unattend never carries a key. A client key is emitted only when explicitly set.
-    $productKey = if ($role -eq 'server') { '' } else { & $get 'productKey' '' }
+    # Product key: emitted only when the user set one AND the image is not an
+    # evaluation edition. A GVLK/MAK in specialize is valid and wanted on a full
+    # (licensed/retail/volume) ISO, but is REJECTED on eval media ("answer file is
+    # invalid"), where the eval-conversion step licenses via DISM /Set-Edition instead.
+    # Eval is read straight off the bound image - the Evaluation Center ISOs and their
+    # editions carry "eval" (SERVER_EVAL, ServerStandardEval); a full ISO does not.
+    # No image bound (tech picks at the device) -> honour a set key, we cannot know.
+    $imageRef = if ($rec.Contains('image') -and $rec.image) { "$($rec.image.sourceId) $($rec.image.editionName)" } else { '' }
+    $imageIsEval = ($imageRef -match '(?i)eval')
+    $productKey = if ($imageIsEval) { '' } else { & $get 'productKey' '' }
 
     # --- Static-IP section -------------------------------------------------------
     $dnsComponent = ''
