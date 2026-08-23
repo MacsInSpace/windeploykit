@@ -523,6 +523,8 @@ export interface PxeBootTaskSequenceStep {
 /** One Netboot task sequence - generates a first-boot unattend.xml on the share. */
 /** A local account created at first boot, with an optional single auto-logon. */
 export interface PxeBootTaskSequenceLocalAccount {
+  /** none | manual | vault. Vault mode takes the user name AND password from the credential. */
+  mode?: "none" | "manual" | "vault" | string;
   enabled: boolean;
   name: string;
   displayName?: string;

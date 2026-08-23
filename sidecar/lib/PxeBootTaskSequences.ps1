@@ -234,12 +234,21 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
     # base64 - obfuscation so the store is not readable over a shoulder, nothing more
     # (LAPS rotates the account). An already-stored value is left alone, so re-saving
     # a sequence never double-encodes or wipes the password.
+    # Local account: ONE mode - none | manual | vault. Vault mode takes BOTH the user
+    # name and the password from the selected vault credential (Craig, 2026-08-23:
+    # "selecting user from the vault also grabs that user's vault password"), so there
+    # is no separate name field in that mode. Legacy stores (enabled + passwordSource)
+    # are mapped to a mode on read.
     $accountIn = Get-AppPxeBootTsProp -Item $Item -Name 'localAccount'
     $localAccount = $null
     if ($accountIn) {
+        $mode = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'mode')).Trim().ToLowerInvariant()
+        if ($mode -notin @('none', 'manual', 'vault')) {
+            $legacyEnabled = [bool](Get-AppPxeBootTsProp -Item $accountIn -Name 'enabled')
+            $legacySource = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'passwordSource')).Trim().ToLowerInvariant()
+            $mode = if (-not $legacyEnabled) { 'none' } elseif ($legacySource -eq 'vault') { 'vault' } else { 'manual' }
+        }
         $accountName = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'name')).Trim()
-        $source = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'passwordSource')).Trim().ToLowerInvariant()
-        if ($source -ne 'vault') { $source = 'manual' }
         $group = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'group')).Trim()
         if ($group -notin @('Administrators', 'Users')) { $group = 'Administrators' }
         $stored = [string](Get-AppPxeBootTsProp -Item $accountIn -Name 'password')
@@ -247,13 +256,15 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         if (-not [string]::IsNullOrEmpty($typed)) {
             $stored = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($typed))
         }
+        if ($mode -eq 'vault') { $stored = '' }
         $localAccount = [ordered]@{
-            enabled        = [bool](Get-AppPxeBootTsProp -Item $accountIn -Name 'enabled')
+            mode           = $mode
+            enabled        = ($mode -ne 'none')
             name           = if ($accountName) { $accountName } else { 'localadmin' }
             displayName    = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'displayName')).Trim()
             description    = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'description')).Trim()
             group          = $group
-            passwordSource = $source
+            passwordSource = if ($mode -eq 'vault') { 'vault' } else { 'manual' }
             vaultSecret    = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'vaultSecret')).Trim()
             password       = $stored
             autoLogon      = [bool](Get-AppPxeBootTsProp -Item $accountIn -Name 'autoLogon')
@@ -797,8 +808,15 @@ function Get-AppPxeBootTsLocalAccountConfig {
         if ($null -eq $v -or ($v -is [string] -and [string]::IsNullOrWhiteSpace($v))) { return $Fallback }
         return $v
     }
+    $modeVal = ([string](& $get 'mode' '')).ToLowerInvariant()
+    if ($modeVal -notin @('none', 'manual', 'vault')) {
+        $en = if ($null -eq $raw) { $false } else { [bool](& $get 'enabled' $false) }
+        $src = ([string](& $get 'passwordSource' 'manual')).ToLowerInvariant()
+        $modeVal = if (-not $en) { 'none' } elseif ($src -eq 'vault') { 'vault' } else { 'manual' }
+    }
     [ordered]@{
-        enabled        = if ($null -eq $raw) { $false } else { [bool](& $get 'enabled' $false) }
+        mode           = $modeVal
+        enabled        = ($modeVal -ne 'none')
         name           = [string](& $get 'name' 'localadmin')
         displayName    = [string](& $get 'displayName' 'Local Admin')
         description    = [string](& $get 'description' 'Created by the imaging task sequence')
@@ -808,6 +826,49 @@ function Get-AppPxeBootTsLocalAccountConfig {
         password       = [string](& $get 'password' '')
         autoLogon      = [bool](& $get 'autoLogon' $false)
     }
+}
+
+function Resolve-AppPxeBootTsLocalAccount {
+    <#
+    .SYNOPSIS
+        The account to create at first boot, resolved to @{ user; pass }, or $null when
+        there is no account (mode none) or it cannot be resolved.
+    .NOTES
+        Vault mode takes BOTH fields from the selected credential - the user name is the
+        credential's UserName, not a typed field. Manual uses the typed name and the
+        base64-at-rest password. Returns $null (account omitted) rather than a
+        blank-password or nameless administrator.
+    #>
+    param($Account)
+    if (-not $Account) { return $null }
+    $mode = [string]$Account.mode
+    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = if ([bool]$Account.enabled) { [string]$Account.passwordSource } else { 'none' } }
+    if ($mode -eq 'none') { return $null }
+    if ($mode -eq 'vault') {
+        $secretName = [string]$Account.vaultSecret
+        if ([string]::IsNullOrWhiteSpace($secretName)) { return $null }
+        if (-not (Get-Command Get-AppVaultCredential -ErrorAction SilentlyContinue)) { return $null }
+        $cred = Get-AppVaultCredential -Name $secretName
+        if (-not $cred) {
+            Write-SidecarLog "Task sequences: vault credential '$secretName' is missing - local account omitted"
+            return $null
+        }
+        $user = [string]$cred.UserName
+        $pass = Get-AppVaultPlainSecret -Name $secretName
+        if ([string]::IsNullOrWhiteSpace($user) -or [string]::IsNullOrEmpty($pass)) {
+            Write-SidecarLog "Task sequences: vault credential '$secretName' has no usable user/password - local account omitted"
+            return $null
+        }
+        if ($user -match '^(.+)\\(.+)$') { $user = $matches[2] }
+        return @{ user = $user; pass = [string]$pass }
+    }
+    $user = [string]$Account.name
+    if ([string]::IsNullOrWhiteSpace($user)) { return $null }
+    $stored = [string]$Account.password
+    if ([string]::IsNullOrEmpty($stored)) { return $null }
+    $pass = try { [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($stored)) } catch { $stored }
+    if ([string]::IsNullOrEmpty($pass)) { return $null }
+    return @{ user = $user; pass = $pass }
 }
 
 function Resolve-AppPxeBootTsLocalAccountPassword {
@@ -866,6 +927,7 @@ function Get-AppPxeBootTsOobeAccounts {
         [string[]]$AdminGroups = @(),
         [bool]$EmitGroups,
         $LocalAccount,
+        [string]$LocalUser = '',
         [string]$LocalPassword,
         [bool]$LegacyLocalAdminAvailable
     )
@@ -886,7 +948,7 @@ $groupLines					</DomainAccountList>
 
     $useConfigured = $LocalAccount -and [bool]$LocalAccount.enabled -and -not [string]::IsNullOrEmpty($LocalPassword)
     if ($useConfigured) {
-        $name = [string]$LocalAccount.name
+        $name = if (-not [string]::IsNullOrWhiteSpace($LocalUser)) { $LocalUser } else { [string]$LocalAccount.name }
         $encoded = ConvertTo-AppPxeBootTsUnattendPassword -Password $LocalPassword -ElementName 'Password'
         $autoLogon = ''
         if ([bool]$LocalAccount.autoLogon) {
@@ -1048,11 +1110,13 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     # client. The answer file keeps only identity/locale/account/join/IP.
     $specialize = $dnsComponent + (Get-AppPxeBootTsIntlSpecialize) + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey) + $ipComponent + $joinComponent
     $localAccount = Get-AppPxeBootTsLocalAccountConfig -Sequence $rec
-    $localAccountPw = Resolve-AppPxeBootTsLocalAccountPassword -Account $localAccount
+    $resolvedAccount = Resolve-AppPxeBootTsLocalAccount -Account $localAccount
+    $localUser = if ($resolvedAccount) { [string]$resolvedAccount.user } else { '' }
+    $localAccountPw = if ($resolvedAccount) { [string]$resolvedAccount.pass } else { '' }
     # The {{LocalAdminPw}} token is only worth emitting if something will fill it.
     $legacyLocalPw = if ($role -eq 'server') { $ctx.serverAdmPw } else { $ctx.clientAdmPw }
     $accounts = Get-AppPxeBootTsOobeAccounts -AdminGroups @($rec.adminGroups | ForEach-Object { [string]$_ }) -EmitGroups $centralJoin `
-        -LocalAccount $localAccount -LocalPassword $localAccountPw -LegacyLocalAdminAvailable ([bool]$legacyLocalPw)
+        -LocalAccount $localAccount -LocalUser $localUser -LocalPassword $localAccountPw -LegacyLocalAdminAvailable ([bool]$legacyLocalPw)
     $oobeShell = Get-AppPxeBootTsOobeShell -Accounts $accounts -Joining $joining
 
     $xml = @"

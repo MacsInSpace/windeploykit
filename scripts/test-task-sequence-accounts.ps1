@@ -156,6 +156,32 @@ Test-Case 'A sequence with no account block saves without inventing one' {
     $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([ordered]@{ id = 'x'; name = 'x'; kind = 'client'; enabled = $true; fields = [ordered]@{} })
     Assert-True (-not $rec.Contains('localAccount')) 'an empty local account was invented'
 }
+Test-Case 'Local account mode: none/manual resolve; legacy enabled+source maps to mode' {
+    # 2026-08-23 (Craig): one mode - none | manual | vault. Vault takes user+password
+    # from the credential (covered live; needs a vault). Here: manual + none + legacy.
+    $mkManual = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([ordered]@{
+            id = 'm'; name = 'm'; kind = 'server'; enabled = $true; fields = [ordered]@{}
+            localAccount = [ordered]@{ mode = 'manual'; name = 'deployadmin'; passwordPlain = 'P@ss1!'; group = 'Administrators'; autoLogon = $true }
+        })
+    Assert-True ([string]$mkManual.localAccount.mode -eq 'manual') 'manual mode not stored'
+    $rM = Resolve-AppPxeBootTsLocalAccount -Account (Get-AppPxeBootTsLocalAccountConfig -Sequence $mkManual)
+    Assert-True ($null -ne $rM) 'manual account did not resolve'
+    Assert-True ([string]$rM.user -eq 'deployadmin') "manual user came back '$($rM.user)'"
+    Assert-True (-not [string]::IsNullOrEmpty([string]$rM.pass)) 'manual password did not resolve'
+
+    $mkNone = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([ordered]@{
+            id = 'n'; name = 'n'; kind = 'server'; enabled = $true; fields = [ordered]@{}
+            localAccount = [ordered]@{ mode = 'none' }
+        })
+    Assert-True ($null -eq (Resolve-AppPxeBootTsLocalAccount -Account (Get-AppPxeBootTsLocalAccountConfig -Sequence $mkNone))) 'none mode should resolve to null'
+
+    $mkLegacy = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([ordered]@{
+            id = 'l'; name = 'l'; kind = 'server'; enabled = $true; fields = [ordered]@{}
+            localAccount = [ordered]@{ enabled = $true; passwordSource = 'vault'; vaultSecret = 'x' }
+        })
+    Assert-True ([string]$mkLegacy.localAccount.mode -eq 'vault') "legacy enabled+vault did not map to vault mode (got '$($mkLegacy.localAccount.mode)')"
+}
+
 Test-Case 'A pwshEncoded step survives a save' {
     # The Server evaluation conversion is one of these; it used to be silently dropped.
     $seq = [ordered]@{

@@ -642,13 +642,14 @@ export function PxeWorkspace({
       // A local account that cannot resolve a password is silently dropped from the
       // unattend (login-less machine, Craig 2026-08-23) - catch it here instead.
       const acct = s.localAccount;
-      if (acct?.enabled) {
-        if ((acct.passwordSource ?? "manual") === "vault") {
-          if (!(acct.vaultSecret ?? "").trim()) {
-            note("account:vaultSecret", "vault secret name is required for the local account.");
-          }
-        } else if (!(acct.passwordPlain ?? "").trim() && !acct.password) {
-          note("account:password", "the local account needs a password.");
+      const acctMode = acct?.mode ?? (acct?.enabled ? (acct.passwordSource === "vault" ? "vault" : "manual") : "none");
+      if (acct && acctMode === "vault") {
+        if (!(acct.vaultSecret ?? "").trim()) {
+          note("account:vaultSecret", "pick a vault credential for the local account.");
+        }
+      } else if (acct && acctMode === "manual") {
+        if (!(acct.passwordPlain ?? "").trim() && !acct.password) {
+          note("account:password", "the manual local account needs a password.");
         }
       }
     }
@@ -2812,10 +2813,14 @@ export function PxeWorkspace({
                                 name: "localadmin",
                                 displayName: "Local Admin",
                                 group: "Administrators",
+                                mode: "none",
                                 passwordSource: "manual",
                                 vaultSecret: "",
                                 autoLogon: false,
                               };
+                              const mode =
+                                account.mode ??
+                                (account.enabled ? (account.passwordSource === "vault" ? "vault" : "manual") : "none");
                               const patchAccount = (patch: Partial<typeof account>) =>
                                 setTsEdit((prev) =>
                                   (prev ?? []).map((s) =>
@@ -2825,20 +2830,24 @@ export function PxeWorkspace({
                               const hasStoredPassword = Boolean(seq.localAccount?.password);
                               return (
                                 <div className="border-t px-3 py-2" style={{ borderColor: "var(--border)" }}>
-                                  <label className="flex items-center gap-1.5 text-[11px]">
-                                    <input
-                                      type="checkbox"
-                                      checked={Boolean(account.enabled)}
-                                      onChange={(e) => patchAccount({ enabled: e.target.checked })}
-                                    />
+                                  <div className="flex items-center gap-2">
                                     <span className="mono text-[10px] uppercase tracking-wider" style={{ color: "var(--text3)" }}>
                                       Local account
                                     </span>
+                                    <select
+                                      className="input-box h-[24px] text-[11px]"
+                                      value={mode}
+                                      onChange={(e) => patchAccount({ mode: e.target.value })}
+                                    >
+                                      <option value="none">No local account</option>
+                                      <option value="manual">Manual account</option>
+                                      <option value="vault">Account from the vault</option>
+                                    </select>
                                     <span className="text-[10px]" style={{ color: "var(--text3)" }}>
                                       created at first boot
                                     </span>
-                                  </label>
-                                  {account.enabled ? (
+                                  </div>
+                                  {mode === "manual" ? (
                                     <div className="mt-1.5 flex flex-col gap-1.5">
                                       <div className="flex flex-wrap items-center gap-1.5">
                                         <input
@@ -2848,10 +2857,12 @@ export function PxeWorkspace({
                                           onChange={(e) => patchAccount({ name: e.target.value })}
                                         />
                                         <input
-                                          className="input-box h-[24px] w-[10rem] text-[11px]"
-                                          placeholder="Display name"
-                                          value={account.displayName ?? ""}
-                                          onChange={(e) => patchAccount({ displayName: e.target.value })}
+                                          type="password"
+                                          className="input-box h-[24px] min-w-[12rem] text-[11px]"
+                                          placeholder={hasStoredPassword ? "Stored - type to replace" : "Password"}
+                                          style={tsFieldOutline(seq.id, "account:password")}
+                                          value={account.passwordPlain ?? ""}
+                                          onChange={(e) => patchAccount({ passwordPlain: e.target.value })}
                                         />
                                         <select
                                           className="input-box h-[24px] text-[11px]"
@@ -2862,33 +2873,42 @@ export function PxeWorkspace({
                                           <option value="Users">Users</option>
                                         </select>
                                       </div>
+                                      <label className="flex items-center gap-1.5 text-[11px]">
+                                        <input
+                                          type="checkbox"
+                                          checked={Boolean(account.autoLogon)}
+                                          onChange={(e) => patchAccount({ autoLogon: e.target.checked })}
+                                        />
+                                        Auto sign-in as this user after imaging (survives one reboot)
+                                      </label>
+                                      <p className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                        Stored obfuscated, and written to the unattend with Windows&apos; own base64 scheme - not encryption. Fine where LAPS rotates the account.
+                                      </p>
+                                    </div>
+                                  ) : mode === "vault" ? (
+                                    <div className="mt-1.5 flex flex-col gap-1.5">
                                       <div className="flex flex-wrap items-center gap-1.5">
+                                        <input
+                                          className="input-box h-[24px] min-w-[16rem] text-[11px]"
+                                          placeholder="Vault credential (user + password)"
+                                          list={`acctvault-${seq.id}`}
+                                          style={tsFieldOutline(seq.id, "account:vaultSecret")}
+                                          value={account.vaultSecret ?? ""}
+                                          onChange={(e) => patchAccount({ vaultSecret: e.target.value })}
+                                        />
+                                        <datalist id={`acctvault-${seq.id}`}>
+                                          {vaultSecretNames.map((n) => (
+                                            <option key={n} value={n} />
+                                          ))}
+                                        </datalist>
                                         <select
                                           className="input-box h-[24px] text-[11px]"
-                                          value={account.passwordSource ?? "manual"}
-                                          onChange={(e) => patchAccount({ passwordSource: e.target.value })}
+                                          value={account.group ?? "Administrators"}
+                                          onChange={(e) => patchAccount({ group: e.target.value })}
                                         >
-                                          <option value="manual">Password: typed here</option>
-                                          <option value="vault">Password: from the vault</option>
+                                          <option value="Administrators">Administrators</option>
+                                          <option value="Users">Users</option>
                                         </select>
-                                        {account.passwordSource === "vault" ? (
-                                          <input
-                                            className="input-box h-[24px] min-w-[14rem] text-[11px]"
-                                            placeholder="Vault secret name"
-                                            style={tsFieldOutline(seq.id, "account:vaultSecret")}
-                                            value={account.vaultSecret ?? ""}
-                                            onChange={(e) => patchAccount({ vaultSecret: e.target.value })}
-                                          />
-                                        ) : (
-                                          <input
-                                            type="password"
-                                            className="input-box h-[24px] min-w-[12rem] text-[11px]"
-                                            placeholder={hasStoredPassword ? "Stored - type to replace" : "Password"}
-                                            style={tsFieldOutline(seq.id, "account:password")}
-                                            value={account.passwordPlain ?? ""}
-                                            onChange={(e) => patchAccount({ passwordPlain: e.target.value })}
-                                          />
-                                        )}
                                       </div>
                                       <label className="flex items-center gap-1.5 text-[11px]">
                                         <input
@@ -2899,9 +2919,7 @@ export function PxeWorkspace({
                                         Auto sign-in as this user after imaging (survives one reboot)
                                       </label>
                                       <p className="text-[10px]" style={{ color: "var(--text3)" }}>
-                                        {account.passwordSource === "vault"
-                                          ? "Read from the vault when the sequence is published; it never sits in the sequence store."
-                                          : "Stored obfuscated, and written to the unattend with Windows' own base64 scheme - not encryption. Fine where LAPS rotates the account."}
+                                        The user name and password both come from the selected vault credential, read only when the sequence is published - never stored in the sequence.
                                       </p>
                                     </div>
                                   ) : null}
