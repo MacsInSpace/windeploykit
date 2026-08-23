@@ -642,16 +642,62 @@ $cmds			</RunSynchronous>
 		</component>
 "@
 }
+$script:AppPxeBootIanaToWindowsTz = @{
+    'Australia/Sydney' = 'AUS Eastern Standard Time'; 'Australia/Melbourne' = 'AUS Eastern Standard Time'
+    'Australia/Hobart' = 'Tasmania Standard Time'; 'Australia/Brisbane' = 'E. Australia Standard Time'
+    'Australia/Adelaide' = 'Cen. Australia Standard Time'; 'Australia/Darwin' = 'AUS Central Standard Time'
+    'Australia/Perth' = 'W. Australia Standard Time'; 'Pacific/Auckland' = 'New Zealand Standard Time'
+    'Europe/London' = 'GMT Standard Time'; 'Europe/Dublin' = 'GMT Standard Time'; 'Europe/Paris' = 'Romance Standard Time'
+    'Europe/Berlin' = 'W. Europe Standard Time'; 'America/New_York' = 'Eastern Standard Time'
+    'America/Chicago' = 'Central Standard Time'; 'America/Denver' = 'Mountain Standard Time'
+    'America/Los_Angeles' = 'Pacific Standard Time'; 'Asia/Singapore' = 'Singapore Standard Time'
+    'Asia/Tokyo' = 'Tokyo Standard Time'; 'Asia/Kolkata' = 'India Standard Time'; 'Asia/Shanghai' = 'China Standard Time'
+    'Asia/Hong_Kong' = 'China Standard Time'; 'Asia/Dubai' = 'Arabian Standard Time'; 'UTC' = 'UTC'; 'Etc/UTC' = 'UTC'
+}
+
+function Get-AppPxeBootTsRegionalDefaults {
+    <#
+    .SYNOPSIS
+        Regional suggestions from THIS host - @{ uiLanguage; inputLocale; timeZone } -
+        so a deploy defaults to where the imaging box actually is (Craig, 2026-08-23).
+        macOS reads AppleLocale + /etc/localtime; Windows reads the culture and time
+        zone directly. Falls back to en-AU / AUS Eastern.
+    #>
+    $locale = 'en-AU'
+    $winTz = 'AUS Eastern Standard Time'
+    try {
+        if ($IsMacOS -or $IsDarwin) {
+            $al = (& defaults read -g AppleLocale 2>$null | Select-Object -First 1)
+            if ($al) { $locale = ([string]$al).Trim() -replace '_', '-' -replace '@.*$', '' }
+            $link = (& readlink /etc/localtime 2>$null | Select-Object -First 1)
+            if ($link) {
+                $iana = ([string]$link -replace '.*/zoneinfo/', '').Trim()
+                if ($script:AppPxeBootIanaToWindowsTz.ContainsKey($iana)) { $winTz = $script:AppPxeBootIanaToWindowsTz[$iana] }
+            }
+        } elseif ($env:OS -eq 'Windows_NT') {
+            try { $locale = (Get-Culture).Name } catch { }
+            try { $winTz = (Get-TimeZone).Id } catch { }
+        }
+    } catch { }
+    if ([string]::IsNullOrWhiteSpace($locale)) { $locale = 'en-AU' }
+    if ([string]::IsNullOrWhiteSpace($winTz)) { $winTz = 'AUS Eastern Standard Time' }
+    @{ uiLanguage = $locale; inputLocale = $locale; timeZone = $winTz }
+}
+
 function Get-AppPxeBootTsIntlSpecialize {
-    @'
+    param([AllowEmptyString()][string]$UiLanguage = '', [AllowEmptyString()][string]$InputLocale = '')
+    $d = Get-AppPxeBootTsRegionalDefaults
+    $ui = if ([string]::IsNullOrWhiteSpace($UiLanguage)) { $d.uiLanguage } else { $UiLanguage }
+    $kb = if ([string]::IsNullOrWhiteSpace($InputLocale)) { $d.inputLocale } else { $InputLocale }
+    @"
 		<component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-			<InputLocale>0c09:00000409</InputLocale>
-			<SystemLocale>en-AU</SystemLocale>
-			<UILanguage>en-AU</UILanguage>
-			<UILanguageFallback>en-AU</UILanguageFallback>
-			<UserLocale>en-AU</UserLocale>
+			<InputLocale>$(ConvertTo-AppPxeBootTsXmlEscaped $kb)</InputLocale>
+			<SystemLocale>$(ConvertTo-AppPxeBootTsXmlEscaped $ui)</SystemLocale>
+			<UILanguage>$(ConvertTo-AppPxeBootTsXmlEscaped $ui)</UILanguage>
+			<UILanguageFallback>$(ConvertTo-AppPxeBootTsXmlEscaped $ui)</UILanguageFallback>
+			<UserLocale>$(ConvertTo-AppPxeBootTsXmlEscaped $ui)</UserLocale>
 		</component>
-'@
+"@
 }
 
 function Get-AppPxeBootTsShellSpecialize {
@@ -667,8 +713,10 @@ function Get-AppPxeBootTsShellSpecialize {
         [Parameter(Mandatory)][string]$ComputerName,
         [AllowEmptyString()][string]$ProductKey,
         [AllowEmptyString()][string]$RegisteredOrg = '',
-        [AllowEmptyString()][string]$RegisteredOwner = ''
+        [AllowEmptyString()][string]$RegisteredOwner = '',
+        [AllowEmptyString()][string]$TimeZone = ''
     )
+    $tz = if ([string]::IsNullOrWhiteSpace($TimeZone)) { (Get-AppPxeBootTsRegionalDefaults).timeZone } else { $TimeZone }
     $org = if ([string]::IsNullOrWhiteSpace($RegisteredOrg)) { Get-AppPxeBootTsOrgName } else { $RegisteredOrg }
     $owner = if ([string]::IsNullOrWhiteSpace($RegisteredOwner)) { Get-AppPxeBootTsOrgName } else { $RegisteredOwner }
     $productKeyLine = if (-not [string]::IsNullOrWhiteSpace($ProductKey)) {
@@ -679,7 +727,7 @@ function Get-AppPxeBootTsShellSpecialize {
 			<ComputerName>$ComputerName</ComputerName>$productKeyLine
 			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped $org)</RegisteredOrganization>
 			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped $owner)</RegisteredOwner>
-			<TimeZone>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsTimeZone))</TimeZone>
+			<TimeZone>$(ConvertTo-AppPxeBootTsXmlEscaped $tz)</TimeZone>
 		</component>
 "@
 }
@@ -1135,7 +1183,11 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     # client. The answer file keeps only identity/locale/account/join/IP.
     $regOrg = & $get 'registeredOrg' ''
     $regOwner = & $get 'registeredOwner' ''
-    $specialize = $dnsComponent + (Get-AppPxeBootTsIntlSpecialize) + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey -RegisteredOrg $regOrg -RegisteredOwner $regOwner) + $ipComponent + $joinComponent
+    $uiLang = & $get 'uiLanguage' ''
+    $inputLocale = & $get 'inputLocale' ''
+    $timeZone = & $get 'timeZone' ''
+    $intl = Get-AppPxeBootTsIntlSpecialize -UiLanguage $uiLang -InputLocale $inputLocale
+    $specialize = $dnsComponent + $intl + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey -RegisteredOrg $regOrg -RegisteredOwner $regOwner -TimeZone $timeZone) + $ipComponent + $joinComponent
     $localAccount = Get-AppPxeBootTsLocalAccountConfig -Sequence $rec
     $resolvedAccount = Resolve-AppPxeBootTsLocalAccount -Account $localAccount
     $localUser = if ($resolvedAccount) { [string]$resolvedAccount.user } else { '' }
@@ -1155,14 +1207,7 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
 	<settings pass="specialize">
 $specialize	</settings>
 	<settings pass="oobeSystem">
-		<component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
-			<InputLocale>0c09:00000409</InputLocale>
-			<SystemLocale>en-AU</SystemLocale>
-			<UILanguage>en-AU</UILanguage>
-			<UILanguageFallback>en-AU</UILanguageFallback>
-			<UserLocale>en-AU</UserLocale>
-		</component>
-$oobeShell	</settings>
+$intl$oobeShell	</settings>
 </unattend>
 "@
 
@@ -1497,6 +1542,7 @@ function Get-AppPxeBootTaskSequencesPayload {
     @{
         sequences         = $sequences
         installImages     = $installImages
+        regionalDefaults  = (Get-AppPxeBootTsRegionalDefaults)
         libraryDir        = $dir
         publishedFiles    = $publishedFiles
         defaultSequenceId  = (Get-AppPxeBootTaskSequenceDefaultId)

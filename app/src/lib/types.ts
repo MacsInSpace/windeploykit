@@ -644,6 +644,8 @@ export interface PxeBootTaskSequencesPayload {
   sequences: PxeBootTaskSequence[];
   /** Install image sources for the per-sequence image dropdown (cached editions only). */
   installImages?: PxeBootInstallImageEntry[];
+  /** Locale/keyboard/timezone read from this host, used as Regional placeholders. */
+  regionalDefaults?: { uiLanguage: string; inputLocale: string; timeZone: string };
   /** Absolute path of <library>/TaskSequences, null when no library root is set. */
   libraryDir?: string | null;
   publishedFiles: string[];
