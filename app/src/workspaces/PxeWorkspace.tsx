@@ -360,7 +360,7 @@ export function PxeWorkspace({
   const [tsJoinOptIn, setTsJoinOptIn] = useState<Set<string>>(new Set());
   // Vault secrets offered as join credentials, and the editor that manages them.
   const [vaultSecretNames, setVaultSecretNames] = useState<string[]>([]);
-  const [vaultEditor, setVaultEditor] = useState<{ open: boolean; seqId?: string }>({ open: false });
+  const [vaultEditor, setVaultEditor] = useState<{ open: boolean; seqId?: string; target?: "join" | "account" }>({ open: false });
 
   const loadVaultSecrets = useCallback(async () => {
     try {
@@ -2596,7 +2596,7 @@ export function PxeWorkspace({
                                             type="button"
                                             className="btn px-1.5 py-0 text-[10px]"
                                             title="Add, replace or delete secrets in the vault"
-                                            onClick={() => setVaultEditor({ open: true, seqId: seq.id })}
+                                            onClick={() => setVaultEditor({ open: true, seqId: seq.id, target: "join" })}
                                           >
                                             Vault...
                                           </button>
@@ -2770,6 +2770,37 @@ export function PxeWorkspace({
                                 />
                                 Bypass TPM / Secure Boot / RAM / CPU (VMs, older hardware)
                               </label>
+                              <label className="text-[11px]" style={{ color: "var(--text2)" }}>
+                                OOBE screens
+                              </label>
+                              <div className="flex flex-col gap-0.5">
+                                {(
+                                  [
+                                    ["oobeHideEula", "Skip the EULA page"],
+                                    ["oobeHideOnline", "Skip Microsoft-account screens"],
+                                    ["oobeExpress", "Use express settings (skip the privacy prompts)"],
+                                    ["oobeHideWireless", "Skip wireless setup"],
+                                    ["oobeHideOemReg", "Skip OEM registration"],
+                                  ] as const
+                                ).map(([k, label]) => (
+                                  <label key={k} className="flex items-center gap-1.5 text-[11px]">
+                                    <input
+                                      type="checkbox"
+                                      checked={seq.fields[k] !== "0"}
+                                      onChange={(e) =>
+                                        setTsEdit((prev) =>
+                                          (prev ?? []).map((s) =>
+                                            s.id === seq.id
+                                              ? { ...s, fields: { ...s.fields, [k]: e.target.checked ? "1" : "0" } }
+                                              : s,
+                                          ),
+                                        )
+                                      }
+                                    />
+                                    {label}
+                                  </label>
+                                ))}
+                              </div>
                             </div>
                           ) : null}
                           {selected && seq.fields.joinDomain && /education\.vic\.gov\.au$/i.test(seq.fields.joinDomain) ? (
@@ -2952,6 +2983,14 @@ export function PxeWorkspace({
                                             <option key={n} value={n} />
                                           ))}
                                         </datalist>
+                                        <button
+                                          type="button"
+                                          className="btn px-1.5 py-0 text-[10px]"
+                                          title="Add a local-admin credential (user + password) to the vault, or pick one"
+                                          onClick={() => setVaultEditor({ open: true, seqId: seq.id, target: "account" })}
+                                        >
+                                          Vault...
+                                        </button>
                                         <select
                                           className="input-box h-[24px] text-[11px]"
                                           value={account.group ?? "Administrators"}
@@ -3384,10 +3423,16 @@ export function PxeWorkspace({
         onPick={(secretName) => {
           const seqId = vaultEditor.seqId;
           if (!seqId) return;
+          const target = vaultEditor.target ?? "join";
           setTsEdit((prev) =>
-            (prev ?? []).map((s) =>
-              s.id === seqId ? { ...s, fields: { ...s.fields, joinCredential: `vault:${secretName}` } } : s,
-            ),
+            (prev ?? []).map((s) => {
+              if (s.id !== seqId) return s;
+              if (target === "account") {
+                const acct = s.localAccount ?? { enabled: true, name: "localadmin", mode: "vault" };
+                return { ...s, localAccount: { ...acct, mode: "vault", vaultSecret: secretName } };
+              }
+              return { ...s, fields: { ...s.fields, joinCredential: `vault:${secretName}` } };
+            }),
           );
         }}
       />

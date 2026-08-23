@@ -1040,21 +1040,31 @@ function Get-AppPxeBootTsOobeShell {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Accounts,
         [bool]$Joining,
         [AllowEmptyString()][string]$RegisteredOrg = '',
-        [AllowEmptyString()][string]$RegisteredOwner = ''
+        [AllowEmptyString()][string]$RegisteredOwner = '',
+        [bool]$HideEula = $true,
+        [bool]$HideOnlineAccounts = $true,
+        [bool]$HideOemReg = $true,
+        [bool]$HideWireless = $true,
+        [bool]$ExpressSettings = $true
     )
     $org = if ([string]::IsNullOrWhiteSpace($RegisteredOrg)) { Get-AppPxeBootTsOrgName } else { $RegisteredOrg }
     $owner = if ([string]::IsNullOrWhiteSpace($RegisteredOwner)) { Get-AppPxeBootTsOrgName } else { $RegisteredOwner }
-    # Joined machines hide the online-account screens; unjoined (workgroup) leave
-    # them visible so the operator can enrol / sign in.
-    $hideOnline = if ($Joining) { "				<HideOnlineAccountScreens>true</HideOnlineAccountScreens>`n" } else { '' }
+    # OOBE screen skips - each optional, default on (a smoother imaging OOBE). The
+    # online-account screens are also hidden whenever joining a domain, regardless.
+    $oobeLines = [System.Collections.Generic.List[string]]::new()
+    [void]$oobeLines.Add("				<HideLocalAccountScreen>true</HideLocalAccountScreen>")
+    if ($HideOemReg) { [void]$oobeLines.Add("				<HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>") }
+    if ($HideOnlineAccounts -or $Joining) { [void]$oobeLines.Add("				<HideOnlineAccountScreens>true</HideOnlineAccountScreens>") }
+    if ($HideWireless) { [void]$oobeLines.Add("				<HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>") }
+    if ($HideEula) { [void]$oobeLines.Add("				<HideEULAPage>true</HideEULAPage>") }
+    [void]$oobeLines.Add("				<NetworkLocation>Work</NetworkLocation>")
+    # ProtectYourPC 1 = express/recommended (skips the prompt); 3 = all off. Default express.
+    [void]$oobeLines.Add("				<ProtectYourPC>$(if ($ExpressSettings) { '1' } else { '3' })</ProtectYourPC>")
+    $oobeBlock = ($oobeLines -join "`n")
     @"
 		<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
 			<OOBE>
-				<HideLocalAccountScreen>true</HideLocalAccountScreen>
-				<HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
-$hideOnline				<HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
-				<NetworkLocation>Work</NetworkLocation>
-				<ProtectYourPC>1</ProtectYourPC>
+$oobeBlock
 			</OOBE>
 $Accounts			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped $org)</RegisteredOrganization>
 			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped $owner)</RegisteredOwner>
@@ -1134,7 +1144,10 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     $legacyLocalPw = if ($role -eq 'server') { $ctx.serverAdmPw } else { $ctx.clientAdmPw }
     $accounts = Get-AppPxeBootTsOobeAccounts -AdminGroups @($rec.adminGroups | ForEach-Object { [string]$_ }) -EmitGroups $centralJoin `
         -LocalAccount $localAccount -LocalUser $localUser -LocalPassword $localAccountPw -LegacyLocalAdminAvailable ([bool]$legacyLocalPw)
-    $oobeShell = Get-AppPxeBootTsOobeShell -Accounts $accounts -Joining $joining -RegisteredOrg $regOrg -RegisteredOwner $regOwner
+    # OOBE skips: a field absent = default on (skip the screen); only an explicit '0' turns it off.
+    $oobeBool = { param($k) -not ($rec.fields.Contains($k) -and [string]$rec.fields[$k] -eq '0') }
+    $oobeShell = Get-AppPxeBootTsOobeShell -Accounts $accounts -Joining $joining -RegisteredOrg $regOrg -RegisteredOwner $regOwner `
+        -HideEula (& $oobeBool 'oobeHideEula') -HideOnlineAccounts (& $oobeBool 'oobeHideOnline') -HideOemReg (& $oobeBool 'oobeHideOemReg') -HideWireless (& $oobeBool 'oobeHideWireless') -ExpressSettings (& $oobeBool 'oobeExpress')
 
     $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
