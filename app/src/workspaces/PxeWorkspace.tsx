@@ -62,6 +62,8 @@ const TS_FIELD_LABELS: Record<string, string> = {
   joinCredential: "Join credentials",
   machineOu: "Machine OU",
   productKey: "Product key",
+  registeredOrg: "Registered org",
+  registeredOwner: "Registered owner",
   ipCidr: "IP address (CIDR)",
   gateway: "Gateway",
   dns1: "DNS",
@@ -78,6 +80,8 @@ const TS_FIELD_ORDER = [
   "joinCredential",
   "machineOu",
   "productKey",
+  "registeredOrg",
+  "registeredOwner",
 ];
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 const IPV4_CIDR_RE = /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/;
@@ -2462,7 +2466,7 @@ export function PxeWorkspace({
                                 Join a domain
                               </label>
                               {TS_FIELD_ORDER
-                                .filter((key) => key in seq.fields)
+                                .filter((key) => key in seq.fields || key === "registeredOrg" || key === "registeredOwner")
                                 .filter((key) => {
                                   const joining = Boolean(seq.fields.joinDomain) || tsJoinOptIn.has(seq.id);
                                   if (["ipCidr", "gateway", "dns1"].includes(key))
@@ -2711,8 +2715,13 @@ export function PxeWorkspace({
                                       <input
                                         className="input-box mono h-[26px] text-[11px]"
                                         style={tsFieldOutline(seq.id, key)}
-                                        value={seq.fields[key]}
+                                        value={seq.fields[key] ?? ""}
                                         spellCheck={false}
+                                        placeholder={
+                                          key === "registeredOrg" || key === "registeredOwner"
+                                            ? "blank = default"
+                                            : undefined
+                                        }
                                         onChange={(e) => setField(e.target.value)}
                                       />
                                     )}

@@ -73,6 +73,8 @@ function Get-AppPxeBootTaskSequenceDefaults {
                 joinCredential = ''
                 machineOu    = ''
                 productKey   = ''
+                registeredOrg   = ''
+                registeredOwner = ''
             }
             adminGroups = @()
             steps   = @(
@@ -107,6 +109,8 @@ function Get-AppPxeBootTaskSequenceDefaults {
                 joinCredential = ''
                 machineOu    = ''
                 productKey   = ''
+                registeredOrg   = ''
+                registeredOwner = ''
             }
             adminGroups = @()
             steps   = @(
@@ -661,16 +665,20 @@ function Get-AppPxeBootTsShellSpecialize {
     # on a Server 2025 eval image). WDK does not KMS-activate anyway.
     param(
         [Parameter(Mandatory)][string]$ComputerName,
-        [AllowEmptyString()][string]$ProductKey
+        [AllowEmptyString()][string]$ProductKey,
+        [AllowEmptyString()][string]$RegisteredOrg = '',
+        [AllowEmptyString()][string]$RegisteredOwner = ''
     )
+    $org = if ([string]::IsNullOrWhiteSpace($RegisteredOrg)) { Get-AppPxeBootTsOrgName } else { $RegisteredOrg }
+    $owner = if ([string]::IsNullOrWhiteSpace($RegisteredOwner)) { Get-AppPxeBootTsOrgName } else { $RegisteredOwner }
     $productKeyLine = if (-not [string]::IsNullOrWhiteSpace($ProductKey)) {
         "`n			<ProductKey>$(ConvertTo-AppPxeBootTsXmlEscaped $ProductKey)</ProductKey>"
     } else { '' }
     @"
 		<component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
 			<ComputerName>$ComputerName</ComputerName>$productKeyLine
-			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsOrgName))</RegisteredOrganization>
-			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsOrgName))</RegisteredOwner>
+			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped $org)</RegisteredOrganization>
+			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped $owner)</RegisteredOwner>
 			<TimeZone>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsTimeZone))</TimeZone>
 		</component>
 "@
@@ -1028,7 +1036,14 @@ function Get-AppPxeBootTsOobeShell {
     # AllowEmptyString: with no local account configured and no profile password, the
     # accounts block is legitimately empty, and Mandatory alone rejected that - it threw
     # while building the unattend for the commonest corporate sequence (caught 2026-08-22).
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Accounts, [bool]$Joining)
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Accounts,
+        [bool]$Joining,
+        [AllowEmptyString()][string]$RegisteredOrg = '',
+        [AllowEmptyString()][string]$RegisteredOwner = ''
+    )
+    $org = if ([string]::IsNullOrWhiteSpace($RegisteredOrg)) { Get-AppPxeBootTsOrgName } else { $RegisteredOrg }
+    $owner = if ([string]::IsNullOrWhiteSpace($RegisteredOwner)) { Get-AppPxeBootTsOrgName } else { $RegisteredOwner }
     # Joined machines hide the online-account screens; unjoined (workgroup) leave
     # them visible so the operator can enrol / sign in.
     $hideOnline = if ($Joining) { "				<HideOnlineAccountScreens>true</HideOnlineAccountScreens>`n" } else { '' }
@@ -1041,8 +1056,8 @@ $hideOnline				<HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
 				<NetworkLocation>Work</NetworkLocation>
 				<ProtectYourPC>1</ProtectYourPC>
 			</OOBE>
-$Accounts			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsOrgName))</RegisteredOrganization>
-			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped (Get-AppPxeBootTsOrgName))</RegisteredOwner>
+$Accounts			<RegisteredOrganization>$(ConvertTo-AppPxeBootTsXmlEscaped $org)</RegisteredOrganization>
+			<RegisteredOwner>$(ConvertTo-AppPxeBootTsXmlEscaped $owner)</RegisteredOwner>
 		</component>
 "@
 }
@@ -1108,7 +1123,9 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     # Steps (reg/cmd/pwsh) are NOT in the unattend any more - they run from
     # SetupComplete.cmd via <id>.firstboot.cmd, dropped into the image by the deploy
     # client. The answer file keeps only identity/locale/account/join/IP.
-    $specialize = $dnsComponent + (Get-AppPxeBootTsIntlSpecialize) + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey) + $ipComponent + $joinComponent
+    $regOrg = & $get 'registeredOrg' ''
+    $regOwner = & $get 'registeredOwner' ''
+    $specialize = $dnsComponent + (Get-AppPxeBootTsIntlSpecialize) + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey -RegisteredOrg $regOrg -RegisteredOwner $regOwner) + $ipComponent + $joinComponent
     $localAccount = Get-AppPxeBootTsLocalAccountConfig -Sequence $rec
     $resolvedAccount = Resolve-AppPxeBootTsLocalAccount -Account $localAccount
     $localUser = if ($resolvedAccount) { [string]$resolvedAccount.user } else { '' }
@@ -1117,7 +1134,7 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     $legacyLocalPw = if ($role -eq 'server') { $ctx.serverAdmPw } else { $ctx.clientAdmPw }
     $accounts = Get-AppPxeBootTsOobeAccounts -AdminGroups @($rec.adminGroups | ForEach-Object { [string]$_ }) -EmitGroups $centralJoin `
         -LocalAccount $localAccount -LocalUser $localUser -LocalPassword $localAccountPw -LegacyLocalAdminAvailable ([bool]$legacyLocalPw)
-    $oobeShell = Get-AppPxeBootTsOobeShell -Accounts $accounts -Joining $joining
+    $oobeShell = Get-AppPxeBootTsOobeShell -Accounts $accounts -Joining $joining -RegisteredOrg $regOrg -RegisteredOwner $regOwner
 
     $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
