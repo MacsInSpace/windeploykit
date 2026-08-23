@@ -1297,6 +1297,7 @@ function Sync-AppPxeBootTaskSequenceStore {
         [void]$envLines.Add("TS_NAME=$($rec.name)")
         [void]$envLines.Add("TS_KIND=$($rec.kind)")
         [void]$envLines.Add("TS_UNATTEND=$($rec.id).xml")
+        if ($rec.fields.Contains('win11Bypass') -and [string]$rec.fields['win11Bypass'] -eq '1') { [void]$envLines.Add("TS_WIN11BYPASS=1") }
         if ($row.image -and -not [bool]$row.image['missing']) {
             [void]$envLines.Add("TS_IMAGE=$($row.image.sharePath)")
             [void]$envLines.Add("TS_INDEX=$($row.image.index)")

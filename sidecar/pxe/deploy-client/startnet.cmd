@@ -133,6 +133,7 @@ set "TS_INDEX="
 set "TS_UNATTEND="
 set "TS_AUTOPREP="
 set "TS_KIND="
+set "TS_WIN11BYPASS="
 for /f "usebackq tokens=1,* delims==" %%K in ("Z:\TaskSequences\%TSID%.env") do (
     if /i "%%K"=="TS_NAME"     set "TS_NAME=%%L"
     if /i "%%K"=="TS_IMAGE"    set "TS_IMAGE=%%L"
@@ -140,6 +141,7 @@ for /f "usebackq tokens=1,* delims==" %%K in ("Z:\TaskSequences\%TSID%.env") do 
     if /i "%%K"=="TS_UNATTEND" set "TS_UNATTEND=%%L"
     if /i "%%K"=="TS_AUTOPREP" set "TS_AUTOPREP=%%L"
     if /i "%%K"=="TS_KIND"     set "TS_KIND=%%L"
+    if /i "%%K"=="TS_WIN11BYPASS" set "TS_WIN11BYPASS=%%L"
 )
 call :log "Task sequence: %TS_NAME% (%TSID%)"
 
@@ -226,6 +228,24 @@ if errorlevel 1 (
     goto :shell
 )
 call :log "DISM apply complete."
+
+rem --- Windows 11 requirement bypass (optional) -----------------------------
+rem  Written into the APPLIED image's own SYSTEM hive (LabConfig + MoSetup) so OOBE
+rem  honours it on a TPM-less VM or old hardware - reg load/add/unload, all in stock
+rem  WinPE. No effect on Server or a supported PC.
+if /i "%TS_WIN11BYPASS%"=="1" (
+    call :log "Windows 11 requirement bypass -> applied image registry"
+    reg load HKLM\WDKSYS "%APPLYDIR%Windows\System32\config\SYSTEM" >>"%LOG%" 2>&1
+    if not errorlevel 1 (
+        for %%K in (BypassTPMCheck BypassSecureBootCheck BypassRAMCheck BypassCPUCheck BypassStorageCheck) do (
+            reg add "HKLM\WDKSYS\Setup\LabConfig" /v %%K /t REG_DWORD /d 1 /f >>"%LOG%" 2>&1
+        )
+        reg add "HKLM\WDKSYS\Setup\MoSetup" /v AllowUpgradesWithUnsupportedTPMOrCPU /t REG_DWORD /d 1 /f >>"%LOG%" 2>&1
+        reg unload HKLM\WDKSYS >>"%LOG%" 2>&1
+    ) else (
+        call :log "WARNING: could not load the image SYSTEM hive - Win11 bypass skipped."
+    )
+)
 
 rem --- drivers into the applied image (same call ImageDeployer makes) --------
 if defined DRIVERSTAGE (

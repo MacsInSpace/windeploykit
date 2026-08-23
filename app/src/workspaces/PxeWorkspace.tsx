@@ -2728,6 +2728,25 @@ export function PxeWorkspace({
                                   </Fragment>
                                 );
                               })}
+                              <label className="text-[11px]" style={{ color: "var(--text2)" }}>
+                                Win 11 requirements
+                              </label>
+                              <label className="flex items-center gap-1.5 text-[11px]">
+                                <input
+                                  type="checkbox"
+                                  checked={seq.fields.win11Bypass === "1"}
+                                  onChange={(e) =>
+                                    setTsEdit((prev) =>
+                                      (prev ?? []).map((s) =>
+                                        s.id === seq.id
+                                          ? { ...s, fields: { ...s.fields, win11Bypass: e.target.checked ? "1" : "" } }
+                                          : s,
+                                      ),
+                                    )
+                                  }
+                                />
+                                Bypass TPM / Secure Boot / RAM / CPU (VMs, older hardware)
+                              </label>
                             </div>
                           ) : null}
                           {selected && seq.fields.joinDomain && /education\.vic\.gov\.au$/i.test(seq.fields.joinDomain) ? (
