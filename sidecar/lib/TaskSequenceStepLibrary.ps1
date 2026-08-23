@@ -244,6 +244,61 @@ function Get-AppTaskSequenceStepLibrary {
             parameter = [ordered]@{ name = 'peer'; label = 'Time server'; type = 'text'; default = 'time.windows.com' }
             step = [ordered]@{ type = 'cmd'; description = 'Set time server'; command = 'w32tm /config /syncfromflags:manual /manualpeerlist:"{{VALUE}}" & w32tm /config /reliable:yes & net stop w32time & net start w32time & w32tm /resync /force' }
         }
+
+        # --- Privacy / cloud content -------------------------------------------
+        [ordered]@{
+            id = 'smartscreen-off'; name = 'SmartScreen: off'; category = 'Privacy'
+            applies = 'both'; risk = 'caution'
+            description = 'Turns off Microsoft Defender SmartScreen for apps and files. Isolated/lab use.'
+            source = 'https://learn.microsoft.com/windows/security/operating-system-security/virus-and-threat-protection/microsoft-defender-smartscreen/microsoft-defender-smartscreen-available-settings'
+            step = [ordered]@{ type = 'reg'; description = 'Disable SmartScreen'; op = 'add'; path = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\System'; name = 'EnableSmartScreen'; valueType = 'REG_DWORD'; data = '0' }
+        }
+        [ordered]@{
+            id = 'cortana-off'; name = 'Cortana: off'; category = 'Privacy'
+            applies = 'client'; risk = 'safe'
+            description = 'Disables Cortana via the Windows Search policy.'
+            source = 'https://learn.microsoft.com/windows/client-management/mdm/policy-csp-experience'
+            step = [ordered]@{ type = 'reg'; description = 'Disable Cortana'; op = 'add'; path = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search'; name = 'AllowCortana'; valueType = 'REG_DWORD'; data = '0' }
+        }
+        [ordered]@{
+            id = 'spotlight-off'; name = 'Windows Spotlight & suggestions: off'; category = 'Privacy'
+            applies = 'client'; risk = 'safe'
+            description = 'Turns off Windows Spotlight lock-screen content and suggested apps/content.'
+            source = 'https://learn.microsoft.com/windows/configuration/windows-spotlight'
+            step = [ordered]@{ type = 'reg'; description = 'Disable Windows Spotlight features'; op = 'add'; path = 'HKLM\SOFTWARE\Policies\Microsoft\Windows\CloudContent'; name = 'DisableWindowsSpotlightFeatures'; valueType = 'REG_DWORD'; data = '1' }
+        }
+
+        # --- Browser -----------------------------------------------------------
+        [ordered]@{
+            id = 'edge-first-run-off'; name = 'Edge: skip the first-run experience'; category = 'Browser'
+            applies = 'both'; risk = 'safe'
+            description = 'Suppresses the Microsoft Edge first-run/welcome flow for every user.'
+            source = 'https://learn.microsoft.com/deployedge/microsoft-edge-policies'
+            step = [ordered]@{ type = 'reg'; description = 'Edge: hide first-run experience'; op = 'add'; path = 'HKLM\SOFTWARE\Policies\Microsoft\Edge'; name = 'HideFirstRunExperience'; valueType = 'REG_DWORD'; data = '1' }
+        }
+
+        # --- System ------------------------------------------------------------
+        [ordered]@{
+            id = 'hibernate-off'; name = 'Power: disable hibernate'; category = 'Power'
+            applies = 'both'; risk = 'safe'
+            description = 'Runs powercfg /h off - frees the hiberfil and removes hibernate/fast startup.'
+            source = 'https://learn.microsoft.com/windows-hardware/design/device-experiences/powercfg-command-line-options'
+            step = [ordered]@{ type = 'cmd'; description = 'Disable hibernate'; command = 'powercfg /h off' }
+        }
+        [ordered]@{
+            id = 'long-paths-on'; name = 'Filesystem: enable long paths (>260)'; category = 'System'
+            applies = 'both'; risk = 'safe'
+            description = 'Lets Win32 apps use paths longer than MAX_PATH (LongPathsEnabled).'
+            source = 'https://learn.microsoft.com/windows/win32/fileio/maximum-file-path-limitation'
+            step = [ordered]@{ type = 'reg'; description = 'Enable long paths'; op = 'add'; path = 'HKLM\SYSTEM\CurrentControlSet\Control\FileSystem'; name = 'LongPathsEnabled'; valueType = 'REG_DWORD'; data = '1' }
+        }
+        [ordered]@{
+            id = 'verbose-status'; name = 'Startup: verbose status messages'; category = 'System'
+            applies = 'both'; risk = 'safe'
+            description = 'Shows detailed "please wait" status at boot/shutdown - handy while imaging.'
+            source = 'https://learn.microsoft.com/troubleshoot/windows-client/user-profiles-and-logon/enable-verbose-startup-shutdown-logon-logoff-status-messages'
+            step = [ordered]@{ type = 'reg'; description = 'Verbose status messages'; op = 'add'; path = 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'; name = 'VerboseStatus'; valueType = 'REG_DWORD'; data = '1' }
+        }
     )
 }
 
