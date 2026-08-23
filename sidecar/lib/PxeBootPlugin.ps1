@@ -1114,6 +1114,10 @@ function Get-AppPxeBootWimOverlayProfiles {
                 @{ ServedName = 'curl.exe'; WinPeName = 'curl.exe'; Required = $false }
                 # Optional WinPE wallpaper - present only when one has been imported.
                 @{ ServedName = 'winpe.jpg'; WinPeName = 'winpe.jpg'; Required = $false }
+                # Optional console-UI customisation: one line of header text, and an
+                # ASCII logo drawn above it. Both absent by default.
+                @{ ServedName = 'deploy.title'; WinPeName = 'deploy.title'; Required = $false }
+                @{ ServedName = 'deploy-logo.txt'; WinPeName = 'deploy-logo.txt'; Required = $false }
                 @{ ServedName = 'deploy.unc';  WinPeName = 'deploy.unc';  Required = $true }
                 @{ ServedName = 'deploy.cred'; WinPeName = 'deploy.cred'; Required = $false }
                 @{ ServedName = 'loghost';     WinPeName = 'deploy.loghost'; Required = $false }
@@ -3773,6 +3777,19 @@ function Write-AppPxeBootDeployOverlayFiles {
             Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
         }
     }
+    # Console-UI customisation: header line and optional ASCII logo.
+    foreach ($pair in @(
+            @{ src = (Get-AppPxeBootDeployUiTitlePath); name = 'deploy.title' },
+            @{ src = (Get-AppPxeBootDeployUiLogoPath); name = 'deploy-logo.txt' }
+        )) {
+        $dstFile = Join-Path $Dir $pair.name
+        if (Test-Path -LiteralPath $pair.src) {
+            Copy-Item -LiteralPath $pair.src -Destination $dstFile -Force
+        } elseif (Test-Path -LiteralPath $dstFile) {
+            Remove-Item -LiteralPath $dstFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     # WinPE wallpaper, when one has been imported (Boot Images -> customisation).
     $bgSrc = Get-AppPxeBootWinPeBackgroundPath
     $bgDst = Join-Path $Dir $script:AppPxeBootWinPeBackgroundName
@@ -3899,6 +3916,40 @@ function Get-AppPxeBootSiteIsoCatalogMenuLabel {
 
 $script:AppPxeBootWinPeBackgroundName = 'winpe.jpg'
 
+function Get-AppPxeBootDeployUiTitlePath {
+    Join-Path (Get-AppPxeBootLayoutPaths).brandingDir 'deploy.title'
+}
+
+function Get-AppPxeBootDeployUiLogoPath {
+    Join-Path (Get-AppPxeBootLayoutPaths).brandingDir 'deploy-logo.txt'
+}
+
+function Set-AppPxeBootDeployUiTitle {
+    <#
+    .SYNOPSIS
+        The header line the deploy client prints above the stage list. Empty clears it
+        (the client falls back to the product name).
+    #>
+    param([AllowEmptyString()][string]$Title)
+    $paths = Get-AppPxeBootLayoutPaths
+    if (-not (Test-Path -LiteralPath $paths.brandingDir)) { $null = New-Item -Path $paths.brandingDir -ItemType Directory -Force }
+    $path = Get-AppPxeBootDeployUiTitlePath
+    $clean = ([string]$Title) -replace '[\r\n]', ' '
+    $clean = $clean.Trim()
+    if ($clean.Length -gt 60) { $clean = $clean.Substring(0, 60).Trim() }
+    if ([string]::IsNullOrWhiteSpace($clean)) {
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
+        $served = Join-Path (Join-Path $paths.httpRoot 'deploy') 'deploy.title'
+        if (Test-Path -LiteralPath $served) { Remove-Item -LiteralPath $served -Force -ErrorAction SilentlyContinue }
+        Write-SidecarLog 'PXE boot: deploy header cleared'
+    } else {
+        # CRLF and no trailing newline games: cmd's set /p reads the first line.
+        [System.IO.File]::WriteAllText($path, $clean + "`r`n", (New-Object System.Text.UTF8Encoding $false))
+        Write-SidecarLog "PXE boot: deploy header set to '$clean'"
+    }
+    Get-AppPxeBootBrandingStatus
+}
+
 function Get-AppPxeBootWinPeBackgroundPath {
     # The WinPE wallpaper. WinPE shows %SystemRoot%\System32\winpe.jpg behind the
     # deploy client, so this file is injected as an overlay initrd - the imported boot
@@ -3990,6 +4041,11 @@ function Get-AppPxeBootBrandingStatus {
     # What the Boot Images panel shows for the boot WIM background.
     $winpe = Get-AppPxeBootWinPeBackgroundPath
     $item = if (Test-Path -LiteralPath $winpe) { Get-Item -LiteralPath $winpe } else { $null }
+    $titlePath = Get-AppPxeBootDeployUiTitlePath
+    $title = ''
+    if (Test-Path -LiteralPath $titlePath) {
+        try { $title = ([string](Get-Content -LiteralPath $titlePath -TotalCount 1 -ErrorAction Stop)).Trim() } catch { $title = '' }
+    }
     @{
         winpeBackground = @{
             present   = [bool]$item
@@ -3997,6 +4053,8 @@ function Get-AppPxeBootBrandingStatus {
             sizeBytes = if ($item) { [long]$item.Length } else { 0 }
             updatedAt = if ($item) { $item.LastWriteTimeUtc.ToString('o') } else { $null }
         }
+        deployTitle     = $title
+        logoPresent     = [bool](Test-Path -LiteralPath (Get-AppPxeBootDeployUiLogoPath))
     }
 }
 

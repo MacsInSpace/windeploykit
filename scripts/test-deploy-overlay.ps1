@@ -267,7 +267,14 @@ try {
         if ([bool]$entry.Required) { throw 'winpe.jpg must not be Required - most deploys have no background' }
         $src = Join-Path ([IO.Path]::GetTempPath()) ("bg-" + [guid]::NewGuid().ToString('N') + '.png')
         [IO.File]::WriteAllBytes($src, [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='))
-        $had = (Get-AppPxeBootBrandingStatus).winpeBackground.present
+        # Back up whatever the operator already had - this gate must not leave its own
+        # 1x1 test image behind on a real host (it did once, 2026-08-23).
+        $livePath = Get-AppPxeBootWinPeBackgroundPath
+        $backup = $null
+        if (Test-Path -LiteralPath $livePath) {
+            $backup = Join-Path ([IO.Path]::GetTempPath()) ("bgsave-" + [guid]::NewGuid().ToString('N') + '.jpg')
+            Copy-Item -LiteralPath $livePath -Destination $backup -Force
+        }
         try {
             $null = Set-AppPxeBootBrandingImage -SourcePath $src
             $after = Get-AppPxeBootBrandingStatus
@@ -275,7 +282,11 @@ try {
             Assert-Equal 'winpe.jpg' $after.winpeBackground.fileName 'stored name'
         } finally {
             Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
-            if (-not $had) { $null = Clear-AppPxeBootBrandingImage }
+            $null = Clear-AppPxeBootBrandingImage
+            if ($backup) {
+                Copy-Item -LiteralPath $backup -Destination $livePath -Force
+                Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 

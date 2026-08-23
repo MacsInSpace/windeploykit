@@ -459,6 +459,14 @@ function Handle-ClearPxeBootBrandingImage {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-SetPxeBootDeployUiTitle {
+    param([int]$Id, $Params)
+    $title = [string](Get-AppSidecarParam -Params $Params -Name 'title')
+    $data = Set-AppPxeBootDeployUiTitle -Title $title
+    try { Write-AppPxeBootWimOverlayRuntimeAssets -LanIp (Get-AppPxeBootLanIp) | Out-Null } catch { }
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
 function Handle-GetPxeBootBrandingStatus {
     param([int]$Id, $Params)
     Write-SidecarResponse -Id $Id -Data (Get-AppPxeBootBrandingStatus)

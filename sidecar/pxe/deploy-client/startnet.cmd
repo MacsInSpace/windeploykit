@@ -31,6 +31,13 @@ set "LOG=X:\Windows\Temp\deploy.log"
 if not exist "X:\Windows\Temp" md "X:\Windows\Temp" >nul 2>&1
 set "SYS=%SystemRoot%\System32"
 
+rem --- screen -------------------------------------------------------------
+rem  A console UI, not an HTA: mshta.exe and mshtml.dll are NOT in a stock
+rem  boot.wim (WinPE-HTA is an ADK optional component), while cmd and conhost
+rem  always are - so the same "nothing but stock WinPE" rule that shaped the
+rem  client shapes its UI (checked against Server 2025 boot.wim, 2026-08-23).
+call :ui_init
+
 rem --- who we are (no wmic, no PowerShell: SMBIOS strings live in the registry) ---
 set "MAKE="
 set "MODEL="
@@ -41,8 +48,10 @@ if not defined MODEL set "MODEL=Unknown"
 
 call :log "=== WinDeployKit deploy client ==="
 call :log "Machine: %MAKE% / %MODEL%"
+call :ui_stage 1 run
 call :log "Starting network (wpeinit)..."
 wpeinit
+call :ui_stage 1 ok
 
 rem The serial is not in the registry; the first NIC's MAC is the stable id the
 rem Netboot panel files this device's log under (the same for a re-image).
@@ -107,6 +116,8 @@ for /l %%A in (1,1,5) do (
     )
 )
 del /q "%SYS%\netuse.txt" >nul 2>&1
+if defined ZOK call :ui_stage 2 ok
+if not defined ZOK call :ui_stage 2 bad
 if not defined ZOK (
     call :fail "Could not connect %UNC% after 5 tries - see the net use lines above and check the share in the Netboot panel."
     goto :shell
@@ -143,6 +154,7 @@ for /f "usebackq tokens=1,* delims==" %%K in ("Z:\TaskSequences\%TSID%.env") do 
     if /i "%%K"=="TS_KIND"     set "TS_KIND=%%L"
     if /i "%%K"=="TS_WIN11BYPASS" set "TS_WIN11BYPASS=%%L"
 )
+call :ui_stage 3 ok
 call :log "Task sequence: %TS_NAME% (%TSID%)"
 
 if not defined TS_IMAGE (
@@ -155,6 +167,7 @@ if not exist "%WIMPATH%" (
     call :fail "Image not on the share: %WIMPATH% - is the ISO still in the library?"
     goto :shell
 )
+call :ui_stage 4 ok
 call :log "Image: %WIMPATH% (index %TS_INDEX%)"
 
 rem --- WinPE-side drivers: the disk has to exist before diskpart can see it ---
@@ -163,7 +176,10 @@ rem  Proxmox/VirtIO is the case that matters; on bare metal this is a no-op.
 set "SEVENZIP="
 if exist "%SYS%\7z.exe" set "SEVENZIP=%SYS%\7z.exe"
 set "DRIVERDIR="
+call :ui_stage 5 run
 call :find_drivers
+if defined DRIVERDIR call :ui_stage 5 ok
+if not defined DRIVERDIR call :ui_stage 5 skip
 if defined DRIVERDIR (
     call :log "Driver pack: %DRIVERDIR%"
     call :stage_drivers
@@ -218,15 +234,19 @@ if not defined APPLYDIR (
     )
     set "APPLYDIR=W:\"
 )
+call :ui_stage 6 ok
 call :log "Applying to %APPLYDIR%"
 call :log "Applying image - DISM prints no lines while it runs; the panel shows a heartbeat until it finishes."
 
 rem --- apply ----------------------------------------------------------------
+call :ui_stage 7 run
+call :ui_note "Applying the image - DISM shows its own progress below."
 dism /Apply-Image /ImageFile:"%WIMPATH%" /Index:%TS_INDEX% /ApplyDir:%APPLYDIR%
 if errorlevel 1 (
     call :fail "DISM /Apply-Image failed - see the DISM output above."
     goto :shell
 )
+call :ui_stage 7 ok
 call :log "DISM apply complete."
 
 rem --- Windows 11 requirement bypass (optional) -----------------------------
@@ -270,6 +290,7 @@ if errorlevel 1 (
     call :fail "bcdboot failed - Windows was applied but will not boot yet."
     goto :shell
 )
+call :ui_stage 8 ok
 call :log "Boot files written."
 
 rem --- first-boot unattend --------------------------------------------------
@@ -313,6 +334,7 @@ if defined NEEDSC (
     )
 )
 
+call :ui_stage 9 ok
 copy /y "%LOG%" "%APPLYDIR%Windows\Temp\windeploykit-deploy.log" >nul 2>&1
 call :log "Done - rebooting into Windows."
 call :heartbeat_stop
@@ -345,6 +367,80 @@ goto :eof
 
 :heartbeat_stop
 if defined HBFLAG if exist "%HBFLAG%" del /q "%HBFLAG%" >nul 2>&1
+goto :eof
+
+:ui_init
+rem Optional customisation, injected as overlay files beside the client:
+rem   deploy.title     one line of header text
+rem   deploy-logo.txt  a small ASCII logo (any lines, drawn above the header)
+set "UITITLE=WinDeployKit"
+if exist "%SYS%\deploy.title" set /p UITITLE=<"%SYS%\deploy.title"
+set "UINOTE="
+rem VT escape, so the header can be bold without a colour scheme. Windows 10+
+rem conhost understands it; if the trick yields nothing we simply print plain.
+for /f %%a in ('echo prompt $E^| cmd') do set "ESC=%%a"
+if defined ESC (
+    set "UIB=%ESC%[1m"
+    set "UID=%ESC%[90m"
+    set "UIR=%ESC%[0m"
+) else (
+    set "UIB=" & set "UID=" & set "UIR="
+)
+set "STG1=Network"
+set "STG2=Deploy share"
+set "STG3=Task sequence"
+set "STG4=Windows image"
+set "STG5=Drivers"
+set "STG6=Disk"
+set "STG7=Apply image"
+set "STG8=Boot files"
+set "STG9=First-boot files"
+set "STGCOUNT=9"
+for /l %%i in (1,1,9) do set "ST%%i=  "
+call :ui_draw
+goto :eof
+
+:ui_stage
+rem %1 = stage number, %2 = run|ok|bad|skip
+if /i "%~2"=="run"  set "ST%~1=>>"
+if /i "%~2"=="ok"   set "ST%~1=ok"
+if /i "%~2"=="bad"  set "ST%~1=!!"
+if /i "%~2"=="skip" set "ST%~1=--"
+set "UINOTE="
+call :ui_draw
+goto :eof
+
+:ui_note
+set "UINOTE=%~1"
+call :ui_draw
+goto :eof
+
+:ui_fail
+set "UINOTE=STOPPED: %~1"
+call :ui_draw
+goto :eof
+
+:ui_draw
+rem A logo is optional and comes from a file - no built-in ASCII art: backslashes
+rem and pipes in art collide with cmd escaping and broke this block once already.
+cls
+if exist "%SYS%\deploy-logo.txt" (
+    for /f "usebackq delims=" %%L in ("%SYS%\deploy-logo.txt") do echo   %%L
+    echo.
+)
+echo   %UIB%%UITITLE%%UIR%
+echo   %UID%%MAKE% / %MODEL%   %SERIAL%%UIR%
+echo   ----------------------------------------------------------
+for /l %%i in (1,1,%STGCOUNT%) do call :ui_row %%i
+echo   ----------------------------------------------------------
+if defined UINOTE echo   %UINOTE%
+echo.
+goto :eof
+
+:ui_row
+call set "_n=%%STG%~1%%"
+call set "_s=%%ST%~1%%"
+echo    [!_s!] !_n!
 goto :eof
 
 :log
@@ -453,6 +549,7 @@ if not defined DRIVERSTAGE call :log "WARNING: %PACK% expanded to no INF files -
 goto :eof
 
 :fail
+call :ui_fail "%~1"
 echo.
 echo [deploy] STOPPED: %~1
 >> "%LOG%" echo %DATE% %TIME% STOPPED: %~1

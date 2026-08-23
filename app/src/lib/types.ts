@@ -83,6 +83,7 @@ export type SidecarCommand =
   | "SetPxeBootBrandingImage"
   | "ClearPxeBootBrandingImage"
   | "GetPxeBootBrandingStatus"
+  | "SetPxeBootDeployUiTitle"
   | "ListVaultSecrets"
   | "RemoveVaultSecret"
   | "SetVaultSecret"
@@ -651,6 +652,10 @@ export interface PxeBootBrandingStatus {
     sizeBytes?: number;
     updatedAt?: string | null;
   };
+  /** Header line the deploy client prints above the stage list; blank = product name. */
+  deployTitle?: string;
+  /** True when an ASCII logo file has been dropped in the branding folder. */
+  logoPresent?: boolean;
 }
 
 export interface PxeBootTaskSequencesPayload {

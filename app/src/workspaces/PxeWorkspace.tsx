@@ -365,7 +365,9 @@ export function PxeWorkspace({
   const [branding, setBranding] = useState<PxeBootBrandingStatus | null>(null);
   const loadBranding = useCallback(async () => {
     try {
-      setBranding(await sidecar.invoke<PxeBootBrandingStatus>("GetPxeBootBrandingStatus"));
+      const s = await sidecar.invoke<PxeBootBrandingStatus>("GetPxeBootBrandingStatus");
+      setBranding(s);
+      setDeployTitle(s.deployTitle ?? "");
     } catch {
       /* panel still works without it */
     }
@@ -379,6 +381,16 @@ export function PxeWorkspace({
     try {
       setBranding(await sidecar.invoke<PxeBootBrandingStatus>("SetPxeBootBrandingImage", { sourcePath: picked }));
       toast.success(PLUGIN_TITLE, "Background set - it applies on the next boot.");
+    } catch (e) {
+      toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+  const [deployTitle, setDeployTitle] = useState("");
+  const saveDeployTitle = useCallback(async (title: string) => {
+    try {
+      const s = await sidecar.invoke<PxeBootBrandingStatus>("SetPxeBootDeployUiTitle", { title });
+      setBranding(s);
+      setDeployTitle(s.deployTitle ?? "");
     } catch (e) {
       toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
     }
@@ -2246,6 +2258,25 @@ export function PxeWorkspace({
                       Clear
                     </button>
                   ) : null}
+                </div>
+                <div
+                  className="mb-3 flex flex-wrap items-center gap-2 rounded-sm border px-2 py-1.5 text-[12px]"
+                  style={{ borderColor: "var(--border)" }}
+                >
+                  <span className="mono text-[10px] uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                    Header
+                  </span>
+                  <input
+                    className="input-box h-[26px] flex-1 text-[12px]"
+                    placeholder="Shown above the deploy stages - blank uses the product name"
+                    value={deployTitle}
+                    maxLength={60}
+                    spellCheck={false}
+                    onChange={(e) => setDeployTitle(e.target.value)}
+                    onBlur={() => {
+                      if ((branding?.deployTitle ?? "") !== deployTitle) void saveDeployTitle(deployTitle);
+                    }}
+                  />
                 </div>
                 {wims.length === 0 ? (
                   <p className="text-[12px]" style={{ color: "var(--text2)" }}>
