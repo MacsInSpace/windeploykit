@@ -182,6 +182,39 @@ Test-Case 'Local account mode: none/manual resolve; legacy enabled+source maps t
     Assert-True ([string]$mkLegacy.localAccount.mode -eq 'vault') "legacy enabled+vault did not map to vault mode (got '$($mkLegacy.localAccount.mode)')"
 }
 
+Test-Case 'The unattend is structurally sane (the traps that made a bad answer file)' {
+    $seq = [ordered]@{
+        id = 'u'; name = 'u'; kind = 'server'; enabled = $true
+        fields = [ordered]@{ computerName = 'SVR01'; network = 'dhcp'; productKey = '' }
+        steps = @()
+        localAccount = [ordered]@{ mode = 'manual'; name = 'localadmin'; passwordPlain = 'P@ss1!'; group = 'Administrators'; autoLogon = $true }
+    }
+    $xml = Build-AppPxeBootTaskSequenceUnattendXml -Sequence (ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq)
+    $doc = [xml]$xml
+    Assert-True ($null -ne $doc) 'not well-formed XML'
+
+    # Display language must be one that is actually IN the image. English media ships
+    # en-US; naming a locale like en-AU here is how the answer file quietly fails.
+    foreach ($m in [regex]::Matches($xml, '<UILanguage(?:Fallback)?>([^<]*)<')) {
+        Assert-True ($m.Groups[1].Value -eq 'en-US') "UILanguage must be en-US, got '$($m.Groups[1].Value)'"
+    }
+    # Keyboard wants LCID:layout, not a bare language tag.
+    foreach ($m in [regex]::Matches($xml, '<InputLocale>([^<]*)<')) {
+        Assert-True ($m.Groups[1].Value -match '^[0-9a-f]{4}:[0-9a-f]{8}$') "InputLocale must be LCID:layout, got '$($m.Groups[1].Value)'"
+    }
+    # Regional formats DO follow the host.
+    foreach ($tag in @('SystemLocale', 'UserLocale')) {
+        Assert-True ($xml -match "<$tag>[a-z]{2}-[A-Z]{2}</$tag>") "$tag is not a locale"
+    }
+    # Passwords are the obfuscated form, never PlainText true.
+    Assert-True ($xml -notmatch '<PlainText>true</PlainText>') 'a plain-text password reached the unattend'
+    Assert-True ($xml -notmatch '\{\{[A-Za-z]+\}\}') 'an unsubstituted {{token}} reached the unattend'
+    # No windowsPE pass: these images are applied with DISM, not setup.exe.
+    Assert-True ($xml -notmatch 'pass="windowsPE"') 'a windowsPE pass reached a DISM-applied unattend'
+    # Exactly the two passes we intend.
+    Assert-True (([regex]::Matches($xml, '<settings pass=')).Count -eq 2) 'expected exactly specialize + oobeSystem'
+}
+
 Test-Case 'A pwshEncoded step survives a save' {
     # The Server evaluation conversion is one of these; it used to be silently dropped.
     $seq = [ordered]@{

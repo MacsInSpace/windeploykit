@@ -655,6 +655,12 @@ $script:AppPxeBootIanaToWindowsTz = @{
     'Asia/Hong_Kong' = 'China Standard Time'; 'Asia/Dubai' = 'Arabian Standard Time'; 'UTC' = 'UTC'; 'Etc/UTC' = 'UTC'
 }
 
+$script:AppPxeBootLocaleToInputLocale = @{
+    'en-AU' = '0c09:00000409'; 'en-NZ' = '1409:00000409'; 'en-GB' = '0809:00000809'
+    'en-US' = '0409:00000409'; 'en-CA' = '1009:00000409'; 'en-IE' = '1809:00001809'
+    'en-ZA' = '1c09:00000409'; 'en-IN' = '4009:00000409'
+}
+
 function Get-AppPxeBootTsRegionalDefaults {
     <#
     .SYNOPSIS
@@ -681,21 +687,41 @@ function Get-AppPxeBootTsRegionalDefaults {
     } catch { }
     if ([string]::IsNullOrWhiteSpace($locale)) { $locale = 'en-AU' }
     if ([string]::IsNullOrWhiteSpace($winTz)) { $winTz = 'AUS Eastern Standard Time' }
-    @{ uiLanguage = $locale; inputLocale = $locale; timeZone = $winTz }
+    # InputLocale wants LCID:keyboard-layout ("0c09:00000409"), not a bare language tag.
+    # The bare tag is my regression (2026-08-23) - the original hardcoded value was the
+    # explicit pair, and that is what Windows Setup documents.
+    $kb = if ($script:AppPxeBootLocaleToInputLocale.ContainsKey($locale)) {
+        $script:AppPxeBootLocaleToInputLocale[$locale]
+    } else {
+        $locale
+    }
+    @{ userLocale = $locale; inputLocale = $kb; timeZone = $winTz }
 }
 
 function Get-AppPxeBootTsIntlSpecialize {
-    param([AllowEmptyString()][string]$UiLanguage = '', [AllowEmptyString()][string]$InputLocale = '')
+    <#
+    .NOTES
+        Two different things, kept apart deliberately:
+          * UILanguage / UILanguageFallback = the DISPLAY language, which must be a
+            language actually installed in the image. English media ships en-US, so
+            that is what we emit. en-AU is NOT an installed UI language - it is a
+            locale - and naming it here is how an unattend quietly does nothing or
+            fails (this was hardcoded to en-AU before 2026-08-23).
+          * SystemLocale / UserLocale = regional formats, which DO follow the host
+            (en-AU), and InputLocale = keyboard, which wants LCID:layout.
+    #>
+    param([AllowEmptyString()][string]$UserLocale = '', [AllowEmptyString()][string]$InputLocale = '')
     $d = Get-AppPxeBootTsRegionalDefaults
-    $ui = if ([string]::IsNullOrWhiteSpace($UiLanguage)) { $d.uiLanguage } else { $UiLanguage }
+    $loc = if ([string]::IsNullOrWhiteSpace($UserLocale)) { $d.userLocale } else { $UserLocale }
     $kb = if ([string]::IsNullOrWhiteSpace($InputLocale)) { $d.inputLocale } else { $InputLocale }
+    $display = 'en-US'
     @"
 		<component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
 			<InputLocale>$(ConvertTo-AppPxeBootTsXmlEscaped $kb)</InputLocale>
-			<SystemLocale>$(ConvertTo-AppPxeBootTsXmlEscaped $ui)</SystemLocale>
-			<UILanguage>$(ConvertTo-AppPxeBootTsXmlEscaped $ui)</UILanguage>
-			<UILanguageFallback>$(ConvertTo-AppPxeBootTsXmlEscaped $ui)</UILanguageFallback>
-			<UserLocale>$(ConvertTo-AppPxeBootTsXmlEscaped $ui)</UserLocale>
+			<SystemLocale>$(ConvertTo-AppPxeBootTsXmlEscaped $loc)</SystemLocale>
+			<UILanguage>$display</UILanguage>
+			<UILanguageFallback>$display</UILanguageFallback>
+			<UserLocale>$(ConvertTo-AppPxeBootTsXmlEscaped $loc)</UserLocale>
 		</component>
 "@
 }
@@ -1180,10 +1206,12 @@ function Build-AppPxeBootTaskSequenceUnattendXml {
     # client. The answer file keeps only identity/locale/account/join/IP.
     $regOrg = & $get 'registeredOrg' ''
     $regOwner = & $get 'registeredOwner' ''
-    $uiLang = & $get 'uiLanguage' ''
+    # 'uiLanguage' was the old field name for the same thing (region formats).
+    $userLocale = & $get 'userLocale' ''
+    if ([string]::IsNullOrWhiteSpace($userLocale)) { $userLocale = & $get 'uiLanguage' '' }
     $inputLocale = & $get 'inputLocale' ''
     $timeZone = & $get 'timeZone' ''
-    $intl = Get-AppPxeBootTsIntlSpecialize -UiLanguage $uiLang -InputLocale $inputLocale
+    $intl = Get-AppPxeBootTsIntlSpecialize -UserLocale $userLocale -InputLocale $inputLocale
     $specialize = $dnsComponent + $intl + (Get-AppPxeBootTsShellSpecialize -ComputerName $computerName -ProductKey $productKey -RegisteredOrg $regOrg -RegisteredOwner $regOwner -TimeZone $timeZone) + $ipComponent + $joinComponent
     $localAccount = Get-AppPxeBootTsLocalAccountConfig -Sequence $rec
     $resolvedAccount = Resolve-AppPxeBootTsLocalAccount -Account $localAccount

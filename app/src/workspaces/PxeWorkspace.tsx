@@ -65,8 +65,8 @@ const TS_FIELD_LABELS: Record<string, string> = {
   productKey: "Product key",
   registeredOrg: "Registered org",
   registeredOwner: "Registered owner",
-  uiLanguage: "UI language / locale",
-  inputLocale: "Keyboard (input locale)",
+  userLocale: "Region / formats",
+  inputLocale: "Keyboard",
   timeZone: "Time zone",
   ipCidr: "IP address (CIDR)",
   gateway: "Gateway",
@@ -86,7 +86,7 @@ const TS_FIELD_ORDER = [
   "productKey",
   "registeredOrg",
   "registeredOwner",
-  "uiLanguage",
+  "userLocale",
   "inputLocale",
   "timeZone",
 ];
@@ -2579,7 +2579,7 @@ export function PxeWorkspace({
                                 Join a domain
                               </label>
                               {TS_FIELD_ORDER
-                                .filter((key) => key in seq.fields || ["registeredOrg", "registeredOwner", "uiLanguage", "inputLocale", "timeZone"].includes(key))
+                                .filter((key) => key in seq.fields || ["registeredOrg", "registeredOwner", "userLocale", "inputLocale", "timeZone"].includes(key))
                                 .filter((key) => {
                                   const joining = Boolean(seq.fields.joinDomain) || tsJoinOptIn.has(seq.id);
                                   if (["ipCidr", "gateway", "dns1"].includes(key))
@@ -2833,8 +2833,8 @@ export function PxeWorkspace({
                                         placeholder={
                                           key === "registeredOrg" || key === "registeredOwner"
                                             ? "optional"
-                                            : key === "uiLanguage"
-                                              ? `blank = ${tsPayload?.regionalDefaults?.uiLanguage ?? "host"}`
+                                            : key === "userLocale"
+                                              ? `blank = ${tsPayload?.regionalDefaults?.userLocale ?? "host"}`
                                               : key === "inputLocale"
                                                 ? `blank = ${tsPayload?.regionalDefaults?.inputLocale ?? "host"}`
                                                 : key === "timeZone"
