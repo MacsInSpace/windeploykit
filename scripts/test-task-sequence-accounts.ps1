@@ -100,7 +100,7 @@ Test-Case 'A configured account is emitted with an obfuscated password' {
 Test-Case 'AutoLogon is emitted once, and only when asked for' {
     $withLogon = Get-AccountXml -Account $configured -Password 'Hunter2!'
     Assert-True ($withLogon -match '<AutoLogon>') 'autologon missing when requested'
-    Assert-True ($withLogon -match '<LogonCount>1</LogonCount>') 'autologon should be a single logon'
+    Assert-True ($withLogon -match '<LogonCount>2</LogonCount>') 'autologon should be LogonCount 2 (survives the setup reboot)'
     $noLogon = Get-AppPxeBootTsLocalAccountConfig -Sequence ([ordered]@{
             localAccount = [ordered]@{ enabled = $true; name = 'deployadmin'; passwordSource = 'manual'; password = 'x'; autoLogon = $false }
         })
