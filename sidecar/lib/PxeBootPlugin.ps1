@@ -4909,6 +4909,19 @@ function Get-AppPxeBootIsoInventory {
 }
 
 function Test-AppPxeBootLayout {
+    # Memoised: this is a file-existence sweep over the whole store and it was the
+    # single biggest cost in the 8s status poll (258 ms measured, 2026-08-23). 6s keeps
+    # it fresh enough that an import or a delete shows up on the next poll.
+    param([switch]$SkipStoreInit)
+    # Both paths memoised: the status poll takes the NON-skip path, which also re-runs
+    # Initialize-AppPxeBootStore (mkdir + README sweep) every 8 seconds for nothing.
+    if ($SkipStoreInit) {
+        return Get-AppPxeBootMemo -Key 'layout-test-skipinit' -Seconds 6 -Producer { Test-AppPxeBootLayoutUncached -SkipStoreInit }
+    }
+    return Get-AppPxeBootMemo -Key 'layout-test' -Seconds 6 -Producer { Test-AppPxeBootLayoutUncached }
+}
+
+function Test-AppPxeBootLayoutUncached {
     param([switch]$SkipStoreInit)
 
     $paths = if ($SkipStoreInit) { Get-AppPxeBootLayoutPaths } else { Initialize-AppPxeBootStore }

@@ -355,9 +355,13 @@ function Write-SidecarIpcComplete {
         [ValidateSet('ok', 'error')]
         [string]$Outcome = 'ok'
     )
-    $slow = if ($ElapsedMs -ge 10000) { ' SLOW' } else { '' }
+    # Two thresholds: SLOW at 10s, and a quieter "took a while" at 3s. Both are logged
+    # even with Debug OFF - a panel that made someone wait is exactly what you want in
+    # the log, and until 2026-08-23 it was silent unless verbose logging happened to be
+    # on (Craig waited 17s for the drivers tab and the log said nothing).
+    $slow = if ($ElapsedMs -ge 10000) { ' SLOW' } elseif ($ElapsedMs -ge 3000) { ' slow' } else { '' }
     if ($Outcome -eq 'ok' -and (Test-AppSidecarIpcPollCommand -Cmd $Cmd) -and -not $slow) { return }
-    if (-not (Test-AppSidecarVerboseLogging) -and $Outcome -ne 'error') { return }
+    if (-not (Test-AppSidecarVerboseLogging) -and $Outcome -ne 'error' -and -not $slow) { return }
     Write-SidecarLog "IPC: $Cmd ($Id) $Outcome +${ElapsedMs}ms$slow" -Flush
 }
 
