@@ -852,7 +852,8 @@ function Get-AppPxeBootTsOobeAccounts {
           1. A configured local account (Craig, 2026-08-22) - name/group from the
              sequence, password from the vault or typed in, written with Windows'
              own base64 obfuscation. AutoLogon only when the sequence asks for it,
-             and only once (LogonCount 1).
+             for two logons (LogonCount 2) so the one intended setup session
+             still lands after the reboot setup triggers (eval conversion, domain join).
           2. No configured account, but the product can supply a local admin password
              (the {{LocalAdminPw}} token, filled at publish time) - the original
              behaviour, unchanged.
@@ -896,7 +897,7 @@ $groupLines					</DomainAccountList>
 					<PlainText>false</PlainText>
 				</Password>
 				<Username>$(ConvertTo-AppPxeBootTsXmlEscaped $name)</Username>
-				<LogonCount>1</LogonCount>
+				<LogonCount>2</LogonCount>
 				<Enabled>true</Enabled>
 			</AutoLogon>
 "@
@@ -955,7 +956,7 @@ $domainAccounts				<LocalAccounts>
 					<PlainText>true</PlainText>
 				</Password>
 				<Username>localadmin</Username>
-				<LogonCount>1</LogonCount>
+				<LogonCount>2</LogonCount>
 				<Enabled>true</Enabled>
 			</AutoLogon>
 "@

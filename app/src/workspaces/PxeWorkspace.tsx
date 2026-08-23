@@ -621,21 +621,35 @@ export function PxeWorkspace({
     const bad = new Set<string>();
     let first: string | null = null;
     for (const s of tsEdit ?? []) {
-      if (!s.enabled || s.fields.network !== "static") continue;
+      if (!s.enabled) continue;
       const note = (field: string, message: string) => {
         bad.add(`${s.id}:${field}`);
         first ??= `${s.name}: ${message}`;
       };
-      if (!IPV4_CIDR_RE.test((s.fields.ipCidr ?? "").trim())) {
-        note("ipCidr", "IP address must be IPv4/CIDR (e.g. 10.150.198.20/23).");
+      if (s.fields.network === "static") {
+        if (!IPV4_CIDR_RE.test((s.fields.ipCidr ?? "").trim())) {
+          note("ipCidr", "IP address must be IPv4/CIDR (e.g. 10.150.198.20/23).");
+        }
+        if (!IPV4_RE.test((s.fields.gateway ?? "").trim())) {
+          note("gateway", "Gateway must be an IPv4 address.");
+        }
+        const dns = [s.fields.dns1, s.fields.dns2, s.fields.dns3].map((v) => (v ?? "").trim());
+        if (!dns[0]) note("dns1", "at least one DNS server is required for Static IP.");
+        for (let i = 0; i < dns.length; i++) {
+          if (dns[i] && !IPV4_RE.test(dns[i])) note(`dns${i + 1}`, "DNS entries must be IPv4 addresses.");
+        }
       }
-      if (!IPV4_RE.test((s.fields.gateway ?? "").trim())) {
-        note("gateway", "Gateway must be an IPv4 address.");
-      }
-      const dns = [s.fields.dns1, s.fields.dns2, s.fields.dns3].map((v) => (v ?? "").trim());
-      if (!dns[0]) note("dns1", "at least one DNS server is required for Static IP.");
-      for (let i = 0; i < dns.length; i++) {
-        if (dns[i] && !IPV4_RE.test(dns[i])) note(`dns${i + 1}`, "DNS entries must be IPv4 addresses.");
+      // A local account that cannot resolve a password is silently dropped from the
+      // unattend (login-less machine, Craig 2026-08-23) - catch it here instead.
+      const acct = s.localAccount;
+      if (acct?.enabled) {
+        if ((acct.passwordSource ?? "manual") === "vault") {
+          if (!(acct.vaultSecret ?? "").trim()) {
+            note("account:vaultSecret", "vault secret name is required for the local account.");
+          }
+        } else if (!(acct.passwordPlain ?? "").trim() && !acct.password) {
+          note("account:password", "the local account needs a password.");
+        }
       }
     }
     return { fields: bad, first };
@@ -2861,6 +2875,7 @@ export function PxeWorkspace({
                                           <input
                                             className="input-box h-[24px] min-w-[14rem] text-[11px]"
                                             placeholder="Vault secret name"
+                                            style={tsFieldOutline(seq.id, "account:vaultSecret")}
                                             value={account.vaultSecret ?? ""}
                                             onChange={(e) => patchAccount({ vaultSecret: e.target.value })}
                                           />
@@ -2869,6 +2884,7 @@ export function PxeWorkspace({
                                             type="password"
                                             className="input-box h-[24px] min-w-[12rem] text-[11px]"
                                             placeholder={hasStoredPassword ? "Stored - type to replace" : "Password"}
+                                            style={tsFieldOutline(seq.id, "account:password")}
                                             value={account.passwordPlain ?? ""}
                                             onChange={(e) => patchAccount({ passwordPlain: e.target.value })}
                                           />
@@ -2880,7 +2896,7 @@ export function PxeWorkspace({
                                           checked={Boolean(account.autoLogon)}
                                           onChange={(e) => patchAccount({ autoLogon: e.target.checked })}
                                         />
-                                        Sign in as this user once after imaging
+                                        Auto sign-in as this user after imaging (survives one reboot)
                                       </label>
                                       <p className="text-[10px]" style={{ color: "var(--text3)" }}>
                                         {account.passwordSource === "vault"
