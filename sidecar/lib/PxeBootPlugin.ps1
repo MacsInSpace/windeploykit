@@ -4013,10 +4013,25 @@ function Get-AppPxeBootBrandingPictureFileName {
 }
 
 function Get-AppPxeBootMenuBrandingConsoleIpxeLines {
+    <#
+    .SYNOPSIS
+        Optional iPXE menu picture (drawn behind the boot menu), when a PNG has been
+        dropped into the branding folder.
+    .NOTES
+        The trailing "||" is not decoration. Checked 2026-08-23 against the iPXE builds
+        this product actually serves: they carry the --picture OPTION string but NO png
+        / jpeg / pnm decoder and no framebuffer console, so `console --picture` FAILS on
+        them. A failing command aborts an iPXE script, and this line sits at :start
+        immediately before `menu` - so a stray PNG in branding/ would have taken out the
+        whole boot menu. "||" makes iPXE ignore the failure and carry on to the menu.
+        Making the picture actually render needs iPXE rebuilt with IMAGE_PNG and a
+        framebuffer console; the Secure Boot binaries are signed, so that rebuild is not
+        a drop-in (it would break the shim chain).
+    #>
     $fileName = Get-AppPxeBootBrandingPictureFileName
     if (-not $fileName) { return @() }
     @(
-        "console --picture `${http_base}/branding/$fileName --left 110 --top 90 --right 90 --bottom 70"
+        "console --picture `${http_base}/branding/$fileName --left 110 --top 90 --right 90 --bottom 70 ||"
     )
 }
 
