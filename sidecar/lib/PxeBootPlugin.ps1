@@ -1095,19 +1095,23 @@ function Get-AppPxeBootWimOverlayInitrdLines {
         $ok = $true
         $servedSubdir = [string](Get-AppPxeBootWimOverlayProfileField -OverlayProfile $overlayProfile -Name 'ServedSubdir')
         foreach ($entry in $runtime) {
-            $served = Join-Path $dir $entry.ServedName
-            if (Test-Path -LiteralPath $served) {
-                # `||` on optional files: iPXE aborts the whole boot on a failed initrd,
-                # and an optional file can legitimately fail two ways - deleted after
-                # the menu was written (cred mode switched to blank mid-session), or a
-                # Secure Boot client refusing an unsigned PE tool ("Verification
-                # failed: Security Policy Violation"). Both killed a live boot on
-                # 2026-08-24; startnet.cmd already degrades when a file is absent.
-                $suffix = if ($entry.Required) { '' } else { ' ||' }
-                $profileLines += ('initrd -n {0} ${{http_base}}/{1}/{2} {0}{3}' -f $entry.WinPeName, $servedSubdir, $entry.ServedName, $suffix)
-            } elseif ($entry.Required) {
-                $ok = $false
-                break
+            if ($entry.Required) {
+                # A missing Required file suppresses the whole profile - a boot without
+                # deploy.unc cannot deploy, so the menu must not promise it.
+                if (-not (Test-Path -LiteralPath (Join-Path $dir $entry.ServedName))) {
+                    $ok = $false
+                    break
+                }
+                $profileLines += ('initrd -n {0} ${{http_base}}/{1}/{2} {0}' -f $entry.WinPeName, $servedSubdir, $entry.ServedName)
+            } else {
+                # Optional files are listed UNCONDITIONALLY with iPXE's `||` ignore-failure
+                # idiom. Emitting them only-when-present made the menu a snapshot of a
+                # moving directory: winpe.jpg was mid-republish during a service start and
+                # the menu silently lost its line - Craig's VM booted with no background
+                # (2026-08-24, third sighting of the same race). A 404 at boot now just
+                # degrades, same as a Secure Boot refusal of an unsigned PE tool, and
+                # startnet.cmd already copes with any absent file.
+                $profileLines += ('initrd -n {0} ${{http_base}}/{1}/{2} {0} ||' -f $entry.WinPeName, $servedSubdir, $entry.ServedName)
             }
         }
         if ($ok) { $lines += $profileLines }
