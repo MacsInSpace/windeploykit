@@ -97,15 +97,20 @@ if exist "%SYS%\deploy.cred" (
 
 rem The NIC may still be settling right after wpeinit, so give the connect a few
 rem tries before giving up; the real net use error goes to the log on each miss.
+rem <nul on every net use: with no credential, net use PROMPTS for a username, and
+rem with output redirected the prompt is invisible - the boot just hangs at
+rem "attempt 1 of 5" forever (Craig hit exactly that, 2026-08-24, cred mode blank).
+rem <nul makes it fail instantly instead, and the error lands in the log.
+if not defined DUSER call :log "No deploy.cred was injected (credential mode is blank) - the share must allow unauthenticated access, or pick throwaway/vault in the Netboot panel."
 net use Z: >nul 2>&1 && net use Z: /delete /y >nul 2>&1
 set "ZOK="
 for /l %%A in (1,1,5) do (
     if not defined ZOK (
         call :log "Connecting %UNC% (attempt %%A of 5)"
         if defined DUSER (
-            net use Z: "%UNC%" /user:"%DUSER%" "%DPASS%" >"%SYS%\netuse.txt" 2>&1
+            net use Z: "%UNC%" /user:"%DUSER%" "%DPASS%" <nul >"%SYS%\netuse.txt" 2>&1
         ) else (
-            net use Z: "%UNC%" >"%SYS%\netuse.txt" 2>&1
+            net use Z: "%UNC%" <nul >"%SYS%\netuse.txt" 2>&1
         )
         if not errorlevel 1 (
             set "ZOK=1"

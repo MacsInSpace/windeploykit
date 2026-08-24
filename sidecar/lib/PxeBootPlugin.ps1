@@ -3263,6 +3263,13 @@ function Write-AppPxeBootDeployOverlayFiles {
         $script:AppPxeBootState.LastOverlayCredPublishKey = $null
         Write-SidecarLog "PXE boot: deploy overlay credential not published (mode=$credsMode)"
     }
+    # Blank mode against THIS machine's Deploy$ can never connect - the share is
+    # guest-off by design, so a client without a credential gets an auth failure at
+    # net use (and before 2026-08-24, an invisible username prompt it hung on). Say
+    # so at publish time instead of letting the first boot discover it.
+    if ($credsMode -eq 'blank' -and [bool]$cfg.smbOverlayEnabled -and [bool]$cfg.smbShareEnabled) {
+        Write-SidecarLog "PXE boot: WARNING - credential mode is blank but the deploy share is this machine's Deploy`$ (guest off). Clients cannot connect; pick throwaway or a vault credential in the Netboot panel."
+    }
 }
 
 function Get-AppPxeBootWanIsoCatalogUrl {
