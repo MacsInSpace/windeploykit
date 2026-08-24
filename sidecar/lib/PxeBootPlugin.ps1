@@ -1011,8 +1011,6 @@ function Get-AppPxeBootWimOverlayProfiles {
                 @{ ServedName = '7za.dll';  WinPeName = '7za.dll';  Required = $false }
                 @{ ServedName = '7zxa.dll'; WinPeName = '7zxa.dll'; Required = $false }
                 @{ ServedName = 'curl.exe'; WinPeName = 'curl.exe'; Required = $false }
-                # Optional WinPE wallpaper - present only when one has been imported.
-                @{ ServedName = 'winpe.jpg'; WinPeName = 'winpe.jpg'; Required = $false }
                 # Optional console-UI customisation: one line of header text, and an
                 # ASCII logo drawn above it. Both absent by default.
                 @{ ServedName = 'deploy.title'; WinPeName = 'deploy.title'; Required = $false }
@@ -1022,6 +1020,19 @@ function Get-AppPxeBootWimOverlayProfiles {
                 @{ ServedName = 'loghost';     WinPeName = 'deploy.loghost'; Required = $false }
             )
             PublishRuntime = { param($Dir, $LanIp) Write-AppPxeBootDeployOverlayFiles -Dir $Dir -LanIp $LanIp }
+            # The WinPE wallpaper is BAKED, not injected: stock boot.wims already carry
+            # \Windows\System32\winpe.jpg (hardlinked to WinSxS), and wimboot's initrd
+            # override does not take on that file - a real boot fetched the custom jpg
+            # and still painted the stock near-black one (proven from the access log +
+            # extracted stock image, 2026-08-24). wimlib update replaces it properly;
+            # the hash marker re-bakes only when the imported background changes.
+            Bakes = @(
+                @{
+                    MarkerName = '.winpe-bg'
+                    WimPath    = '/Windows/System32/winpe.jpg'
+                    Source     = { Get-AppPxeBootWinPeBackgroundPath }
+                }
+            )
         }
         # Example (future): bake a static unattend.xml into a custom install WIM -
         # @{
@@ -1332,6 +1343,14 @@ function Invoke-AppPxeBootWimOverlayBake {
             return @{ skipped = $true; reason = 'wim-incompatible'; profile = $ProfileId; missing = [string]$required }
         }
     }
+
+    # WIMs imported from ISO media inherit the ISO's read-only mode (555) and wimlib
+    # update refuses them (exit 71). The store's WIMs are ours to service - make it
+    # writable before baking (found on Server2025-boot.wim, 2026-08-24).
+    try {
+        $wimItem = Get-Item -LiteralPath $WimPath
+        if ($wimItem.IsReadOnly) { $wimItem.IsReadOnly = $false }
+    } catch { }
 
     $updateFile = Join-Path ([IO.Path]::GetTempPath()) ("sm-pxe-wim-overlay-$([Guid]::NewGuid().ToString('N')).txt")
     try {
@@ -3213,20 +3232,6 @@ function Write-AppPxeBootDeployOverlayFiles {
         }
     }
 
-    # WinPE wallpaper, when one has been imported (Boot Images -> customisation).
-    $bgSrc = Get-AppPxeBootWinPeBackgroundPath
-    $bgDst = Join-Path $Dir $script:AppPxeBootWinPeBackgroundName
-    if (Test-Path -LiteralPath $bgSrc) {
-        $s = Get-Item -LiteralPath $bgSrc
-        $d = Get-Item -LiteralPath $bgDst -ErrorAction SilentlyContinue
-        if (-not $d -or $d.Length -ne $s.Length -or $d.LastWriteTimeUtc -lt $s.LastWriteTimeUtc) {
-            Copy-Item -LiteralPath $bgSrc -Destination $bgDst -Force
-            Write-SidecarLog 'PXE boot: published the WinPE background (winpe.jpg)'
-        }
-    } elseif (Test-Path -LiteralPath $bgDst) {
-        Remove-Item -LiteralPath $bgDst -Force -ErrorAction SilentlyContinue
-    }
-
     if ((Test-AppPxeBootDeployClientInjectEnabled) -and -not (Test-Path -LiteralPath (Join-Path $Dir '7z.exe'))) {
         Write-SidecarLogVerbose 'PXE boot: deploy client tools (7z/curl) not found - .cab packs only, no live log'
     }
@@ -3370,9 +3375,11 @@ function Set-AppPxeBootBrandingImage {
         already on the machine (sips on macOS, System.Drawing on Windows) because that
         is what WinPE reads.
     .NOTES
-        Delivered as an overlay initrd, so the boot WIM itself is never modified - the
-        same mechanism as the deploy client (Craig, 2026-08-23: boot.wim customisation,
-        not iPXE).
+        BAKED into each boot WIM via the overlay bake engine (wimlib update + hash
+        marker): the stock \Windows\System32\winpe.jpg is hardlinked inside the WIM
+        and wimboot's initrd override does not take on it (proven 2026-08-24), so
+        injection can never show a custom background. Baking is the one deliberate
+        WIM modification in the product, chosen explicitly by importing a background.
     #>
     param([Parameter(Mandatory)][string]$SourcePath)
     if (-not (Test-Path -LiteralPath $SourcePath)) { throw "PXE boot: picture not found - $SourcePath" }
@@ -3387,6 +3394,15 @@ function Set-AppPxeBootBrandingImage {
         throw 'PXE boot: could not prepare the WinPE background (jpg conversion failed).'
     }
     Write-SidecarLog "PXE boot: WinPE background set from $([IO.Path]::GetFileName($SourcePath))"
+    # Bake it into every boot WIM now - the hash markers make this a no-op for WIMs
+    # already carrying this exact image, and the next PXE boot shows it without
+    # waiting for a service start.
+    $wimDir = (Get-AppPxeBootLayoutPaths).wimDir
+    foreach ($wim in @(Get-ChildItem -LiteralPath $wimDir -Filter '*.wim' -File -ErrorAction SilentlyContinue)) {
+        try { Sync-AppPxeBootWimOverlays -WimPath $wim.FullName | Out-Null } catch {
+            Write-SidecarLog "PXE boot: background bake failed for $($wim.Name) - $($_.Exception.Message)"
+        }
+    }
     Get-AppPxeBootBrandingStatus
 }
 
@@ -3395,10 +3411,10 @@ function Clear-AppPxeBootBrandingImage {
     $paths = Get-AppPxeBootLayoutPaths
     $p = Get-AppPxeBootWinPeBackgroundPath
     if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
-    # Drop the served copy too, so the next boot stops injecting it.
+    # Legacy: pre-bake builds also served an initrd copy - tidy it if present.
     $served = Join-Path (Join-Path $paths.httpRoot 'deploy') $script:AppPxeBootWinPeBackgroundName
     if (Test-Path -LiteralPath $served) { Remove-Item -LiteralPath $served -Force -ErrorAction SilentlyContinue }
-    Write-SidecarLog 'PXE boot: WinPE background cleared'
+    Write-SidecarLog 'PXE boot: WinPE background cleared - WIMs already baked keep the last image until re-imported'
     Get-AppPxeBootBrandingStatus
 }
 
@@ -8418,6 +8434,60 @@ function Sync-AppPxeBootInstallWimMounts {
         Clear-AppPxeBootMemo
     } catch {
         Write-SidecarLog "PXE boot: re-mount failed - $($_.Exception.Message)"
+    }
+}
+
+function Sync-AppPxeBootIngestRoute {
+    <#
+    .SYNOPSIS
+        Housekeeping: if Caddy is serving but proxying imaging logs to a listener that
+        is not this process's, own the route - start our listener and restart HTTP.
+    .NOTES
+        The Start handler already does this on a Start click, but a restarted sidecar
+        ADOPTS running daemons without one: Craig's 21:25 session showed running badges,
+        he booted a client, and every log push 502'd against the previous session's dead
+        port until someone pressed Start (2026-08-24). Runs on the housekeeping tick;
+        cheap no-op when HTTP is down or the route already points at our listener.
+    #>
+    Sync-AppPxeBootHttpProcessState
+    if (-not ($script:AppPxeBootState.HttpProcess -and -not $script:AppPxeBootState.HttpProcess.HasExited)) { return }
+    $current = 0
+    try {
+        $cfText = Get-Content -LiteralPath (Get-AppPxeBootLayoutPaths).caddyfile -Raw -ErrorAction Stop
+        if ($cfText -match 'reverse_proxy 127\.0\.0\.1:(\d+)') { $current = [int]$Matches[1] }
+    } catch { return }
+    if ($current -le 0) { return }
+    $mine = if ($script:AppPxeBootState.LogIngest) { [int]$script:AppPxeBootState.LogIngest.Port } else { 0 }
+    if ($current -eq $mine) { return }
+    # Not ours. If whoever owns it is alive, leave it be; if it is dead, take over.
+    $alive = $false
+    try {
+        $probe = [System.Net.Sockets.TcpClient]::new()
+        $alive = $probe.ConnectAsync('127.0.0.1', $current).Wait(300) -and $probe.Connected
+        $probe.Dispose()
+    } catch { $alive = $false }
+    if ($alive) { return }
+    # Throttle: one attempt per 30s. The housekeeping tick fires every dispatch pass,
+    # and an unthrottled attempt looped itself to death on 2026-08-24 - see below.
+    $now = [DateTime]::UtcNow
+    $last = if ($script:AppPxeBootState.ContainsKey('LastIngestRouteAdopt')) { $script:AppPxeBootState.LastIngestRouteAdopt } else { $null }
+    if ($last -and ($now - $last).TotalSeconds -lt 30) { return }
+    $script:AppPxeBootState.LastIngestRouteAdopt = $now
+    Write-SidecarLog "PXE boot: adopting the imaging-log route - Caddy proxies to dead :$current"
+    try {
+        $cfg = Read-AppPxeBootConfig
+        # Order matters: Stop-AppPxeBootHttpServer ALSO stops this process's ingest
+        # listener (line ~6557), so the listener must be started AFTER the stop - the
+        # first version started it first, the stop killed it, the next tick saw a dead
+        # port again, and the loop restarted Caddy every two seconds until everything
+        # fell over (2026-08-24).
+        Stop-AppPxeBootHttpServer | Out-Null
+        $port = Start-AppPxeBootImagingLogIngest
+        if ($port -le 0) { return }
+        Start-AppPxeBootHttpServer -HttpRoot (Get-AppPxeBootLayoutPaths).httpRoot -Port ([int]$cfg.httpPort) -InterfaceId $cfg.interfaceId -IngestPort $port | Out-Null
+        Write-SidecarLog "PXE boot: imaging-log route restored onto live :$port"
+    } catch {
+        Write-SidecarLog "PXE boot: imaging-log route adoption failed - $($_.Exception.Message)"
     }
 }
 

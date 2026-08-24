@@ -178,7 +178,7 @@ namespace WinDeployKitSidecar {
 function Invoke-SidecarDispatchOnce {
     try {
         # Background housekeeping the panels depend on for progress events.
-        foreach ($job in @('Sync-AppAria2DirectDownloadJobs', 'Sync-AppVendorSccmCatalogRefreshJob', 'Start-AppVendorSccmCatalogAutoRefreshIfDue', 'Sync-AppPxeBootDriverPullThrough', 'Sync-AppEvalIsoCatalogRefreshJob', 'Start-AppEvalIsoCatalogRefreshIfDue', 'Sync-AppEvalIsoDownloadQueue', 'Sync-AppPxeBootInstallWimMounts', 'Sync-AppPxeBootDeployClientPublish', 'Sync-AppSidecarJobs')) {
+        foreach ($job in @('Sync-AppAria2DirectDownloadJobs', 'Sync-AppVendorSccmCatalogRefreshJob', 'Start-AppVendorSccmCatalogAutoRefreshIfDue', 'Sync-AppPxeBootDriverPullThrough', 'Sync-AppEvalIsoCatalogRefreshJob', 'Start-AppEvalIsoCatalogRefreshIfDue', 'Sync-AppEvalIsoDownloadQueue', 'Sync-AppPxeBootInstallWimMounts', 'Sync-AppPxeBootDeployClientPublish', 'Sync-AppPxeBootIngestRoute', 'Sync-AppSidecarJobs')) {
             if (Test-AppSidecarCommand $job) {
                 try { & $job | Out-Null } catch { }
             }
