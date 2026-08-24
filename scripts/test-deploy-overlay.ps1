@@ -75,13 +75,18 @@ try {
         Assert-Equal 'throwaway' (Read-AppPxeBootConfig).deployOverlayCreds 'creds'
     }
 
-    Test-Case 'creds mode values' {
-        foreach ($v in @('throwaway', 'blank', 'dept', 'vault:acme-deploy')) {
+    Test-Case 'creds mode values - throwaway or vault only, no blank' {
+        foreach ($v in @('throwaway', 'vault:acme-deploy')) {
             if (-not (Test-AppPxeBootDeployOverlayCredsModeValue -Value $v)) { throw "'$v' should be valid" }
         }
-        foreach ($v in @('', 'vault:', 'vault:bad id', 'other')) {
+        # blank hung a real boot on an invisible net use prompt (2026-08-24) and dept
+        # was USM-only - both must stay rejected so an old config self-heals to
+        # throwaway at read time.
+        foreach ($v in @('', 'blank', 'dept', 'vault:', 'vault:bad id', 'other')) {
             if (Test-AppPxeBootDeployOverlayCredsModeValue -Value $v) { throw "'$v' should be rejected" }
         }
+        Set-TestConfig @{ deployOverlayCreds = 'blank' }
+        Assert-Equal 'throwaway' (Read-AppPxeBootConfig).deployOverlayCreds 'a legacy blank config heals to throwaway'
     }
 
     Test-Case 'deploy UNC uses the configured share name' {
@@ -157,9 +162,8 @@ try {
     }
 
     Test-Case 'initrd lines come out for an overlay-eligible WIM' {
-        # deploy.cred is only served in throwaway/vault cred modes - blank mode is a
-        # legitimate config (Craig runs it), so make the fixture deterministic: drop a
-        # cred file in, assert its line, and clean it up if we created it.
+        # Make the fixture deterministic regardless of what the live store holds:
+        # drop a cred file in, assert its line, clean up if we created it.
         $dir = Get-AppPxeBootWimOverlayServedDir -OverlayProfile (Get-AppPxeBootWimOverlayProfiles | Select-Object -First 1)
         $credPath = Join-Path $dir 'deploy.cred'
         $madeCred = $false

@@ -215,20 +215,18 @@ type PxeHostFormSnapshot = {
 };
 
 function normalizeOverlayCreds(raw: string | undefined): string {
+  // The deploy credential always defaults: there is no "blank" mode. A client
+  // without a credential cannot open the guest-off Deploy$, and the old silent
+  // downgrade to blank hung a real boot at net use (2026-08-24).
   const v = (raw ?? "").trim();
-  if (!v || v === "blank") return "blank";
-  if (v === "throwaway") return v;
   if (v.startsWith("vault:")) return v;
-  return "blank";
+  return "throwaway";
 }
 
 function pxeHostFormFromConfig(resp: PxeBootPluginConfigResponse): PxeHostFormSnapshot {
   const mode = resp.config.tftpMode;
   const smbOverlayEnabled = resp.config.smbOverlayEnabled === true;
-  let overlayCreds = normalizeOverlayCreds(resp.config.deployOverlayCreds);
-  if (!smbOverlayEnabled && overlayCreds === "throwaway") {
-    overlayCreds = "blank";
-  }
+  const overlayCreds = normalizeOverlayCreds(resp.config.deployOverlayCreds);
   return {
     httpPort: String(resp.config.httpPort ?? 8080),
     interfaceId: resp.config.interfaceId ?? "",
@@ -328,7 +326,7 @@ export function PxeWorkspace({
   const [tftpMode, setTftpMode] = useState<"router" | "standalone" | "proxy">("router");
   const [smbShareEnabled, setSmbShareEnabled] = useState(false);
   const [smbOverlayEnabled, setSmbOverlayEnabled] = useState(false);
-  const [overlayCreds, setOverlayCreds] = useState<string>("blank");
+  const [overlayCreds, setOverlayCreds] = useState<string>("throwaway");
   const [tftpBootFile, setTftpBootFile] = useState(BOOT_FILE_NAME);
   const [removeTarget, setRemoveTarget] = useState<PxeBootWimEntry | null>(null);
   const [replaceConfirm, setReplaceConfirm] = useState<{ sourcePath: string; fileName: string } | null>(null);

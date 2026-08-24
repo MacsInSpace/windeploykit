@@ -3003,7 +3003,10 @@ function Test-AppPxeBootDeployClientInjectEnabled {
 function Test-AppPxeBootDeployOverlayCredsModeValue {
     param([string]$Value)
     $v = ([string]$Value).Trim()
-    if ($v -in @('throwaway', 'blank', 'dept')) { return $true }
+    # No blank mode: a credential-less client cannot open the guest-off Deploy$,
+    # and "blank" only ever got into a config via a frontend downgrade bug (it hung
+    # a real boot at net use, 2026-08-24). The deploy credential always defaults.
+    if ($v -eq 'throwaway') { return $true }
     if ($v -match '^vault:[A-Za-z0-9_-]+$') { return $true }
     return $false
 }
@@ -3059,8 +3062,6 @@ function Get-AppPxeBootDeployOverlayCredentialPair {
     } else {
         'throwaway'
     }
-    if ($mode -eq 'blank') { return $null }
-
     if ($mode -eq 'throwaway') {
         $cred = $null
         if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
@@ -3262,13 +3263,6 @@ function Write-AppPxeBootDeployOverlayFiles {
         Remove-Item -LiteralPath $credFile -Force -ErrorAction SilentlyContinue
         $script:AppPxeBootState.LastOverlayCredPublishKey = $null
         Write-SidecarLog "PXE boot: deploy overlay credential not published (mode=$credsMode)"
-    }
-    # Blank mode against THIS machine's Deploy$ can never connect - the share is
-    # guest-off by design, so a client without a credential gets an auth failure at
-    # net use (and before 2026-08-24, an invisible username prompt it hung on). Say
-    # so at publish time instead of letting the first boot discover it.
-    if ($credsMode -eq 'blank' -and [bool]$cfg.smbOverlayEnabled -and [bool]$cfg.smbShareEnabled) {
-        Write-SidecarLog "PXE boot: WARNING - credential mode is blank but the deploy share is this machine's Deploy`$ (guest off). Clients cannot connect; pick throwaway or a vault credential in the Netboot panel."
     }
 }
 
