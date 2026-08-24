@@ -50,6 +50,7 @@ $libRoot = Join-Path $script:SidecarRoot 'lib'
 . (Join-Path $libRoot 'AppHttp.ps1')
 . (Join-Path $libRoot 'AppElevation.ps1')
 . (Join-Path $libRoot 'AppNativeProcess.ps1')
+. (Join-Path $libRoot 'AppSidecarJobs.ps1')
 . (Join-Path $libRoot 'AppPluginGates.ps1')
 . (Join-Path $libRoot 'AppSharedSecretVault.ps1')
 . (Join-Path $libRoot 'LocalMachineCredentials.ps1')
@@ -177,7 +178,7 @@ namespace WinDeployKitSidecar {
 function Invoke-SidecarDispatchOnce {
     try {
         # Background housekeeping the panels depend on for progress events.
-        foreach ($job in @('Sync-AppAria2DirectDownloadJobs', 'Sync-AppVendorSccmCatalogRefreshJob', 'Start-AppVendorSccmCatalogAutoRefreshIfDue', 'Sync-AppPxeBootDriverPullThrough', 'Sync-AppEvalIsoCatalogRefreshJob', 'Start-AppEvalIsoCatalogRefreshIfDue', 'Sync-AppEvalIsoDownloadQueue', 'Sync-AppPxeBootInstallWimMounts', 'Sync-AppPxeBootDeployClientPublish')) {
+        foreach ($job in @('Sync-AppAria2DirectDownloadJobs', 'Sync-AppVendorSccmCatalogRefreshJob', 'Start-AppVendorSccmCatalogAutoRefreshIfDue', 'Sync-AppPxeBootDriverPullThrough', 'Sync-AppEvalIsoCatalogRefreshJob', 'Start-AppEvalIsoCatalogRefreshIfDue', 'Sync-AppEvalIsoDownloadQueue', 'Sync-AppPxeBootInstallWimMounts', 'Sync-AppPxeBootDeployClientPublish', 'Sync-AppSidecarJobs')) {
             if (Test-AppSidecarCommand $job) {
                 try { & $job | Out-Null } catch { }
             }
@@ -264,6 +265,7 @@ try {
     # not by parent, so a second sidecar - a test harness, a second window - used to
     # stop the running app's imaging services on its way out (caught 2026-08-24 doing
     # exactly that to a live PXE server).
+    try { if (Get-Command Stop-AppSidecarJobs -ErrorAction SilentlyContinue) { Stop-AppSidecarJobs } } catch { }
     if ($script:AppSidecarStartedPxeServices) {
         try { if (Get-Command Stop-AppPxeBootServices -ErrorAction SilentlyContinue) { Stop-AppPxeBootServices | Out-Null } } catch { }
     }

@@ -6,12 +6,13 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { DataTable, type DataTableColumn } from "../components/DataTable";
 import type { MaybeInfoTipRow } from "../components/InfoTip";
 import { VaultEditorOverlay } from "../components/VaultEditorOverlay";
+import { isPxeBootServiceStartAck } from "../lib/types";
 import { InfrastructureCredentialsOverlay } from "../components/InfrastructureCredentialsOverlay";
 import { PanelShell } from "../components/PanelShell";
 import { SEP } from "../components/ContextMenu";
 import { useConsoleActions, type ConsoleNodeActions } from "../state/consoleActions";
 import { SessionDot } from "../components/SessionDot";
-import { sidecar } from "../lib/ipc";
+import { onSidecarEvent, sidecar } from "../lib/ipc";
 import {
   applyPxeBootLibraryToCache,
   patchPxeBootPanelData,
@@ -41,6 +42,8 @@ import type {
   TaskSequenceLibraryLists,
   VaultSecretsResponse,
   VaultSecretSummary,
+  PxeBootServiceStartResult,
+  PxeBootJobFinishedEvent,
   PxeBootWimEntry,
   PxeBootWimLibraryResponse,
   SessionState,
@@ -315,6 +318,9 @@ export function PxeWorkspace({
   }, []);
 
   const [busy, setBusy] = useState(false);
+  // A service start now runs in a child process, so the button has to stay in
+  // "Starting..." until the job-finished event lands rather than until the call returns.
+  const [servicesStarting, setServicesStarting] = useState(false);
   const [menuRebuildMessage, setMenuRebuildMessage] = useState<string | null>(null);
   const [httpPort, setHttpPort] = useState("8080");
   const [isoCatalogSource, setIsoCatalogSource] = useState<"local" | "wan">("local");
@@ -506,6 +512,50 @@ export function PxeWorkspace({
     revalidateQueryKey(PXE_BOOT_CONFIG_CACHE_KEY);
     refetchConfig();
   }, [refetchConfig]);
+
+  // Read inside the job-finished handler without resubscribing on every poll.
+  const tccBlockedRef = useRef(false);
+  useEffect(() => {
+    tccBlockedRef.current = Boolean(data?.smbShare?.tccBlocked);
+  }, [data?.smbShare?.tccBlocked]);
+
+  // Background jobs report back here. 'pxe-services' is a service start that was
+  // handed to a child process so the dispatch loop stayed free for everything else.
+  useEffect(() => {
+    const unsub = onSidecarEvent((ev) => {
+      if (ev.event !== "job-finished") return;
+      const d = ev.data as PxeBootJobFinishedEvent | undefined;
+      if (!d || d.job !== "pxe-services") return;
+      setServicesStarting(false);
+      setBusy(false);
+      if (!d.ok) {
+        toast.error(PLUGIN_TITLE, d.error ?? "The services could not be started.");
+        void reloadConfig();
+        return;
+      }
+      const s = d.result;
+      if (s) {
+        patchPxeBootPanelStatus(s);
+        if (s.httpRunning && !tccBlockedRef.current) setSmbShareEnabled(true);
+      }
+      if (s?.httpRunning && s?.tftpRunning) {
+        toast.info(PLUGIN_TITLE, "TFTP + HTTP started.");
+      } else if (s?.httpRunning && s?.tftpLastError) {
+        toast.info(PLUGIN_TITLE, "HTTP started. TFTP was not started - see TFTP section below.");
+      } else if (s?.httpRunning) {
+        toast.info(PLUGIN_TITLE, "HTTP started.");
+      } else if (s?.tftpRunning) {
+        toast.info(PLUGIN_TITLE, "TFTP started.");
+      } else {
+        toast.info(PLUGIN_TITLE, "Services started (see status).");
+      }
+      void reloadConfig();
+    });
+    return () => {
+      void unsub.then((f) => f());
+    };
+  }, [reloadConfig]);
+
 
   const formInitRef = useRef(false);
   useEffect(() => {
@@ -1245,7 +1295,14 @@ export function PxeWorkspace({
         );
       }
       if (!(await persistConfig(undefined, { skipMenuRegen: true }))) return;
-      const s = await sidecar.invoke<PxeBootPluginStatus>("StartPxeBootServices");
+      const s = await sidecar.invoke<PxeBootServiceStartResult>("StartPxeBootServices");
+      // Backgrounded: the sidecar answered straight away so the rest of the app stays
+      // usable. The finished status arrives as a job-finished event (see below), which
+      // is what clears "Starting..." and raises the toast.
+      if (isPxeBootServiceStartAck(s)) {
+        setServicesStarting(true);
+        return;
+      }
       patchPxeBootPanelStatus(s);
       // SMB comes up with imaging services (unless the root is TCC-blocked on macOS).
       if (s.httpRunning && !data?.smbShare?.tccBlocked) {
@@ -1558,17 +1615,23 @@ export function PxeWorkspace({
             { label: "Credentials...", disabled: busy || loading, onSelect: () => setCredentialsOpen(true) },
             SEP,
             {
-              label: busy ? "Working..." : "Start Services",
-              disabled: busy || loading || !hasLanIp,
+              // servicesStarting: the start is running in a child process, so the call
+              // has already returned - the menu must not read as idle until it lands.
+              label: servicesStarting ? "Starting..." : busy ? "Working..." : "Start Services",
+              disabled: busy || servicesStarting || loading || !hasLanIp,
               onSelect: () => void startServices(),
             },
-            { label: "Stop Services", disabled: busy || loading || !running, onSelect: () => void stopServices() },
+            {
+              label: "Stop Services",
+              disabled: busy || servicesStarting || loading || !running,
+              onSelect: () => void stopServices(),
+            },
           ]
         : [],
       refresh: reloadConfig,
       status: lanIpText,
     }),
-    [showHost, busy, loading, hasLanIp, running, startServices, stopServices, reloadConfig, lanIpText],
+    [showHost, busy, servicesStarting, loading, hasLanIp, running, startServices, stopServices, reloadConfig, lanIpText],
   );
   useConsoleActions(consoleActions);
 

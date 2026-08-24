@@ -152,10 +152,27 @@ function Handle-StartPxeBootServices {
     $httpOnly = Get-AppSidecarParam -Params $Params -Name 'httpOnly'
     $tftpOnly = Get-AppSidecarParam -Params $Params -Name 'tftpOnly'
     $minimal = Get-AppSidecarParam -Params $Params -Name 'minimal'
-    $data = Start-AppPxeBootServices `
-        -HttpOnly:([bool]$httpOnly) `
-        -TftpOnly:([bool]$tftpOnly) `
-        -Minimal:([bool]$minimal)
+    # Off the dispatch thread wherever possible: a start is 5-16s of mounts, daemons
+    # and share provisioning, and while it ran every other panel queued behind it.
+    # The one case that cannot move is a macOS box with no saved admin password - that
+    # dialog has to come from this process (see Test-AppPxeBootServiceStartNeedsPrompt).
+    $canBackground = (Test-AppSidecarCommand Start-AppSidecarJob) -and
+        -not (Test-AppPxeBootServiceStartNeedsPrompt -HttpOnly:([bool]$httpOnly) -Minimal:([bool]$minimal))
+    $data = if ($canBackground) {
+        Start-AppSidecarJob -Name 'pxe-services' -FunctionName 'Start-AppPxeBootServices' -TimeoutMinutes 5 `
+            -Arguments @{ HttpOnly = [bool]$httpOnly; TftpOnly = [bool]$tftpOnly; Minimal = [bool]$minimal } `
+            -OnComplete {
+                param($ok, $result, $err)
+                # The badges must reflect what the child actually did, not what this
+                # process remembered from before it ran.
+                if (Test-AppSidecarCommand Clear-AppPxeBootMemo) { Clear-AppPxeBootMemo }
+            }
+    } else {
+        Start-AppPxeBootServices `
+            -HttpOnly:([bool]$httpOnly) `
+            -TftpOnly:([bool]$tftpOnly) `
+            -Minimal:([bool]$minimal)
+    }
     # This process owns them now, so it is allowed to stop them on the way out.
     $script:AppSidecarStartedPxeServices = $true
     Write-SidecarResponse -Id $Id -Data $data

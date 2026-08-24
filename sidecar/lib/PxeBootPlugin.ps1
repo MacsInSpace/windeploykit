@@ -8694,6 +8694,33 @@ function Remove-AppPxeBootImageLibraryShare {
     }
 }
 
+function Test-AppPxeBootServiceStartNeedsPrompt {
+    <#
+    .SYNOPSIS
+        $true when starting would have to put up the macOS admin password dialog.
+    .NOTES
+        The one reason a start cannot move to a child process: that dialog has to come
+        from this process's own STA thread. Windows, Linux, and any macOS box whose
+        admin credential is already in the vault or the session cache can all be
+        backgrounded - which is every machine after the first successful start.
+    #>
+    param([switch]$HttpOnly, [switch]$Minimal)
+    if (-not $IsMacOS) { return $false }
+    $cfg = Read-AppPxeBootConfig
+    $startTftp = -not $HttpOnly
+    $needsAdmin = $startTftp -or ($cfg.smbShareEnabled -and -not $Minimal)
+    if (-not $needsAdmin) { return $false }
+    try {
+        if ((Get-AppMacOsAdminCredentialCacheStatus).cached) { return $false }
+    } catch { }
+    try {
+        if (Test-AppSidecarCommand Resolve-AppMacOsAdminCredentialFromVaultOrPrompt) {
+            if (Resolve-AppMacOsAdminCredentialFromVaultOrPrompt) { return $false }
+        }
+    } catch { }
+    return $true
+}
+
 function Start-AppPxeBootServices {
     param(
         [switch]$HttpOnly,

@@ -14,6 +14,8 @@ export type SidecarEventName =
   | "driver-download-progress"
   | "vendor-catalog-refresh"
   | "eval-iso-catalog-refresh"
+  | "job-started"
+  | "job-finished"
   | "aria2-promote"
   | "exited";
 
@@ -332,6 +334,43 @@ export interface PxeBootRouterInstructions {
   option66Label?: string;
   option67Label?: string;
   notes: string[];
+}
+
+/**
+ * StartPxeBootServices answers immediately with an ack when it can hand the work to a
+ * child process, and with the finished status when it cannot (a macOS box whose admin
+ * password still has to be typed). The finished status then arrives as a
+ * "pxe-services-started" event.
+ */
+export interface PxeBootServiceStartAck {
+  accepted: true;
+  background: true;
+  mode?: string;
+  alreadyRunning?: boolean;
+}
+
+export type PxeBootServiceStartResult = PxeBootPluginStatus | PxeBootServiceStartAck;
+
+export function isPxeBootServiceStartAck(
+  v: PxeBootServiceStartResult | undefined,
+): v is PxeBootServiceStartAck {
+  return Boolean(v && (v as PxeBootServiceStartAck).background === true);
+}
+
+/** Payload of the generic "job-finished" event: one shape for every background job. */
+export interface PxeBootJobFinishedEvent {
+  job: string;
+  jobId?: string;
+  ok: boolean;
+  error?: string;
+  elapsed?: number;
+  result?: PxeBootPluginStatus;
+}
+
+export interface PxeBootServicesStartedEvent {
+  mode?: string;
+  error?: string;
+  status?: PxeBootPluginStatus;
 }
 
 export interface PxeBootPluginStatus {
