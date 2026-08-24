@@ -168,8 +168,12 @@ function Handle-StartPxeBootServices {
     $canBackground = (Test-AppSidecarCommand Start-AppSidecarJob) -and
         -not (Test-AppPxeBootServiceStartNeedsPrompt -HttpOnly:([bool]$httpOnly) -Minimal:([bool]$minimal))
     $data = if ($canBackground) {
+        # The ingest listener must outlive the child: start (or reuse) it in THIS
+        # process and hand the child the port for the Caddyfile. Without this, every
+        # WinPE log push 502'd the moment the start job exited (2026-08-24).
+        $parentIngestPort = Start-AppPxeBootImagingLogIngest
         Start-AppSidecarJob -Name 'pxe-services' -FunctionName 'Start-AppPxeBootServices' -TimeoutMinutes 5 `
-            -Arguments @{ HttpOnly = [bool]$httpOnly; TftpOnly = [bool]$tftpOnly; Minimal = [bool]$minimal } `
+            -Arguments @{ HttpOnly = [bool]$httpOnly; TftpOnly = [bool]$tftpOnly; Minimal = [bool]$minimal; IngestPort = [int]$parentIngestPort } `
             -OnComplete {
                 param($ok, $result, $err)
                 # The badges must reflect what the child actually did, not what this

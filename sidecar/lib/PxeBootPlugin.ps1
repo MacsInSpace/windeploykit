@@ -6545,14 +6545,35 @@ function Start-AppPxeBootHttpServer {
     param(
         [Parameter(Mandatory)][string]$HttpRoot,
         [Parameter(Mandatory)][int]$Port,
-        [string]$InterfaceId
+        [string]$InterfaceId,
+        # The imaging-log ingest listener lives in a PROCESS, and since the service
+        # start moved to a child pwsh (2026-08-24) that process must be the parent
+        # sidecar - the child's listener died with it and every WinPE log push got a
+        # 502 from Caddy. When the parent already owns a listener it passes the port
+        # here; 0 = start one in this process (the inline path).
+        [int]$IngestPort = 0
     )
 
     Clear-AppPxeBootLegacyHttpRunner
 
     Sync-AppPxeBootHttpProcessState -Port $Port
     if ($script:AppPxeBootState.HttpProcess -and -not $script:AppPxeBootState.HttpProcess.HasExited) {
-        return @{ ok = $true; detail = 'HTTP already running'; backend = 'caddy' }
+        # An adopted Caddy has its Caddyfile baked - if its imaging-log route points at
+        # a dead listener (the one that started it exited; ports are per-process), every
+        # WinPE log push 502s until Caddy is restarted with the live port. Verify before
+        # accepting it (caught live 2026-08-24: client pushes bounced off port 54960).
+        $desiredIngest = if ($IngestPort -gt 0) { $IngestPort } elseif ($script:AppPxeBootState.LogIngest) { [int]$script:AppPxeBootState.LogIngest.Port } else { 0 }
+        $currentIngest = 0
+        try {
+            $cfText = Get-Content -LiteralPath (Get-AppPxeBootLayoutPaths).caddyfile -Raw -ErrorAction Stop
+            if ($cfText -match 'reverse_proxy 127\.0\.0\.1:(\d+)') { $currentIngest = [int]$Matches[1] }
+        } catch { }
+        if ($desiredIngest -gt 0 -and $currentIngest -ne $desiredIngest) {
+            Write-SidecarLog "PXE boot: restarting HTTP - Caddy proxies imaging logs to :$currentIngest but the live ingest listener is :$desiredIngest"
+            Stop-AppPxeBootHttpServer | Out-Null
+        } else {
+            return @{ ok = $true; detail = 'HTTP already running'; backend = 'caddy' }
+        }
     }
 
     $paths = Get-AppPxeBootLayoutPaths
@@ -6594,7 +6615,7 @@ function Start-AppPxeBootHttpServer {
 
     # Imaging-log ingest first so the Caddyfile can carry its reverse_proxy port. A failed
     # ingest start (port 0) just omits the route - imaging never depends on log push.
-    $ingestPort = Start-AppPxeBootImagingLogIngest
+    $ingestPort = if ($IngestPort -gt 0) { $IngestPort } else { Start-AppPxeBootImagingLogIngest }
 
     Write-AppPxeBootCaddyfile -Path $caddyConfig -HttpRoot $HttpRoot -Port $Port -BindAddress $bindAddress -ImagingLogIngestPort $ingestPort
 
@@ -7583,7 +7604,10 @@ function Start-AppPxeBootServices {
         # Serve files only - no Deploy$ SMB share, no ISO mounts, no menu regeneration.
         # For callers that just need the local web root (AP Converter), which must not
         # enable SMB on a machine whose owner never turned Netboot on.
-        [switch]$Minimal
+        [switch]$Minimal,
+        # See Start-AppPxeBootHttpServer: the parent sidecar's ingest listener port,
+        # when this start runs in a child process.
+        [int]$IngestPort = 0
     )
     # Whatever the badges say next must reflect what we are about to do.
     Clear-AppPxeBootMemo
@@ -7633,7 +7657,7 @@ function Start-AppPxeBootServices {
 
     if ($startHttp) {
         try {
-            Start-AppPxeBootHttpServer -HttpRoot $layout.httpRoot -Port ([int]$cfg.httpPort) -InterfaceId $cfg.interfaceId | Out-Null
+            Start-AppPxeBootHttpServer -HttpRoot $layout.httpRoot -Port ([int]$cfg.httpPort) -InterfaceId $cfg.interfaceId -IngestPort $IngestPort | Out-Null
         } catch {
             $msg = $_.Exception.Message
             $script:AppPxeBootState.HttpLastError = $msg
