@@ -288,10 +288,10 @@ try {
         # into the WIM still booted black, 2026-08-24), so the background is drawn
         # by the wdk-bg viewer riding the overlay - the WIM stays untouched (Craig:
         # "work with any wim without touching it").
-        foreach ($n in @('wdk-bg.exe', 'deploy-bg.bmp')) {
+        foreach ($n in @('wdk-bg.exe', 'deploy-bg.bmp', 'wdk-panel.exe', 'deploy-ui.cfg')) {
             $hit = @($p.Runtime | Where-Object { $_.WinPeName -eq $n })
             if ($hit.Count -ne 1) { throw "$n must be a runtime overlay entry" }
-            if ([bool]$hit[0].Required) { throw "$n must not be Required - most deploys have no background" }
+            if ([bool]$hit[0].Required) { throw "$n must not be Required - the console face still works without them" }
         }
         if (@($p.Runtime | Where-Object { $_.WinPeName -eq 'winpe.jpg' }).Count -gt 0) { throw 'winpe.jpg must not ride the overlay - WinPE never paints it' }
         if ($null -ne (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $p -Name 'Bakes')) { throw 'the deploy-share profile must bake nothing - WIMs are never modified' }

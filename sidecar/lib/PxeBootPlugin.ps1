@@ -1021,6 +1021,15 @@ function Get-AppPxeBootWimOverlayProfiles {
                 # Boot clients pick it up from Z:\Tools like 7z/curl.
                 @{ ServedName = 'wdk-bg.exe'; WinPeName = 'wdk-bg.exe'; Required = $false }
                 @{ ServedName = 'deploy-bg.bmp'; WinPeName = 'deploy-bg.bmp'; Required = $false }
+                # The deploy status panel: a floating C/GDI window over the
+                # wallpaper that replaces the console as the face when present -
+                # startnet.cmd feeds it via files (deploy.state, the log tail, a
+                # confirm req/ack pair) and keeps the console as the engine and
+                # fallback. C like wdk-bg, never Go: a bare Go runtime exe hard-
+                # resets WinPE 26100 (proven 2026-08-25, boot-chain VM). The
+                # deploy-ui.cfg colours (accent=/panel=) are edited in the panel.
+                @{ ServedName = 'wdk-panel.exe'; WinPeName = 'wdk-panel.exe'; Required = $false }
+                @{ ServedName = 'deploy-ui.cfg'; WinPeName = 'deploy-ui.cfg'; Required = $false }
                 # Optional console-UI customisation: one line of header text, and an
                 # ASCII logo drawn above it. Both absent by default.
                 @{ ServedName = 'deploy.title'; WinPeName = 'deploy.title'; Required = $false }
@@ -3181,7 +3190,7 @@ function Write-AppPxeBootDeployOverlayFiles {
     # Tools the client needs that WinPE lacks, served beside it. Copied once
     # (size+mtime), removed with the toggle so nothing stale is ever injected.
     $toolsSrcDir = Get-AppPxeBootDeployClientToolsDir
-    foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe', 'wdk-bg.exe')) {
+    foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe', 'wdk-bg.exe', 'wdk-panel.exe')) {
         $dst = Join-Path $Dir $tool
         $src = if ($toolsSrcDir) { Join-Path $toolsSrcDir $tool } else { $null }
         if ((Test-AppPxeBootDeployClientInjectEnabled) -and $src -and (Test-Path -LiteralPath $src)) {
@@ -3202,7 +3211,7 @@ function Write-AppPxeBootDeployOverlayFiles {
         if ($shareRoot -and (Test-Path -LiteralPath $shareRoot) -and (Test-AppPxeBootDeployClientInjectEnabled) -and $toolsSrcDir) {
             $shareTools = Join-Path $shareRoot 'Tools'
             if (-not (Test-Path -LiteralPath $shareTools)) { New-Item -ItemType Directory -Path $shareTools -Force | Out-Null }
-            foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe', 'wdk-bg.exe')) {
+            foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe', 'wdk-bg.exe', 'wdk-panel.exe')) {
                 $src = Join-Path $toolsSrcDir $tool
                 if (-not (Test-Path -LiteralPath $src)) { continue }
                 $dst = Join-Path $shareTools $tool
@@ -3219,7 +3228,8 @@ function Write-AppPxeBootDeployOverlayFiles {
     # Console-UI customisation: header line and optional ASCII logo.
     foreach ($pair in @(
             @{ src = (Get-AppPxeBootDeployUiTitlePath); name = 'deploy.title' },
-            @{ src = (Get-AppPxeBootDeployUiLogoPath); name = 'deploy-logo.txt' }
+            @{ src = (Get-AppPxeBootDeployUiLogoPath); name = 'deploy-logo.txt' },
+            @{ src = (Get-AppPxeBootDeployUiCfgPath); name = 'deploy-ui.cfg' }
         )) {
         $dstFile = Join-Path $Dir $pair.name
         if (Test-Path -LiteralPath $pair.src) {
@@ -3305,6 +3315,45 @@ function Get-AppPxeBootDeployUiTitlePath {
 
 function Get-AppPxeBootDeployUiLogoPath {
     Join-Path (Get-AppPxeBootLayoutPaths).brandingDir 'deploy-logo.txt'
+}
+
+function Get-AppPxeBootDeployUiCfgPath {
+    Join-Path (Get-AppPxeBootLayoutPaths).brandingDir 'deploy-ui.cfg'
+}
+
+function Set-AppPxeBootDeployUiColors {
+    <#
+    .SYNOPSIS
+        Colours for the wdk-ui deploy panel (deploy-ui.cfg: accent= and panel=,
+        RRGGBB). Both empty clears the file and the panel falls back to its
+        built-in dark navy / light blue.
+    #>
+    param(
+        [AllowEmptyString()][string]$Accent,
+        [AllowEmptyString()][string]$Panel
+    )
+    $clean = @{}
+    foreach ($pair in @(@{ k = 'accent'; v = $Accent }, @{ k = 'panel'; v = $Panel })) {
+        $v = ([string]$pair.v).Trim().TrimStart('#')
+        if ([string]::IsNullOrWhiteSpace($v)) { continue }
+        if ($v -notmatch '^[0-9A-Fa-f]{6}$') { throw "Not an RRGGBB colour: $($pair.v)" }
+        $clean[$pair.k] = $v.ToUpperInvariant()
+    }
+    $paths = Get-AppPxeBootLayoutPaths
+    $path = Get-AppPxeBootDeployUiCfgPath
+    if ($clean.Count -eq 0) {
+        foreach ($f in @($path, (Join-Path (Join-Path $paths.httpRoot 'deploy') 'deploy-ui.cfg'))) {
+            if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+        }
+        Write-SidecarLog 'PXE boot: deploy panel colours cleared'
+    } else {
+        if (-not (Test-Path -LiteralPath $paths.brandingDir)) { $null = New-Item -Path $paths.brandingDir -ItemType Directory -Force }
+        $lines = @($clean.Keys | Sort-Object | ForEach-Object { "$_=$($clean[$_])" })
+        # CRLF for the same reason as deploy.title - a WinPE-side reader.
+        [System.IO.File]::WriteAllText($path, (($lines -join "`r`n") + "`r`n"), (New-Object System.Text.UTF8Encoding $false))
+        Write-SidecarLog "PXE boot: deploy panel colours set ($($lines -join ', '))"
+    }
+    Get-AppPxeBootBrandingStatus
 }
 
 function Set-AppPxeBootDeployUiTitle {
@@ -3437,6 +3486,16 @@ function Get-AppPxeBootBrandingStatus {
     if (Test-Path -LiteralPath $titlePath) {
         try { $title = ([string](Get-Content -LiteralPath $titlePath -TotalCount 1 -ErrorAction Stop)).Trim() } catch { $title = '' }
     }
+    $uiColors = @{ accent = ''; panel = '' }
+    $cfgPath = Get-AppPxeBootDeployUiCfgPath
+    if (Test-Path -LiteralPath $cfgPath) {
+        try {
+            foreach ($line in @(Get-Content -LiteralPath $cfgPath -ErrorAction Stop)) {
+                $k, $v = ([string]$line).Split('=', 2)
+                if ($null -ne $v -and $uiColors.ContainsKey($k.Trim())) { $uiColors[$k.Trim()] = $v.Trim() }
+            }
+        } catch { }
+    }
     @{
         winpeBackground = @{
             present   = [bool]$item
@@ -3446,6 +3505,8 @@ function Get-AppPxeBootBrandingStatus {
         }
         deployTitle     = $title
         logoPresent     = [bool](Test-Path -LiteralPath (Get-AppPxeBootDeployUiLogoPath))
+        uiAccent        = $uiColors['accent']
+        uiPanel         = $uiColors['panel']
     }
 }
 

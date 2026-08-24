@@ -17,6 +17,7 @@
  *       -o wdk-bg.exe wdk-bg.c -lgdi32 -luser32
  */
 #include <windows.h>
+#include <string.h>
 
 static HBITMAP g_bmp;
 static int g_bw, g_bh;
@@ -54,6 +55,31 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, LPWSTR cmdline, int show)
 {
     (void)prev; (void)show;
+
+    /* --hide-console: hide the window of the console that LAUNCHED us and exit.
+     * WinPE reboots when winpeshl's child exits, so the original console must
+     * stay alive as an anchor while the themed relaunch does the work - but it
+     * does not have to stay visible. A GUI-subsystem exe gets no console of its
+     * own; attaching to the parent's gives us its HWND to hide. Without this,
+     * the anchor sat opaque behind the themed window and blocked the background
+     * (Craig, 2026-08-24: "two windows one semi transparent in front of the
+     * other... blocking the bg anyway"). */
+    /* --show-console is the undo: the fail path drops to a shell, and an
+     * operator cannot type into a hidden window. */
+    if (cmdline && (wcsstr(cmdline, L"--hide-console") ||
+                    wcsstr(cmdline, L"--show-console"))) {
+        int hide = wcsstr(cmdline, L"--hide-console") != NULL;
+        if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+            HWND con = GetConsoleWindow();
+            if (con) {
+                ShowWindow(con, hide ? SW_HIDE : SW_SHOW);
+                if (!hide) SetForegroundWindow(con);
+            }
+            FreeConsole();
+        }
+        return 0;
+    }
+
     LPWSTR path = cmdline;
     /* Trim quotes the launcher may pass. */
     if (path && path[0] == L'"') {

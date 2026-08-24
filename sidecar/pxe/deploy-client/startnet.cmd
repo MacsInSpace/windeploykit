@@ -27,6 +27,42 @@ rem  never a silent reboot loop.
 rem ===========================================================================
 setlocal EnableExtensions EnableDelayedExpansion
 
+rem --- themed console -------------------------------------------------------
+rem  Conhost reads HKCU\Console at WINDOW CREATION, so the theme needs a fresh
+rem  window: apply the keys, relaunch this script inside one, and WAIT for it.
+rem  start /wait is load-bearing - winpeshl reboots WinPE when its child exits,
+rem  so the original console must stay alive as the anchor while the themed
+rem  window does the work. WDK_THEMED (inherited env) stops the recursion.
+rem  Palette is BGR: near-black panel, soft grey text, green/red/amber accents.
+rem  WindowAlpha 0xE6 = ~90% opaque, so the deploy background shows through.
+if not defined WDK_THEMED (
+    set "WDK_THEMED=1"
+    reg add "HKCU\Console" /v WindowAlpha /t REG_DWORD /d 230 /f >nul 2>&1
+    reg add "HKCU\Console" /v VirtualTerminalLevel /t REG_DWORD /d 1 /f >nul 2>&1
+    reg add "HKCU\Console" /v FaceName /t REG_SZ /d Consolas /f >nul 2>&1
+    reg add "HKCU\Console" /v FontFamily /t REG_DWORD /d 54 /f >nul 2>&1
+    reg add "HKCU\Console" /v FontSize /t REG_DWORD /d 1310720 /f >nul 2>&1
+    reg add "HKCU\Console" /v FontWeight /t REG_DWORD /d 400 /f >nul 2>&1
+    reg add "HKCU\Console" /v QuickEdit /t REG_DWORD /d 0 /f >nul 2>&1
+    reg add "HKCU\Console" /v CursorSize /t REG_DWORD /d 25 /f >nul 2>&1
+    reg add "HKCU\Console" /v WindowSize /t REG_DWORD /d 2621540 /f >nul 2>&1
+    reg add "HKCU\Console" /v ScreenBufferSize /t REG_DWORD /d 32768100 /f >nul 2>&1
+    reg add "HKCU\Console" /v ScreenColors /t REG_DWORD /d 7 /f >nul 2>&1
+    reg add "HKCU\Console" /v ColorTable00 /t REG_DWORD /d 1446416 /f >nul 2>&1
+    reg add "HKCU\Console" /v ColorTable02 /t REG_DWORD /d 9156159 /f >nul 2>&1
+    reg add "HKCU\Console" /v ColorTable07 /t REG_DWORD /d 13159632 /f >nul 2>&1
+    reg add "HKCU\Console" /v ColorTable10 /t REG_DWORD /d 10871631 /f >nul 2>&1
+    reg add "HKCU\Console" /v ColorTable12 /t REG_DWORD /d 6378976 /f >nul 2>&1
+    reg add "HKCU\Console" /v ColorTable14 /t REG_DWORD /d 4305888 /f >nul 2>&1
+    rem Hide THIS (anchor) console before the themed one opens - it must stay
+    rem alive (winpeshl reboots WinPE when its child exits) but not visible: an
+    rem opaque anchor behind the translucent window blocked the background.
+    if exist "%SystemRoot%\System32\wdk-bg.exe" start "" "%SystemRoot%\System32\wdk-bg.exe" --hide-console
+    start /wait "WinDeployKit" cmd /c "%~f0"
+    exit
+)
+title WinDeployKit
+
 set "LOG=X:\Windows\Temp\deploy.log"
 if not exist "X:\Windows\Temp" md "X:\Windows\Temp" >nul 2>&1
 set "SYS=%SystemRoot%\System32"
@@ -44,6 +80,16 @@ if not defined BGON if exist "%SYS%\wdk-bg.exe" if exist "%SYS%\deploy-bg.bmp" (
     start "" "%SYS%\wdk-bg.exe" "%SYS%\deploy-bg.bmp"
     set "BGON=1"
 )
+rem Deploy status panel (wdk-panel.exe): the face of the deploy client, a
+rem native GDI window over the wallpaper fed by deploy.state and the log
+rem tail; :ui_takeover hides the console once it is provably alive. C/GDI
+rem like the wallpaper viewer, NEVER Go: a bare Go runtime exe (no window,
+rem no UI library) hard-resets WinPE 26100 within seconds - proven in the
+rem boot-chain VM 2026-08-25 after the Go panel took every boot down.
+if not defined UIEXE if exist "%SYS%\wdk-panel.exe" (
+    start "" "%SYS%\wdk-panel.exe"
+    set "UIEXE=1"
+)
 
 rem --- who we are (no wmic, no PowerShell: SMBIOS strings live in the registry) ---
 set "MAKE="
@@ -59,6 +105,7 @@ call :ui_stage 1 run
 call :log "Starting network (wpeinit)..."
 wpeinit
 call :ui_stage 1 ok
+call :ui_takeover
 
 rem The serial is not in the registry; the first NIC's MAC is the stable id the
 rem Netboot panel files this device's log under (the same for a re-image).
@@ -113,11 +160,11 @@ net use Z: >nul 2>&1 && net use Z: /delete /y >nul 2>&1
 set "ZOK="
 for /l %%A in (1,1,5) do (
     if not defined ZOK (
-        call :log "Connecting %UNC% (attempt %%A of 5)"
+        call :log "Connecting !UNC! (attempt %%A of 5)"
         if defined DUSER (
-            net use Z: "%UNC%" /user:"%DUSER%" "%DPASS%" <nul >"%SYS%\netuse.txt" 2>&1
+            net use Z: "!UNC!" /user:"!DUSER!" "!DPASS!" <nul >"%SYS%\netuse.txt" 2>&1
         ) else (
-            net use Z: "%UNC%" <nul >"%SYS%\netuse.txt" 2>&1
+            net use Z: "!UNC!" <nul >"%SYS%\netuse.txt" 2>&1
         )
         if not errorlevel 1 (
             set "ZOK=1"
@@ -131,7 +178,7 @@ del /q "%SYS%\netuse.txt" >nul 2>&1
 if defined ZOK call :ui_stage 2 ok
 if not defined ZOK call :ui_stage 2 bad
 if not defined ZOK (
-    call :fail "Could not connect %UNC% after 5 tries - see the net use lines above and check the share in the Netboot panel."
+    call :fail "Could not connect !UNC! after 5 tries - see the net use lines above and check the share in the Netboot panel."
     goto :shell
 )
 
@@ -141,7 +188,7 @@ rem  iPXE prints "Verification failed: Security Policy Violation" and skips
 rem  them (seen live 2026-08-24). The share has the same four files under
 rem  Z:\Tools, and SMB has no such rule, so pick up whatever is missing here.
 rem  Harmless everywhere else: if initrd delivered them, this copies nothing.
-for %%T in (7z.exe 7za.dll 7zxa.dll curl.exe wdk-bg.exe) do (
+for %%T in (7z.exe 7za.dll 7zxa.dll curl.exe wdk-bg.exe wdk-panel.exe) do (
     if not exist "%SYS%\%%T" if exist "Z:\Tools\%%T" (
         copy /y "Z:\Tools\%%T" "%SYS%\%%T" >nul 2>&1
         if exist "%SYS%\%%T" call :log "Fetched %%T from the share (Secure Boot boot path)"
@@ -153,6 +200,11 @@ if not defined BGON if exist "%SYS%\wdk-bg.exe" if exist "%SYS%\deploy-bg.bmp" (
     start "" "%SYS%\wdk-bg.exe" "%SYS%\deploy-bg.bmp"
     set "BGON=1"
 )
+if not defined UIEXE if exist "%SYS%\wdk-panel.exe" (
+    start "" "%SYS%\wdk-panel.exe"
+    set "UIEXE=1"
+)
+call :ui_takeover
 
 rem --- which task sequence -------------------------------------------------
 set "TSID="
@@ -164,7 +216,7 @@ if not defined TSID (
     goto :shell
 )
 if not exist "Z:\TaskSequences\%TSID%.env" (
-    call :fail "Task sequence '%TSID%' is not published - Save and publish it in the Netboot panel."
+    call :fail "Task sequence '!TSID!' is not published - Save and publish it in the Netboot panel."
     goto :shell
 )
 
@@ -190,13 +242,13 @@ call :ui_stage 3 ok
 call :log "Task sequence: %TS_NAME% (%TSID%)"
 
 if not defined TS_IMAGE (
-    call :fail "Task sequence '%TSID%' has no Windows image - pick one in the Netboot panel."
+    call :fail "Task sequence '!TSID!' has no Windows image - pick one in the Netboot panel."
     goto :shell
 )
 if not defined TS_INDEX set "TS_INDEX=1"
 set "WIMPATH=Z:\%TS_IMAGE%"
 if not exist "%WIMPATH%" (
-    call :fail "Image not on the share: %WIMPATH% - is the ISO still in the library?"
+    call :fail "Image not on the share: !WIMPATH! - is the ISO still in the library?"
     goto :shell
 )
 call :ui_stage 4 ok
@@ -212,20 +264,15 @@ call :ui_stage 5 run
 call :find_drivers
 if defined DRIVERDIR call :ui_stage 5 ok
 if not defined DRIVERDIR call :ui_stage 5 skip
-if defined DRIVERDIR (
-    call :log "Driver pack: %DRIVERDIR%"
-    call :stage_drivers
-    if defined DRIVERSTAGE call :drvload_storage
-) else (
-    call :log "No driver pack for this machine on the share (Z:\Drivers\%MAKE%\%MODEL%) - continuing without."
-    if exist "Z:\Drivers\%MAKE%\" (
-        for /d %%M in ("Z:\Drivers\%MAKE%\*") do call :log "  Z:\Drivers\%MAKE%\ has: %%~nxM"
-    ) else (
-        call :log "  Z:\Drivers\ has no %MAKE% folder - create Z:\Drivers\%MAKE%\%MODEL%\ and drop the INF tree or pack in it."
-    )
-    if /i "%MAKE%"=="Proxmox" call :log "  Without vioscsi/viostor this VM has an emulated disk - the apply will be slow."
-    if /i "%MAKE%"=="QEMU" call :log "  Without vioscsi/viostor this VM has an emulated disk - the apply will be slow."
-)
+rem Subroutines of PLAIN lines, and !delayed! in every ( ) and for-set below:
+rem %MODEL% / %DRIVERDIR% carry the SMBIOS model name, and a ")" in it (QEMU
+rem "Standard PC (Q35 + ICH9, 2009)", Dell "(SFF)" models) terminates a
+rem parenthesised block or for-set AT PARSE TIME - cmd dies on the orphaned
+rem remainder, the anchor exits, winpeshl reboots. Same bomb family as the
+rem heartbeat writer (found 2026-08-25 via the boot-chain VM).
+if defined DRIVERDIR call :drivers_found
+if not defined DRIVERDIR call :drivers_missing
+if defined DRIVERSTAGE call :drvload_storage
 
 rem --- target volume --------------------------------------------------------
 rem  Reuse a prepared W: if it is already there; otherwise repartition disk 0 -
@@ -234,17 +281,10 @@ set "APPLYDIR="
 if exist "W:\" set "APPLYDIR=W:\"
 if not defined APPLYDIR (
     if exist "%SYS%\deploy.autoprep" set "TS_AUTOPREP=1"
-    if not "%TS_AUTOPREP%"=="1" (
-        echo.
-        echo   About to ERASE DISK 0 on this machine and install %TS_NAME%.
-        echo   Type  WIPE  and press Enter to continue, or close this window to stop.
-        echo.
-        set "CONFIRM="
-        set /p CONFIRM=Confirm: 
-        if /i not "!CONFIRM!"=="WIPE" (
-            call :fail "Not confirmed - nothing was changed."
-            goto :shell
-        )
+    if not "%TS_AUTOPREP%"=="1" call :confirm_wipe
+    if defined NOWIPE (
+        call :fail "Not confirmed - nothing was changed."
+        goto :shell
     )
     call :log "Partitioning disk 0 (GPT: EFI 260MB, MSR 16MB, Windows)"
     > "X:\Windows\Temp\diskpart.txt" (
@@ -361,9 +401,9 @@ if defined NEEDSC (
     rem SetupComplete.cmd runs each helper from its own folder (%~dp0 = ...\Setup\Scripts).
     > "%SETUPCOMPLETE%" echo @echo off
     if exist "Z:\TaskSequences\%TSID%.firstboot.cmd" (
-        copy /y "Z:\TaskSequences\%TSID%.firstboot.cmd" "%SCR%\%TSID%.firstboot.cmd" >nul
-        >>"%SETUPCOMPLETE%" echo if exist "%%~dp0%TSID%.firstboot.cmd" call "%%~dp0%TSID%.firstboot.cmd"
-        call :log "First-boot steps staged (%TSID%.firstboot.cmd -> Setup\Scripts)"
+        copy /y "Z:\TaskSequences\!TSID!.firstboot.cmd" "%SCR%\!TSID!.firstboot.cmd" >nul
+        >>"%SETUPCOMPLETE%" echo if exist "%%~dp0!TSID!.firstboot.cmd" call "%%~dp0!TSID!.firstboot.cmd"
+        call :log "First-boot steps staged (!TSID!.firstboot.cmd -> Setup\Scripts)"
     )
     if /i "%TS_KIND%"=="server" if exist "Z:\TaskSequences\convert-eval.ps1" (
         copy /y "Z:\TaskSequences\convert-eval.ps1" "%SCR%\Convert-EvalEdition.ps1" >nul
@@ -411,14 +451,19 @@ rem A literal word, never `echo on`/`echo off` - those are the echo directive,
 rem not text, so `> file echo on` flips command-echo on for the whole script
 rem (the wall of echoed lines Craig saw, 2026-08-23) and writes nothing.
 > "%HBFLAG%" echo hb
-> "%HBCMD%" (
-    echo @echo off
-    echo :loop
-    echo if not exist "%HBFLAG%" exit
-    echo "%CURL%" -s -m 3 -o NUL -H "Content-Type: application/json" -d "{\"serial\":\"%SERIAL%\",\"make\":\"%MAKE%\",\"model\":\"%MODEL%\",\"session\":\"%SESSION%\",\"heartbeat\":true,\"lines\":[]}" "%LOGHOST%/imaging-log/ingest" ^>nul 2^>^&1
-    echo ping -n 31 127.0.0.1 ^>nul
-    echo goto :loop
-)
+rem One redirect per line, NO ( ) block: %MODEL% expands at parse time, and on
+rem QEMU/Proxmox (and real PCs like "OptiPlex 7050 (SFF)") it contains a ")"
+rem that TERMINATES a parenthesised block mid-line - cmd then dies on the
+rem orphaned remainder, the anchor exits, and winpeshl reboots WinPE. This was
+rem the "VM crashes right after wpeinit" loop (found via the boot-chain VM,
+rem 2026-08-25: last log line "Log push:", "Connecting" never arrived). Parens
+rem are only special inside a block, so plain lines are safe.
+> "%HBCMD%" echo @echo off
+>>"%HBCMD%" echo :loop
+>>"%HBCMD%" echo if not exist "%HBFLAG%" exit
+>>"%HBCMD%" echo "%CURL%" -s -m 3 -o NUL -H "Content-Type: application/json" -d "{\"serial\":\"%SERIAL%\",\"make\":\"%MAKE%\",\"model\":\"%MODEL%\",\"session\":\"%SESSION%\",\"heartbeat\":true,\"lines\":[]}" "%LOGHOST%/imaging-log/ingest" ^>nul 2^>^&1
+>>"%HBCMD%" echo ping -n 31 127.0.0.1 ^>nul
+>>"%HBCMD%" echo goto :loop
 start "" /b cmd /c "%HBCMD%"
 goto :eof
 
@@ -432,6 +477,7 @@ rem   deploy.title     one line of header text
 rem   deploy-logo.txt  a small ASCII logo (any lines, drawn above the header)
 set "UITITLE=WinDeployKit"
 if exist "%SYS%\deploy.title" set /p UITITLE=<"%SYS%\deploy.title"
+set "STATE=X:\Windows\Temp\deploy.state"
 set "UINOTE="
 rem VT escape, so the header can be bold without a colour scheme. Windows 10+
 rem conhost understands it; if the trick yields nothing we simply print plain.
@@ -492,12 +538,83 @@ for /l %%i in (1,1,%STGCOUNT%) do call :ui_row %%i
 echo   ----------------------------------------------------------
 if defined UINOTE echo   %UINOTE%
 echo.
+call :ui_state
 goto :eof
 
 :ui_row
 call set "_n=%%STG%~1%%"
 call set "_s=%%ST%~1%%"
 echo    [!_s!] !_n!
+goto :eof
+
+:ui_state
+rem Snapshot for wdk-ui.exe: key=value, stageN=<st>~<name>, tmp+move so the
+rem panel never reads a half-written file. Values via delayed expansion so a
+rem stray paren in a note cannot break this block - but an UNSET !var! stays
+rem literal, hence the if defined guards.
+if not defined STATE goto :eof
+> "%STATE%.tmp" (
+    echo title=!UITITLE!
+    if defined MAKE (echo machine=!MAKE! / !MODEL!) else echo machine=
+    if defined SERIAL (echo serial=!SERIAL!) else echo serial=
+    if defined UINOTE (echo note=!UINOTE!) else echo note=
+    for /l %%i in (1,1,%STGCOUNT%) do echo stage%%i=!ST%%i!~!STG%%i!
+)
+move /y "%STATE%.tmp" "%STATE%" >nul 2>&1
+goto :eof
+
+:ui_takeover
+rem Hide the console only once the panel is provably alive. Aliveness is the
+rem deploy.panel.alive file the panel writes AFTER its window exists - never
+rem a process probe: `tasklist | find` here reset the machine on every boot
+rem that reached it (WinPE auto-restarts on bugcheck, so it looked like a
+rem silent reboot loop - the whole 2026-08-25 crash hunt), and tasklist is
+rem not in a stock boot.wim anyway. Runs to completion once; no-op after.
+if defined UION goto :eof
+if not defined UIEXE goto :eof
+set /a TKWAIT=0
+:ui_takeover_wait
+if exist "X:\Windows\Temp\deploy.panel.alive" goto :ui_takeover_alive
+set /a TKWAIT+=1
+if !TKWAIT! GEQ 5 goto :ui_takeover_dead
+ping -n 2 127.0.0.1 >nul
+goto :ui_takeover_wait
+:ui_takeover_alive
+set "UION=1"
+call :log "UI panel running - console hidden (fail path brings it back)."
+if exist "%SYS%\wdk-bg.exe" start "" "%SYS%\wdk-bg.exe" --hide-console
+goto :eof
+:ui_takeover_dead
+call :log "UI panel did not start - staying on the console."
+set "UIEXE="
+goto :eof
+
+:confirm_wipe
+rem Sets NOWIPE unless the operator confirms. Console asks for the typed WIPE;
+rem the panel shows a Yes/No box instead: deploy.confirm.req out, .ack back.
+set "NOWIPE="
+if defined UION goto :confirm_wipe_ui
+echo.
+echo   About to ERASE DISK 0 on this machine and install %TS_NAME%.
+echo   Type  WIPE  and press Enter to continue, or close this window to stop.
+echo.
+set "CONFIRM="
+set /p CONFIRM=Confirm: 
+if /i not "!CONFIRM!"=="WIPE" set "NOWIPE=1"
+goto :eof
+:confirm_wipe_ui
+del /q "X:\Windows\Temp\deploy.confirm.ack" >nul 2>&1
+> "X:\Windows\Temp\deploy.confirm.req" echo About to ERASE DISK 0 on this machine and install %TS_NAME%.
+call :log "Waiting for on-screen confirmation..."
+:confirm_wipe_wait
+if not exist "X:\Windows\Temp\deploy.confirm.ack" (
+    ping -n 2 127.0.0.1 >nul
+    goto :confirm_wipe_wait
+)
+set "CONFIRM="
+set /p CONFIRM=<"X:\Windows\Temp\deploy.confirm.ack"
+del /q "X:\Windows\Temp\deploy.confirm.req" "X:\Windows\Temp\deploy.confirm.ack" >nul 2>&1
+if /i not "!CONFIRM!"=="YES" set "NOWIPE=1"
 goto :eof
 
 :log
@@ -522,6 +639,23 @@ set "MSG=%MSG:}=)%"
 "%CURL%" -s -m 3 -o NUL -H "Content-Type: application/json" -d "{\"serial\":\"%SERIAL%\",\"make\":\"%MAKE%\",\"model\":\"%MODEL%\",\"session\":\"%SESSION%\",\"lines\":[\"%MSG%\"]}" "%LOGHOST%/imaging-log/ingest" >nul 2>&1
 goto :eof
 
+:drivers_found
+call :log "Driver pack: %DRIVERDIR%"
+call :stage_drivers
+goto :eof
+
+:drivers_missing
+call :log "No driver pack for this machine on the share (Z:\Drivers\%MAKE%\%MODEL%) - continuing without."
+if exist "Z:\Drivers\%MAKE%\" goto :drivers_missing_list
+call :log "  Z:\Drivers\ has no %MAKE% folder - create Z:\Drivers\%MAKE%\%MODEL%\ and drop the INF tree or pack in it."
+goto :drivers_missing_vm
+:drivers_missing_list
+for /d %%M in ("Z:\Drivers\!MAKE!\*") do call :log "  Z:\Drivers\!MAKE!\ has: %%~nxM"
+:drivers_missing_vm
+if /i "%MAKE%"=="Proxmox" call :log "  Without vioscsi/viostor this VM has an emulated disk - the apply will be slow."
+if /i "%MAKE%"=="QEMU" call :log "  Without vioscsi/viostor this VM has an emulated disk - the apply will be slow."
+goto :eof
+
 :find_drivers
 rem Z:\Drivers\<Make>\<Model> by exact name, then model starts-with folder
 rem (Lenovo: product 21F5001AAU, folder 21F), then folder contained in product
@@ -541,7 +675,7 @@ for /d %%V in ("Z:\Drivers\*") do (
 if defined DRIVERDIR goto :eof
 if exist "Z:\Drivers\aliases.txt" (
     for /f "usebackq tokens=1,* delims==" %%K in ("Z:\Drivers\aliases.txt") do (
-        if not defined DRIVERDIR if /i "%%K"=="%MODEL%" if exist "Z:\Drivers\%%L\" set "DRIVERDIR=Z:\Drivers\%%L"
+        if not defined DRIVERDIR if /i "%%K"=="!MODEL!" if exist "Z:\Drivers\%%L\" set "DRIVERDIR=Z:\Drivers\%%L"
     )
 )
 if defined DRIVERDIR goto :eof
@@ -574,32 +708,32 @@ set "DRIVERSTAGE="
 rem Loose INFs (a virtio-win tree dropped straight in, as in Proxmox\vm) are used
 rem in place - no pack needed. `A && B & C` would run C unconditionally, so this
 rem is an if block, not a one-liner.
-dir /b /s "%DRIVERDIR%\*.inf" >nul 2>&1
-if not errorlevel 1 (
-    set "DRIVERSTAGE=%DRIVERDIR%"
-    call :log "INF tree in place (%DRIVERDIR%)"
-    goto :eof
-)
+dir /b /s "!DRIVERDIR!\*.inf" >nul 2>&1
+if errorlevel 1 goto :stage_drivers_pack
+set "DRIVERSTAGE=%DRIVERDIR%"
+call :log "INF tree in place (%DRIVERDIR%)"
+goto :eof
+:stage_drivers_pack
 set "PACK="
 for %%E in (cab exe zip 7z) do (
-    if not defined PACK for %%P in ("%DRIVERDIR%\*.%%E") do if not defined PACK set "PACK=%%~fP"
+    if not defined PACK for %%P in ("!DRIVERDIR!\*.%%E") do if not defined PACK set "PACK=%%~fP"
 )
 if not defined PACK (
-    call :log "WARNING: %DRIVERDIR% has no INF and no archive - skipped."
+    call :log "WARNING: !DRIVERDIR! has no INF and no archive - skipped."
     goto :eof
 )
 set "STAGE=X:\Drivers\pack"
 if exist "%STAGE%" rd /s /q "%STAGE%" >nul 2>&1
 md "%STAGE%" >nul 2>&1
 call :log "Expanding %PACK%"
-if /i "%PACK:~-4%"==".cab" (
-    expand.exe -F:* "%PACK%" "%STAGE%" >> "%LOG%" 2>&1
+if /i "!PACK:~-4!"==".cab" (
+    expand.exe -F:* "!PACK!" "%STAGE%" >> "%LOG%" 2>&1
 ) else (
     if not defined SEVENZIP (
-        call :log "WARNING: %PACK% needs 7z.exe, which was not injected - drivers skipped."
+        call :log "WARNING: !PACK! needs 7z.exe, which was not injected - drivers skipped."
         goto :eof
     )
-    "%SEVENZIP%" x -y -o"%STAGE%" "%PACK%" >> "%LOG%" 2>&1
+    "%SEVENZIP%" x -y -o"%STAGE%" "!PACK!" >> "%LOG%" 2>&1
 )
 dir /b /s "%STAGE%\*.inf" >nul 2>&1 && set "DRIVERSTAGE=%STAGE%"
 if not defined DRIVERSTAGE call :log "WARNING: %PACK% expanded to no INF files - drivers skipped."
@@ -615,6 +749,13 @@ goto :eof
 
 :shell
 call :heartbeat_stop
+rem An operator cannot type into a hidden window - and on a small screen the
+rem topmost panel would sit over the prompt, so both are undone here.
+if defined UION (
+    if exist "%SYS%\wdk-bg.exe" start "" "%SYS%\wdk-bg.exe" --show-console
+    taskkill /f /im wdk-panel.exe >nul 2>&1
+    set "UION="
+)
 echo [deploy] Log: %LOG%
 echo [deploy] Dropping to a command prompt.
 cmd.exe

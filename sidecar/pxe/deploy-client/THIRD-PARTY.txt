@@ -13,5 +13,12 @@ curl.exe
   Licence: the curl licence (MIT/X derivative), https://curl.se/docs/copyright.html
   Used unmodified to POST deployment log lines to the Netboot panel.
 
+wdk-bg.exe, wdk-ui.exe
+  Built from source in src/ (see src/wdk-ui/build.sh and the recipe in
+  src/wdk-bg.c) - wdk-bg is plain C over USER32/GDI, wdk-ui is Go using
+  github.com/lxn/walk and github.com/lxn/win (BSD 3-Clause,
+  https://github.com/lxn/walk/blob/master/LICENSE) and their dependency
+  gopkg.in/Knetic/govaluate.v3 (MIT).
+
 Everything else the client runs (dism, diskpart, bcdboot, drvload, expand, net,
 reg, find, ipconfig) is part of the user's own Windows boot.wim.
