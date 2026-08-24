@@ -50,7 +50,6 @@ export type SidecarCommand =
   | "ClearPxeBootLogTail"
   | "ControlAria2Download"
   | "DeleteInfraSshCredential"
-  | "DownloadPxeBootFieldIso"
   | "DownloadPxeBootOptionalAsset"
   | "EnsureAria2Binary"
   | "EnsurePxeBootCaddy"
@@ -64,7 +63,6 @@ export type SidecarCommand =
   | "GetTaskSequenceStepLibrary"
   | "GetTaskSequenceStepFromLibrary"
   | "GetPathFreeSpace"
-  | "GetPxeBootFieldIsoStatus"
   | "GetPxeBootImagingClientLog"
   | "GetPxeBootImagingClients"
   | "GetPxeBootLogTail"
@@ -93,7 +91,7 @@ export type SidecarCommand =
   | "ListPxeBootIsoWims"
   | "LoadLocalMachineCredentialToSession"
   | "OpenAria2DownloadFolder"
-  | "OpenPxeBootFieldIsoDriversFolder"
+  | "OpenPxeBootDriversFolder"
   | "OpenPxeBootIsoFolder"
   | "OpenPxeBootStoreFolder"
   | "OpenPxeBootWimFolder"
@@ -110,7 +108,6 @@ export type SidecarCommand =
   | "SetImageLibraryRoot"
   | "SetInfraSshCredential"
   | "SetLocalMachineCredential"
-  | "SetPxeBootDefaultIso"
   | "SetPxeBootDefaultWim"
   | "SetPxeBootPluginConfig"
   | "SetSiteProfile"
@@ -162,16 +159,12 @@ export interface PxeBootPluginConfig {
   httpPort: number;
   interfaceId?: string | null;
   deployMenuUrl: string;
-  /** Primary ISO catalog: local laptop /ISOs or WAN deploy server */
-  isoCatalogSource?: "local" | "wan";
   tftpd64Path?: string | null;
   tftpMode?: "router" | "standalone" | "proxy" | string;
   defaultBootWim?: string | null;
-  /** When FieldIso.wim is default boot WIM - auto-boot this local ISO (else ISO catalog menu). */
-  defaultBootIso?: string | null;
   /** DHCP Option 67 - path relative to tftp/ (e.g. snponly.efi or x86_64-sb/shimx64.efi). */
   tftpBootFile?: string | null;
-  /** When true, PXE clients skip the menu and chain straight to defaultBootWim / defaultBootIso. */
+  /** When true, PXE clients skip the menu and chain straight to defaultBootWim. */
   autoBootDefault?: boolean;
   /** When true, share the image library root as a hidden, read-only SMB share (Deploy$). */
   smbShareEnabled?: boolean;
@@ -244,20 +237,6 @@ export interface PxeBootIsoEntry {
   httpPath: string;
   isoUrlRel: string;
   label?: string;
-  isDefault?: boolean;
-}
-
-export interface PxeBootFieldIsoStatus {
-  present: boolean;
-  fileName?: string | null;
-  sizeBytes?: number | null;
-  sha256?: string | null;
-  expectedSize?: number;
-  expectedSha256?: string | null;
-  wimUrl: string;
-  manifestUrl: string;
-  manifestSource?: string;
-  label?: string;
 }
 
 export interface PxeBootOptionalAssetStatus {
@@ -287,16 +266,6 @@ export interface PxeBootCaddyStatus {
   needsInstall?: boolean;
 }
 
-export interface PxeBootFieldIsoDriversSummary {
-  osRoot?: string;
-  indexPath?: string;
-  modelCount?: number;
-  readyCount?: number;
-  defaultReady?: boolean;
-  generated?: string;
-  httpPath?: string;
-}
-
 export interface PxeBootLayoutStatus {
   ok: boolean;
   storeRoot: string;
@@ -307,15 +276,21 @@ export interface PxeBootLayoutStatus {
   wimFiles: string[];
   isoFiles?: string[];
   defaultBootWim?: string | null;
-  defaultBootIso?: string | null;
   wims?: PxeBootWimEntry[];
   isos?: PxeBootIsoEntry[];
-  fieldIsoWim?: string | null;
-  isoCatalogSource?: "local" | "wan";
-  localIsoCatalogUrl?: string | null;
   wanIsoCatalogUrl?: string | null;
-  isoCatalogReady?: boolean;
-  fieldIsoDrivers?: PxeBootFieldIsoDriversSummary;
+  driversSummary?: PxeBootDriversSummary | null;
+}
+
+/** Driver store summary - <library>/Drivers seed models and their ready state. */
+export interface PxeBootDriversSummary {
+  osRoot?: string;
+  indexPath?: string;
+  modelCount?: number;
+  readyCount?: number;
+  defaultReady?: boolean;
+  generated?: string;
+  httpPath?: string;
   missing: string[];
   warnings: string[];
 }
@@ -394,10 +369,7 @@ export interface PxeBootPluginStatus {
   imagingClientsActive?: number;
   startedAt?: string | null;
   deployMenuUrl: string;
-  isoCatalogSource?: "local" | "wan";
-  localIsoCatalogUrl?: string | null;
   wanIsoCatalogUrl?: string | null;
-  localIsoCatalogReady?: boolean;
   router: PxeBootRouterInstructions;
   bundledSnponly: boolean;
   bundledWimboot?: boolean;
@@ -406,16 +378,13 @@ export interface PxeBootPluginStatus {
   tftpd64Path?: string | null;
   defaultBootWim?: string | null;
   defaultBootWimUrl?: string | null;
-  defaultBootIso?: string | null;
-  /** wimboot:<boot.wim> | fieldiso-catalog | fieldiso-iso:... | deploy-iso */
+  /** wimboot:<boot.wim> | deploy-iso */
   bootChainMode?: string | null;
   /** e.g. " index=1 gui" for default WIM local wimboot line */
   defaultWimbootKernelOptions?: string | null;
   defaultWimbootUsesBootAssets?: boolean;
   wims?: PxeBootWimEntry[];
   isos?: PxeBootIsoEntry[];
-  fieldIsoWim?: string | null;
-  fieldIso?: PxeBootFieldIsoStatus;
   optionalAssets?: PxeBootOptionalAssetsStatus;
   httpLastError?: string | null;
   tftpLastError?: string | null;
@@ -441,7 +410,6 @@ export interface PxeBootPluginStatus {
 export interface PxeBootWimLibraryResponse {
   wims: PxeBootWimEntry[];
   isos?: PxeBootIsoEntry[];
-  fieldIsoWim?: string | null;
   config: PxeBootPluginConfig;
   layout: PxeBootLayoutStatus;
   status?: PxeBootPluginStatus | null;
@@ -743,7 +711,6 @@ export interface SetPxeBootPluginConfigParams {
   httpPort?: number;
   interfaceId?: string;
   deployMenuUrl?: string;
-  isoCatalogSource?: "local" | "wan";
   tftpd64Path?: string;
   tftpMode?: string;
   tftpBootFile?: string;

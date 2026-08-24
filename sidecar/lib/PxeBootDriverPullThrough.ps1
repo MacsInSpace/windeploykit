@@ -199,8 +199,8 @@ function Sync-AppPxeBootDriverPullThrough {
             $folder = [string](Get-AppAria2JsonProp -Item $row -Name 'folder')
             $uri = [string](Get-AppAria2JsonProp -Item $row -Name 'uri')
             $progressKey = "$vendor|$folder"
-            $modelDir = Join-Path (Join-Path (Get-AppPxeBootFieldIsoDriversOsRoot) $vendor) $folder
-            $havePack = (Test-Path -LiteralPath $modelDir) -and [bool](Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $modelDir)
+            $modelDir = Join-Path (Join-Path (Get-AppPxeBootDriversOsRoot) $vendor) $folder
+            $havePack = (Test-Path -LiteralPath $modelDir) -and [bool](Get-AppPxeBootDriverPackInFolder -FolderPath $modelDir)
         }
 
         # 1. Reconcile an attempt that was in flight: still running -> wait; otherwise
@@ -324,7 +324,7 @@ function Write-AppPxeBootDriverAliasMap {
         vendor/folder of a pack ACTUALLY on disk. Regenerated only when the set of
         installed pack folders changes, so the store-sync poll stays cheap.
     #>
-    $root = Get-AppPxeBootFieldIsoDriversOsRoot
+    $root = Get-AppPxeBootDriversOsRoot
     if (-not $root -or -not (Test-Path -LiteralPath $root)) { return }
     $installed = [System.Collections.Generic.List[string]]::new()
     foreach ($vendorDir in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue)) {
@@ -333,7 +333,7 @@ function Write-AppPxeBootDriverAliasMap {
             # client both use an unpacked tree in place (Proxmox/vm is one), and a
             # folder the alias map does not list is a folder no alias can reach.
             $hasInfTree = [bool](Get-ChildItem -LiteralPath $modelDir.FullName -Recurse -Filter '*.inf' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
-            if ($hasInfTree -or (Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $modelDir.FullName)) {
+            if ($hasInfTree -or (Get-AppPxeBootDriverPackInFolder -FolderPath $modelDir.FullName)) {
                 [void]$installed.Add("$($vendorDir.Name)|$($modelDir.Name)")
             }
         }
@@ -361,9 +361,9 @@ function Write-AppPxeBootDriverAliasMap {
         [void]$entries.Add(@{ vendor = $vendor; folder = $folder; aliases = @($aliases) })
     }
     # Seed wmiPatterns (wildcards) for the pre-seeded vendor tree.
-    if (Test-AppSidecarCommand Read-AppPxeBootFieldIsoDriversSeed) {
+    if (Test-AppSidecarCommand Read-AppPxeBootDriversSeed) {
         try {
-            $seed = Read-AppPxeBootFieldIsoDriversSeed
+            $seed = Read-AppPxeBootDriversSeed
             if ($seed -and $seed.vendors) {
                 foreach ($vendorProp in $seed.vendors.PSObject.Properties) {
                     $vendorName = [string]$vendorProp.Name

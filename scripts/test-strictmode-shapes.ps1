@@ -10,7 +10,7 @@
 param([string]$Root = (Join-Path $PSScriptRoot '../sidecar'))
 $producers=@{}   # fn name -> @{ union=..; every=.. }
 $files = Get-ChildItem $Root -Recurse -Filter *.ps1 -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -notmatch 'fieldiso|node_modules|vendor/psmodules|site-build-scripts' }
+    Where-Object { $_.FullName -notmatch 'node_modules|vendor/psmodules|site-build-scripts' }
 $asts=@{}
 foreach($f in $files){
     $e=$null;$tk=$null

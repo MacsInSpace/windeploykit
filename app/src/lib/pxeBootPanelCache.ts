@@ -41,18 +41,11 @@ export function mergePxeBootLibraryIntoPanelData(
           isos: library.layout.isos ?? prev.status.layout.isos,
           wimFiles: library.layout.wimFiles ?? prev.status.layout.wimFiles,
           isoFiles: library.layout.isoFiles ?? prev.status.layout.isoFiles,
-          fieldIsoWim: library.layout.fieldIsoWim ?? prev.status.layout.fieldIsoWim,
           defaultBootWim:
             library.layout.defaultBootWim ??
             library.config.defaultBootWim ??
             prev.status.layout.defaultBootWim ??
             null,
-          defaultBootIso:
-            library.layout.defaultBootIso ??
-            library.config.defaultBootIso ??
-            prev.status.layout.defaultBootIso ??
-            null,
-          isoCatalogReady: library.layout.isoCatalogReady ?? prev.status.layout.isoCatalogReady,
         }
       : library.layout;
 
@@ -65,9 +58,7 @@ export function mergePxeBootLibraryIntoPanelData(
           layout: mergedLayout,
           wims: library.wims ?? prev.status.wims,
           isos: library.isos ?? prev.status.isos,
-          fieldIsoWim: library.fieldIsoWim ?? prev.status.fieldIsoWim,
           defaultBootWim: mergedLayout.defaultBootWim ?? library.config.defaultBootWim ?? null,
-          defaultBootIso: mergedLayout.defaultBootIso ?? library.config.defaultBootIso ?? null,
         }
       : library.status ?? prev?.status);
 

@@ -72,7 +72,6 @@ function Handle-SetPxeBootPluginConfig {
     $httpPort = Get-AppSidecarParam -Params $Params -Name 'httpPort'
     $interfaceId = Get-AppSidecarParam -Params $Params -Name 'interfaceId'
     $deployMenuUrl = Get-AppSidecarParam -Params $Params -Name 'deployMenuUrl'
-    $isoCatalogSource = Get-AppSidecarParam -Params $Params -Name 'isoCatalogSource'
     $tftpd64Path = Get-AppSidecarParam -Params $Params -Name 'tftpd64Path'
     $tftpMode = Get-AppSidecarParam -Params $Params -Name 'tftpMode'
     $tftpBootFile = Get-AppSidecarParam -Params $Params -Name 'tftpBootFile'
@@ -87,7 +86,6 @@ function Handle-SetPxeBootPluginConfig {
         HttpPort         = $(if ($null -ne $httpPort) { [int]$httpPort } else { 8080 })
         InterfaceId      = $(if ($interfaceId) { [string]$interfaceId } else { $null })
         DeployMenuUrl    = $(if ($deployMenuUrl) { [string]$deployMenuUrl } else { $null })
-        IsoCatalogSource = $(if ($isoCatalogSource) { [string]$isoCatalogSource } else { $null })
         Tftpd64Path      = $(if ($tftpd64Path) { [string]$tftpd64Path } else { $null })
         TftpMode         = $(if ($tftpMode) { [string]$tftpMode } else { 'router' })
         SkipMenuRegen    = ([bool]$skipMenuRegen)
@@ -318,22 +316,9 @@ function Handle-OpenPxeBootIsoFolder {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
-function Handle-OpenPxeBootFieldIsoDriversFolder {
+function Handle-OpenPxeBootDriversFolder {
     param([int]$Id, $Params)
-    $data = Open-AppPxeBootFieldIsoDriversFolder
-    Write-SidecarResponse -Id $Id -Data $data
-}
-
-function Handle-GetPxeBootFieldIsoStatus {
-    param([int]$Id, $Params)
-    $data = Get-AppPxeBootFieldIsoDownloadStatus
-    Write-SidecarResponse -Id $Id -Data $data
-}
-
-function Handle-DownloadPxeBootFieldIso {
-    param([int]$Id, $Params)
-    $replaceExisting = Get-AppSidecarParam -Params $Params -Name 'replaceExisting'
-    $data = Download-AppPxeBootFieldIsoWim -ReplaceExisting:([bool]$replaceExisting)
+    $data = Open-AppPxeBootDriversFolder
     Write-SidecarResponse -Id $Id -Data $data
 }
 
@@ -382,20 +367,6 @@ function Handle-SetPxeBootDefaultWim {
         $data = Set-AppPxeBootDefaultWim -FileName ([string]$fileName)
     } else {
         $data = Set-AppPxeBootDefaultWim -Clear
-    }
-    Write-SidecarResponse -Id $Id -Data $data
-}
-
-function Handle-SetPxeBootDefaultIso {
-    param([int]$Id, $Params)
-    $clear = Get-AppSidecarParam -Params $Params -Name 'clear'
-    $fileName = Get-AppSidecarParam -Params $Params -Name 'fileName'
-    if ($clear) {
-        $data = Set-AppPxeBootDefaultIso -Clear
-    } elseif ($fileName) {
-        $data = Set-AppPxeBootDefaultIso -FileName ([string]$fileName)
-    } else {
-        $data = Set-AppPxeBootDefaultIso -Clear
     }
     Write-SidecarResponse -Id $Id -Data $data
 }

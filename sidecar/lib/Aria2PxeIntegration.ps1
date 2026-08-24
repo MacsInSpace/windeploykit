@@ -146,10 +146,10 @@ function Resolve-AppAria2DriverModelEntry {
         [string]$Vendor,
         [string]$Folder
     )
-    if (-not (Test-AppSidecarCommand Read-AppPxeBootFieldIsoDriversSeed)) {
+    if (-not (Test-AppSidecarCommand Read-AppPxeBootDriversSeed)) {
         return $null
     }
-    $seed = Read-AppPxeBootFieldIsoDriversSeed
+    $seed = Read-AppPxeBootDriversSeed
     if (-not $seed -or -not $seed.vendors) { return $null }
 
     $vendorNeedle = if ($Vendor) { $Vendor.Trim() } else { $null }
@@ -160,7 +160,7 @@ function Resolve-AppAria2DriverModelEntry {
         $vendorName = [string]$vendorProp.Name
         if ($vendorNeedle -and $vendorName -ne $vendorNeedle) { continue }
         foreach ($model in @($vendorProp.Value.models)) {
-            $folderName = Get-AppPxeBootFieldIsoDriverSeedStringProp -Model $model -Name 'folder'
+            $folderName = Get-AppPxeBootDriverSeedStringProp -Model $model -Name 'folder'
             if ([string]::IsNullOrWhiteSpace($folderName)) { continue }
 
             $matched = $false
@@ -170,14 +170,14 @@ function Resolve-AppAria2DriverModelEntry {
                 foreach ($candidate in @($aliasNeedle, $folderNeedle)) {
                     if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
                     if ($folderName -eq $candidate) { $matched = $true; break }
-                    foreach ($pat in @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $model -Name 'wmiPatterns')) {
+                    foreach ($pat in @(Get-AppPxeBootDriverSeedArrayProp -Model $model -Name 'wmiPatterns')) {
                         if ([string]$pat -eq $candidate) { $matched = $true; break }
                         if ($candidate -match [regex]::Escape([string]$pat)) { $matched = $true; break }
                     }
                     if ($matched) { break }
                     if (Test-AppSidecarCommand Get-AppAcerSccmPatternVariants) {
                         foreach ($variant in @(Get-AppAcerSccmPatternVariants -Pattern $candidate)) {
-                            foreach ($pat in @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $model -Name 'wmiPatterns')) {
+                            foreach ($pat in @(Get-AppPxeBootDriverSeedArrayProp -Model $model -Name 'wmiPatterns')) {
                                 if ([string]$pat -eq $variant) { $matched = $true; break }
                             }
                             if ($matched) { break }
@@ -188,12 +188,12 @@ function Resolve-AppAria2DriverModelEntry {
             } elseif ($aliasNeedle) {
                 if ($folderName -eq $aliasNeedle) { $matched = $true }
                 else {
-                    foreach ($pat in @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $model -Name 'wmiPatterns')) {
+                    foreach ($pat in @(Get-AppPxeBootDriverSeedArrayProp -Model $model -Name 'wmiPatterns')) {
                         if ([string]$pat -eq $aliasNeedle) { $matched = $true; break }
                         if ($aliasNeedle -match [regex]::Escape([string]$pat)) { $matched = $true; break }
                     }
                     if (-not $matched) {
-                        foreach ($label in @(Get-AppPxeBootFieldIsoDriverNsspCatalogLabels -Model $model)) {
+                        foreach ($label in @(Get-AppPxeBootDriverNsspCatalogLabels -Model $model)) {
                             if ([string]$label -eq $aliasNeedle) { $matched = $true; break }
                         }
                     }
@@ -209,7 +209,7 @@ function Resolve-AppAria2DriverModelEntry {
                 folder      = $folderName
                 relPath     = $relPath
                 displayName = $folderName
-                aliases     = @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $model -Name 'wmiPatterns')
+                aliases     = @(Get-AppPxeBootDriverSeedArrayProp -Model $model -Name 'wmiPatterns')
             }
         }
     }
@@ -457,9 +457,9 @@ function Invoke-AppAria2PromoteJobFiles {
             # Vendor comes from the promote target; tolerate old job records without one.
             $vendorName = [string](Get-AppAria2JsonProp -Item $target -Name 'vendor')
             $destDir = if ([string]::IsNullOrWhiteSpace($vendorName)) {
-                Join-Path (Get-AppPxeBootFieldIsoDriversOsRoot) $folderName
+                Join-Path (Get-AppPxeBootDriversOsRoot) $folderName
             } else {
-                Join-Path (Join-Path (Get-AppPxeBootFieldIsoDriversOsRoot) $vendorName) $folderName
+                Join-Path (Join-Path (Get-AppPxeBootDriversOsRoot) $vendorName) $folderName
             }
             if (-not (Test-Path -LiteralPath $destDir)) {
                 $null = New-Item -Path $destDir -ItemType Directory -Force
@@ -470,8 +470,8 @@ function Invoke-AppAria2PromoteJobFiles {
             }
             $destFile = Join-Path $destDir $srcFile.Name
             Move-Item -LiteralPath $srcFile.FullName -Destination $destFile -Force
-            if (Test-AppSidecarCommand Sync-AppPxeBootFieldIsoDriverStore) {
-                Sync-AppPxeBootFieldIsoDriverStore | Out-Null
+            if (Test-AppSidecarCommand Sync-AppPxeBootDriverStore) {
+                Sync-AppPxeBootDriverStore | Out-Null
             }
             $result.files += @{ path = $destFile; kind = 'driver' }
             Write-SidecarLog "aria2: promoted driver to $destFile"
@@ -2057,12 +2057,12 @@ function Get-AppAria2TrackerCatalogPayload {
         trackerUrl  = [string](Get-AppAria2JsonProp -Item $tracker -Name 'manifestUrl')
         generatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
-    if (-not (Test-AppSidecarCommand Read-AppPxeBootFieldIsoDriversSeed)) {
+    if (-not (Test-AppSidecarCommand Read-AppPxeBootDriversSeed)) {
         $catalogMeta['drivers'] = @()
-        $catalogMeta['note'] = 'FieldIso driver seed unavailable.'
+        $catalogMeta['note'] = 'Driver seed unavailable.'
         return $catalogMeta
     }
-    $seed = Read-AppPxeBootFieldIsoDriversSeed
+    $seed = Read-AppPxeBootDriversSeed
     $trackerMap = @{}
     if ($tracker -and (Get-AppAria2JsonProp -Item $tracker -Name 'entries')) {
         foreach ($entry in @(Get-AppAria2JsonProp -Item $tracker -Name 'entries')) {
@@ -2076,12 +2076,12 @@ function Get-AppAria2TrackerCatalogPayload {
 
     # Downloaded state ("Ready" in the panel) = what is actually in the driver store on
     # disk (<library>/Drivers/<Vendor>/<Model>/ holding a pack file), keyed vendor|folder.
-    # The old source - the FieldIso index - only ever listed seed models, so catalog-row
+    # The old source - the drivers index - only ever listed seed models, so catalog-row
     # downloads could never show as downloaded (Craig, 2026-08-18).
     $indexReady = @{}
-    if (Test-AppSidecarCommand Get-AppPxeBootFieldIsoDriversOsRoot) {
+    if (Test-AppSidecarCommand Get-AppPxeBootDriversOsRoot) {
         try {
-            $driversRoot = Get-AppPxeBootFieldIsoDriversOsRoot
+            $driversRoot = Get-AppPxeBootDriversOsRoot
             if ($driversRoot -and (Test-Path -LiteralPath $driversRoot)) {
                 foreach ($vendorDir in @(Get-ChildItem -LiteralPath $driversRoot -Directory -ErrorAction SilentlyContinue)) {
                     foreach ($modelDir in @(Get-ChildItem -LiteralPath $vendorDir.FullName -Directory -ErrorAction SilentlyContinue)) {
@@ -2146,12 +2146,12 @@ function Get-AppAria2TrackerCatalogPayload {
             # deploy.example.com OOBD folder tree, and its rows (bare codes like 20L/82V)
             # rendered ahead of - and folded away - the better-named catalog rows. Catalog
             # rows are canonical for catalog-covered vendors now; the seed keeps its other
-            # jobs (FieldIso store/index + WinPE WMI matching, promote alias resolution).
+            # jobs (driver store/index + WinPE WMI matching, promote alias resolution).
             # Only vendors WITHOUT a vendor catalog (Proxmox VirtIO lab packs) still
             # surface seed rows here.
             if ($vendorName -in @('Acer', 'LENOVO', 'Dell', 'HP', 'Microsoft')) { continue }
             foreach ($model in @($vendorProp.Value.models)) {
-                $folderName = Get-AppPxeBootFieldIsoDriverSeedStringProp -Model $model -Name 'folder'
+                $folderName = Get-AppPxeBootDriverSeedStringProp -Model $model -Name 'folder'
                 if ([string]::IsNullOrWhiteSpace($folderName)) { continue }
                 $expected = $null
                 $key = "$vendorName|$folderName"
@@ -2168,7 +2168,7 @@ function Get-AppAria2TrackerCatalogPayload {
                     }
                     if ($magnetVal) { $magnet = [string]$magnetVal }
                 }
-                $patterns = @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $model -Name 'wmiPatterns')
+                $patterns = @(Get-AppPxeBootDriverSeedArrayProp -Model $model -Name 'wmiPatterns')
                 if ($vendorName -eq 'Acer') {
                     [void]$acerSeedFolders.Add($folderName)
                     foreach ($pat in $patterns) {
@@ -2201,7 +2201,7 @@ function Get-AppAria2TrackerCatalogPayload {
                     }
                 }
                 if (-not $uri -and -not $magnet -and $vendorName -eq 'LENOVO' -and $lenovoCatalog) {
-                    $fallbackPage = Get-AppPxeBootFieldIsoDriverSeedStringProp -Model $model -Name 'lenovoSccmFallbackPage'
+                    $fallbackPage = Get-AppPxeBootDriverSeedStringProp -Model $model -Name 'lenovoSccmFallbackPage'
                     $resolved = Resolve-AppLenovoSccmDriverUrlForWmiPatterns `
                         -Patterns $patterns `
                         -Catalog $lenovoCatalog `
@@ -2234,8 +2234,8 @@ function Get-AppAria2TrackerCatalogPayload {
                         folder          = $folderName
                         expectedArchive = $expected
                         relPath         = "drivers/$vendorName/$folderName"
-                        aliases         = @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $model -Name 'wmiPatterns')
-                        nsspLabels      = @(Get-AppPxeBootFieldIsoDriverNsspCatalogLabels -Model $model)
+                        aliases         = @(Get-AppPxeBootDriverSeedArrayProp -Model $model -Name 'wmiPatterns')
+                        nsspLabels      = @(Get-AppPxeBootDriverNsspCatalogLabels -Model $model)
                         archiveReady    = if ($indexReady.ContainsKey($key)) { $indexReady[$key] } else { $false }
                         uri             = $uri
                         magnet          = $magnet

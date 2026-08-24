@@ -14,7 +14,7 @@ $script:AppProductIdentity = [ordered]@{
     UserAgentToken   = 'WinDeployKit/1.0'    # token only; Get-AppUserAgent composes the header
     # DialogHelperName is left at its default, '<BinaryName>-dialog' = windeploykit-dialog
     # (scripts/build-windeploykit-dialog.sh, vendor/binaries/dialog-macos/).
-    # Published-asset feed (p7zip / Caddy / tftpd64 / FieldIso / aria2 manifests). Still the
+    # Published-asset feed (p7zip / Caddy / tftpd64 / aria2 manifests). Still the
     # placeholder host from the port: every caller falls back to the bundled manifest when
     # the fetch fails, so behaviour is unchanged until a real feed exists. Omit the field to
     # skip the fetch entirely.

@@ -9,7 +9,7 @@
       1. wimlib's `info` output parses into the editions a tech picks from.
       2. A sequence stores {sourceId,index} and only that - a malformed or
          path-shaped sourceId must never reach the published share.
-      3. The client half (FieldIso) reads TaskSequences/index.json and turns a row
+      3. The client half (startnet.cmd) reads TaskSequences/index.json and turns a row
          into a URL + index against the host it is already talking to, ignoring the
          iPXE-only ${next-server} form of the URL.
 #>
@@ -232,90 +232,6 @@ Test-Case 'a serve mount is re-homed, never borrowed from outside the share' {
     if ($src -notmatch 'hdiutil: \$reason') { throw 'attach failure does not carry the hdiutil reason' }
     $reader = (Get-Command Get-AppPxeBootInstallImagesForSource).ScriptBlock.ToString()
     if ($reader -notmatch 'isoMountDir') { throw 'the edition reader does not mount at the canonical .mounts path' }
-}
-
-Write-Host ''
-Write-Host 'Client half (FieldIso reads the published index):'
-
-# The client functions live in a script that runs main() on load, so lift just the
-# function definitions out of its AST rather than dot-sourcing it.
-$runPath = Join-Path $SidecarRoot 'pxe/fieldiso/run.ps1'
-$errors = $null
-$tokens = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($runPath, [ref]$tokens, [ref]$errors)
-if ($errors -and $errors.Count -gt 0) { throw "run.ps1 does not parse: $($errors[0])" }
-$wanted = @('Get-FieldIsoHttpOrigin', 'Get-FieldIsoTaskSequence', 'Get-FieldIsoTaskSequenceImage', 'Install-FieldIsoTaskSequenceUnattend', 'Get-FieldIsoJsonProp', 'Test-FieldIsoJsonBool', 'Read-FieldIsoOneLineFile', 'Get-FieldIsoWorkDir')
-$defs = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)
-$src = ($defs | Where-Object { $wanted -contains $_.Name } | ForEach-Object { $_.Extent.Text }) -join "`n"
-foreach ($name in $wanted) { if ($src -notmatch [regex]::Escape("function $name")) { throw "run.ps1 is missing $name" } }
-
-$clientScope = [scriptblock]::Create(@"
-`$script:log = [System.Collections.Generic.List[string]]::new()
-function Write-FieldIsoLog { param([string]`$Message) [void]`$script:log.Add(`$Message) }
-function Stop-FieldIsoBootstrap { param([string]`$Message) throw `$Message }
-$src
-"@)
-$clientState = [powershell]::Create()
-$null = $clientState.AddScript({
-        param($Setup, $IndexJson, $TempDir)
-        . ([scriptblock]::Create($Setup))
-        # Stub the network: index.json comes from a temp file, everything else 404s.
-        function Invoke-FieldIsoCurl {
-            param([string]$Url, [string]$OutFile, [string]$CurlPath)
-            if ($Url -like '*TaskSequences/index.json') {
-                Set-Content -LiteralPath $OutFile -Value $script:IndexBody -Encoding UTF8
-                return $true
-            }
-            return $false
-        }
-        $script:IndexBody = $IndexJson
-        $env:SystemRoot = $TempDir
-        $results = [ordered]@{}
-        $results['origin'] = Get-FieldIsoHttpOrigin -HttpBase 'http://10.0.1.147:8080/fieldiso'
-        $seq = Get-FieldIsoTaskSequence -HttpBase 'http://10.0.1.147:8080/fieldiso' -CurlPath ''
-        $results['seqId'] = if ($seq) { [string]$seq.id } else { '' }
-        $img = Get-FieldIsoTaskSequenceImage -Sequence $seq -HttpBase 'http://10.0.1.147:8080/fieldiso'
-        $results['url'] = if ($img) { [string]$img.Url } else { '' }
-        $results['index'] = if ($img) { [int]$img.Index } else { 0 }
-        $results['log'] = ($script:log -join ' | ')
-        $results
-    })
-$null = $clientState.AddParameters(@{
-        Setup = $clientScope.ToString()
-        TempDir = ([IO.Path]::GetTempPath())
-        IndexJson = (@{
-                schema = 1
-                defaultSequenceId = 'server-standard'
-                sequences = @(
-                    @{ id = 'client-domain'; name = 'Client'; kind = 'client'; file = 'client-domain.xml'; image = $null }
-                    @{ id = 'server-standard'; name = 'Server'; kind = 'server'; file = 'server-standard.xml'
-                        image = @{
-                            sourceId = 'iso:Server2025.iso'; index = 2; editionName = 'Windows Server 2025 SERVERSTANDARD'
-                            httpPath = 'iso-wim/server2025-a38406a3/install.wim'
-                            # Deliberately the iPXE form - the client must not use it.
-                            httpUrl = 'http://${next-server}:8080/iso-wim/server2025-a38406a3/install.wim'
-                            sharePath = '.mounts\server2025-a38406a3\sources\install.wim'
-                        }
-                    }
-                )
-            } | ConvertTo-Json -Depth 8)
-    })
-$clientResult = $clientState.Invoke()
-$clientState.Dispose()
-$r = @($clientResult)[0]
-
-Test-Case 'origin is taken from the http_base URL' {
-    Assert-Equal 'http://10.0.1.147:8080' $r['origin'] 'origin'
-}
-
-Test-Case 'the default sequence is selected from index.json' {
-    Assert-Equal 'server-standard' $r['seqId'] 'sequence id'
-}
-
-Test-Case 'the image URL is rebuilt from httpPath, never the iPXE httpUrl' {
-    Assert-Equal 'http://10.0.1.147:8080/iso-wim/server2025-a38406a3/install.wim' $r['url'] 'image url'
-    if ($r['url'] -match 'next-server') { throw 'the client used the iPXE URL' }
-    Assert-Equal 2 $r['index'] 'image index'
 }
 
 Write-Host ''

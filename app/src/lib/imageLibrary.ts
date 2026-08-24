@@ -16,7 +16,7 @@ import { getSystemDownloadsDir } from "./downloadPath";
 //   <root>/WIMs/<name>.wim
 //   <root>/.incoming/<guid>/          (aria2 staging)
 //
-// See docs/core/app-data/AGENT_NOTES_APP_DATA_LAYOUT.md and docs/plugins/netboot/AGENT_NOTES_FIELDISO_SMB_PAYLOAD.md.
+// See docs/core/app-data/AGENT_NOTES_APP_DATA_LAYOUT.md and docs/plugins/netboot (Deploy$ SMB payload notes).
 
 // Product slug - the same folder name the sidecar uses (Get-AppImageLibraryDefaultRoot).
 const APP_ROOT_NAME = "windeploykit";

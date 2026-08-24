@@ -50,8 +50,6 @@ $script:AppPxeBootStoreInitializing = $false
 # Keep in sync with packaging/p7zip-tools.json (runtime install - not bundled in signed macOS pkg).
 $script:AppPxeBootP7zipPinnedVersion = '17.06'
 $script:AppPxeBootP7zipInstallInProgress = $false
-$script:AppPxeBootFieldIsoManifestCache = $null
-$script:AppPxeBootFieldIsoManifestCacheAt = $null
 $script:AppPxeBootOptionalAssetsManifestCache = $null
 $script:AppPxeBootOptionalAssetsManifestCacheAt = $null
 $script:AppPxeBootWindowsSmbAclRoot = $null
@@ -122,12 +120,10 @@ function Read-AppPxeBootConfig {
         httpPort          = 8080
         interfaceId       = $null
         deployMenuUrl     = (Get-AppPxeBootDefaultDeployMenuUrl)
-        isoCatalogSource  = 'local'
         tftpd64Path       = $null
         tftpMode          = 'router'
         tftpBootFile      = $script:AppPxeBootDefaultTftpBootFile
         defaultBootWim       = $null
-        defaultBootIso       = $null
         autoBootDefault      = $false
         smbShareEnabled      = $false
         smbOverlayEnabled    = $false
@@ -162,9 +158,6 @@ function Read-AppPxeBootConfig {
         # was removed from the UI). Ignore any stale persisted false so the mounter and
         # the WIMs/ install.wim symlinks always run when HTTP starts.
         $defaults.isoMountServe = $true
-        if (-not (Test-AppPxeBootWanDeployMenuEnabled) -and [string]$defaults.isoCatalogSource -eq 'wan') {
-            $defaults.isoCatalogSource = 'local'
-        }
         # deploy overlay creds: blank | throwaway | dept | vault:<id>
         if (-not (Test-AppPxeBootDeployOverlayCredsModeValue -Value ([string]$defaults.deployOverlayCreds))) {
             $defaults.deployOverlayCreds = 'throwaway'
@@ -184,12 +177,10 @@ function Write-AppPxeBootConfig {
         [int]$HttpPort = 8080,
         [string]$InterfaceId,
         [string]$DeployMenuUrl,
-        [string]$IsoCatalogSource,
         [string]$Tftpd64Path,
         [string]$TftpMode = 'router',
         [string]$TftpBootFile,
         [string]$DefaultBootWim,
-        [string]$DefaultBootIso,
         [bool]$AutoBootDefault,
         [bool]$SmbShareEnabled,
         [bool]$SmbOverlayEnabled,
@@ -219,14 +210,6 @@ function Write-AppPxeBootConfig {
             $defaultWim = Get-AppPxeBootSafeWimFileName -FileName $DefaultBootWim
         }
     }
-    $defaultIso = $existing.defaultBootIso
-    if ($PSBoundParameters.ContainsKey('DefaultBootIso')) {
-        if ([string]::IsNullOrWhiteSpace($DefaultBootIso)) {
-            $defaultIso = $null
-        } else {
-            $defaultIso = Get-AppPxeBootSafeIsoFileName -FileName $DefaultBootIso
-        }
-    }
     $cfg = [ordered]@{
         httpPort       = $HttpPort
         interfaceId    = if ([string]::IsNullOrWhiteSpace($InterfaceId)) { $null } else { $InterfaceId.Trim() }
@@ -235,21 +218,10 @@ function Write-AppPxeBootConfig {
         } else {
             $DeployMenuUrl.Trim().TrimEnd('/')
         }
-        isoCatalogSource = if (-not (Test-AppPxeBootWanDeployMenuEnabled)) {
-            'local'
-        } elseif ($PSBoundParameters.ContainsKey('IsoCatalogSource')) {
-            $src = [string]$IsoCatalogSource
-            if ($src -eq 'wan') { 'wan' } else { 'local' }
-        } elseif ($existing.isoCatalogSource -eq 'wan') {
-            'wan'
-        } else {
-            'local'
-        }
         tftpd64Path    = if ([string]::IsNullOrWhiteSpace($Tftpd64Path)) { $null } else { $Tftpd64Path.Trim() }
         tftpMode       = if ($TftpMode -in @('router', 'standalone', 'proxy')) { $TftpMode } else { 'router' }
         tftpBootFile   = $storedTftpBootFile
         defaultBootWim     = $defaultWim
-        defaultBootIso     = $defaultIso
         autoBootDefault    = if ($PSBoundParameters.ContainsKey('AutoBootDefault')) {
             [bool]$AutoBootDefault
         } elseif ($null -ne $existing.autoBootDefault) {
@@ -348,22 +320,12 @@ function Get-AppPxeBootLayoutPaths {
         # so a /tmp mount + absolute link is invisible to Windows WinPE.
         isoMountDir     = Join-Path (Split-Path -Parent $libWims) '.mounts'
         isoDir          = $libIso
-        isoCatalogDir   = Join-Path $root 'http/ISOs'
-        isoUrlDir       = Join-Path $root 'http/ISOs/urls'
         caddyBinaryDir  = Join-Path $root 'binaries/caddy'
         tftpd64BinaryDir = Join-Path $root 'binaries/tftpd64'
         caddyfile       = Join-Path $root 'Caddyfile'
         bootChain       = Join-Path $root 'http/boot.ipxe'
         menuIpxe        = Join-Path $root 'http/menu.ipxe'
-        isoCatalogMenu  = Join-Path $root 'http/ISOs/menu.ipxe'
-        isoCatalogJson  = Join-Path $root 'http/ISOs/catalog.json'
         brandingDir     = Join-Path $root 'http/branding'
-        fieldisoDir         = Join-Path $root 'http/fieldiso'
-        fieldisoDriversDir  = Join-Path $root 'http/fieldiso/drivers'
-        fieldisoDriversIndex = Join-Path $root 'http/fieldiso/drivers/index.json'
-        fieldisoBootstrapUrl = Join-Path $root 'http/fieldiso/bootstrap.url'
-        fieldisoRunScript     = Join-Path $root 'http/fieldiso/run.ps1'
-        fieldisoToolsDir      = Join-Path $root 'http/fieldiso/tools'
         shareDir            = Join-Path $root 'http/share'
         dnsmasqConf = Join-Path $root 'dnsmasq-tftp.conf'
     }
@@ -398,7 +360,7 @@ function Set-AppPxeBootPluginRuntimeEnabled {
             Ensure-AppPxeBootStoreLayoutLite | Out-Null
             Sync-AppPxeBootBundledBootAssets | Out-Null
             if ($null -eq $prev -or -not $prev) {
-                Write-SidecarLog 'Netboot: pxe-boot store ready (http/iso, ISOs, branding, fieldiso/drivers, share/)'
+                Write-SidecarLog 'Netboot: pxe-boot store ready (http/iso, branding, drivers, share/)'
             }
         }
     } elseif ($null -ne $prev -and $prev -and -not $Enabled) {
@@ -422,7 +384,7 @@ function Complete-AppPxeBootDeferredStoreInit {
     $script:AppPxeBootState['StoreInitDeferred'] = $false
     Ensure-AppPxeBootStoreLayoutLite | Out-Null
     Sync-AppPxeBootBundledBootAssets | Out-Null
-    Write-SidecarLog 'Netboot: pxe-boot store ready (http/iso, ISOs, branding, fieldiso/drivers, share/)'
+    Write-SidecarLog 'Netboot: pxe-boot store ready (http/iso, branding, drivers, share/)'
 }
 
 function Write-AppPxeBootStoreReadmeIfMissing {
@@ -444,10 +406,10 @@ function Write-AppPxeBootStoreReadmeIfMissing {
     $want | Set-Content -LiteralPath $Path -Encoding UTF8 -NoNewline
 }
 
-function Test-AppPxeBootFieldIsoDriverSyncDue {
+function Test-AppPxeBootDriverSyncDue {
     param([int]$MinIntervalSeconds = 300)
 
-    if (-not (Test-Path -LiteralPath (Get-AppPxeBootFieldIsoDriversIndexPath))) {
+    if (-not (Test-Path -LiteralPath (Get-AppPxeBootDriversIndexPath))) {
         return $true
     }
     $last = $script:AppPxeBootState.LastDriverSyncUtc
@@ -471,12 +433,7 @@ function Ensure-AppPxeBootStoreLayoutLite {
             (Join-Path $paths.httpRoot 'wim-boot')
             $paths.isoDir
             $paths.imageWimsDir
-            $paths.isoCatalogDir
-            $paths.isoUrlDir
             $paths.brandingDir
-            $paths.fieldisoDir
-            $paths.fieldisoDriversDir
-            $paths.fieldisoToolsDir
             $paths.shareDir
             $paths.caddyBinaryDir
             $paths.tftpd64BinaryDir
@@ -492,12 +449,6 @@ function Ensure-AppPxeBootStoreLayoutLite {
         'Each ISO is mounted read-only and its install.wim served live at'
         '/iso-wim/<name>/install.wim - nothing is extracted or duplicated on disk.'
         'Add ISOs via Netboot > Add ISO, or drop .iso files here.'
-    )
-    Write-AppPxeBootStoreReadmeIfMissing -Path (Join-Path $paths.isoCatalogDir 'README.txt') -ReadmeLines @(
-        'Generated FieldIso ISO catalog - do not drop ISO files here.'
-        'Source ISOs live in the image library iso/ folder (Settings > Downloads location).'
-        'urls/*.install.wim.url points at /iso-wim/<name>/install.wim - served live'
-        'from the read-only ISO mount, never extracted.'
     )
     Write-AppPxeBootStoreReadmeIfMissing -Path (Join-Path $paths.brandingDir 'README.txt') -ReadmeLines @(
         'PXE menu background PNGs for boot.ipxe and ISOs/menu.ipxe.'
@@ -535,12 +486,10 @@ function Ensure-AppPxeBootStoreLayout {
         Write-SidecarLog 'PXE boot: pruned legacy http/iso-wim extraction folder (mount-and-serve only)'
     }
 
-    if (Test-AppPxeBootFieldIsoDriverSyncDue) {
-        Sync-AppPxeBootFieldIsoDriverStore | Out-Null
+    if (Test-AppPxeBootDriverSyncDue) {
+        Sync-AppPxeBootDriverStore | Out-Null
         $script:AppPxeBootState.LastDriverSyncUtc = (Get-Date).ToUniversalTime()
     }
-    Sync-AppPxeBootFieldIsoHttpAssets | Out-Null
-
     Sync-AppPxeBootBundledBootAssets | Out-Null
     Ensure-AppPxeBootAutoexecIfMissing | Out-Null
     Write-AppPxeBootTftpAutoexecScript | Out-Null
@@ -614,7 +563,7 @@ function Get-AppPxeBootBundledArchRoot {
     <#
         Root holding the per-architecture iPXE trees. Unlike USM (single location) we
         carry two candidates, so require at least one recognised arch dir before
-        accepting a root - sidecar/pxe/ also holds fieldiso/, wimboot and snponly.efi.
+        accepting a root - sidecar/pxe/ also holds wimboot and snponly.efi.
     #>
     $candidates = [System.Collections.Generic.List[string]]::new()
     if ($SidecarRoot) { [void]$candidates.Add((Join-Path $SidecarRoot 'pxe')) }
@@ -726,11 +675,6 @@ function Sync-AppPxeBootBundledBootAssets {
     return ($snponly -or $wimboot -or $archTrees)
 }
 
-function Test-AppPxeBootWimIsFieldIso {
-    param([Parameter(Mandatory)][string]$FileName)
-    return [string]$FileName -match '(?i)^FieldIso\.wim$'
-}
-
 function Test-AppPxeBootWimIsMdtLiteTouch {
     <#
     .SYNOPSIS
@@ -749,13 +693,11 @@ function Test-AppPxeBootWimUsesDeployOverlay {
     .SYNOPSIS
         True for a boot WIM that can consume the Deploy$ overlay we inject at boot.
     .NOTES
-        Every imported WinPE except FieldIso.wim: FieldIso takes its install.wim URL
-        straight from iPXE and needs nothing injected. Injection only happens when the
-        overlay is enabled (Test-AppPxeBootDeployOverlayEnabled).
+        Any imported WinPE. Injection only happens when the overlay is enabled
+        (Test-AppPxeBootDeployOverlayEnabled).
     #>
     param([Parameter(Mandatory)][string]$FileName)
     if ([string]::IsNullOrWhiteSpace($FileName)) { return $false }
-    if (Test-AppPxeBootWimIsFieldIso -FileName $FileName) { return $false }
     return ([string]$FileName -match '(?i)\.wim$')
 }
 
@@ -764,67 +706,26 @@ function Get-AppPxeBootDirectBootWimName {
     if (-not $cfg.defaultBootWim) { return $null }
     $defaultPath = Join-Path (Get-AppPxeBootLayoutPaths).wimDir $cfg.defaultBootWim
     if (-not (Test-Path -LiteralPath $defaultPath)) { return $null }
-    $name = [string]$cfg.defaultBootWim
-    if (Test-AppPxeBootWimIsFieldIso -FileName $name) { return $null }
-    return $name
-}
-
-function Test-AppPxeBootFieldIsoIsDefaultBoot {
-    $cfg = Read-AppPxeBootConfig
-    if (-not $cfg.defaultBootWim) { return $false }
-    if (-not (Test-AppPxeBootWimIsFieldIso -FileName $cfg.defaultBootWim)) { return $false }
-    $defaultPath = Join-Path (Get-AppPxeBootLayoutPaths).wimDir $cfg.defaultBootWim
-    return (Test-Path -LiteralPath $defaultPath)
+    return [string]$cfg.defaultBootWim
 }
 
 function Get-AppPxeBootBootChainMode {
     $direct = Get-AppPxeBootDirectBootWimName
     if ($direct) { return "wimboot:$direct" }
-    if (Test-AppPxeBootFieldIsoIsDefaultBoot) {
-        $defaultIso = Get-AppPxeBootDefaultIsoName
-        if ($defaultIso) { return "fieldiso-iso:$defaultIso" }
-        return 'fieldiso-catalog'
-    }
     return 'deploy-iso'
-}
-
-function Get-AppPxeBootDefaultIsoName {
-    $cfg = Read-AppPxeBootConfig
-    if ([string]::IsNullOrWhiteSpace($cfg.defaultBootIso)) { return $null }
-    try {
-        $name = Get-AppPxeBootSafeIsoFileName -FileName ([string]$cfg.defaultBootIso)
-    } catch {
-        return $null
-    }
-    $dest = Join-Path (Get-AppPxeBootLayoutPaths).isoDir $name
-    if (Test-Path -LiteralPath $dest) { return $name }
-    return $null
-}
-
-function Get-AppPxeBootIsoCatalogMenuId {
-    param([Parameter(Mandatory)][string]$FileName)
-    (Get-AppPxeBootIsoMenuItemId -FileName $FileName) -replace '^iso_', ''
-}
-
-function Get-AppPxeBootIsoDisplayLabel {
-    param([Parameter(Mandatory)][string]$FileName)
-    ([IO.Path]::GetFileNameWithoutExtension($FileName) -replace '_', ' ')
 }
 
 function Get-AppPxeBootMenuDefaultChooseTarget {
     param(
         [string]$DirectBootWim,
-        [array]$BootableWims,
-        [string]$DefaultIsoMenuId
+        [array]$BootableWims
     )
     if ($DirectBootWim) { return 'boot_default' }
-    if ($DefaultIsoMenuId) { return $DefaultIsoMenuId }
-    if (Test-AppPxeBootFieldIsoIsDefaultBoot) { return 'iso_catalog' }
-    $first = @($BootableWims | Where-Object { -not (Test-AppPxeBootWimIsFieldIso -FileName $_.fileName) } | Select-Object -First 1)
+    $first = @($BootableWims | Select-Object -First 1)
     if ($first.Count -gt 0) {
         return Get-AppPxeBootMenuItemId -FileName ([string]$first[0].fileName)
     }
-    return 'iso_catalog'
+    return 'shell'
 }
 
 function Get-AppPxeBootBundledWimbootRecipesPath {
@@ -947,19 +848,6 @@ function Get-AppPxeBootWimbootRecipe {
         $recipe['gui'] = $true
         if (Test-AppPxeBootWimIsMdtLiteTouch -FileName $WimFileName) {
             $recipe['extractBootmgrFromWim'] = $true
-        }
-    } elseif (Test-AppPxeBootWimIsFieldIso -FileName $WimFileName) {
-        $recipe['useBootAssets'] = $true
-        $recipe['gui'] = $true
-        $recipe['extractBootmgrFromWim'] = $true
-        if (-not $recipe.ContainsKey('index')) { $recipe['index'] = 1 }
-    }
-
-    if (Test-AppPxeBootWimIsFieldIso -FileName $WimFileName) {
-        if (Test-AppPxeBootRecipeFlag -Recipe $recipe -Key 'extractBootmgrFromWim') {
-            if (-not $recipe.ContainsKey('index')) { $recipe['index'] = 1 }
-        } elseif ($recipe.ContainsKey('index')) {
-            $recipe.Remove('index')
         }
     }
 
@@ -1099,7 +987,7 @@ function Get-AppPxeBootWimOverlayProfiles {
         @{
             Id            = 'deploy-share'
             ServedSubdir  = 'deploy'
-            # Any imported WinPE except FieldIso, which gets its install.wim URL from
+            # Any imported WinPE - the deploy client reads its install.wim URL from
             # iPXE and needs no injection. A custom deploy client reads these files from
             # its own root at boot.
             AppliesTo     = { param($Name) Test-AppPxeBootWimUsesDeployOverlay -FileName $Name }
@@ -1117,7 +1005,7 @@ function Get-AppPxeBootWimOverlayProfiles {
                 @{ ServedName = 'startnet.cmd'; WinPeName = 'startnet.cmd'; Required = $false }
                 # The two things a stock WinPE cannot do: expand a vendor .exe/.zip/.7z
                 # driver pack, and talk HTTP. Both LGPL/MIT-licensed, both already in
-                # the repo for FieldIso, both now shipped in the app bundle. None is
+                # the repo, both now shipped in the app bundle. None is
                 # Required - the client degrades (cab-only, local log) without them.
                 @{ ServedName = '7z.exe';   WinPeName = '7z.exe';   Required = $false }
                 @{ ServedName = '7za.dll';  WinPeName = '7za.dll';  Required = $false }
@@ -1225,108 +1113,6 @@ function Get-AppPxeBootWimOverlayInitrdLines {
         if ($ok) { $lines += $profileLines }
     }
     return $lines
-}
-
-$script:AppPxeBootFieldIsoIpxeCatalogRevision = 4
-
-function Test-AppPxeBootIsoCatalogIpxeTemplateOutdated {
-    $paths = Get-AppPxeBootLayoutPaths
-    if (-not (Test-Path -LiteralPath $paths.isoCatalogMenu)) { return [bool](Get-AppPxeBootFieldIsoWimName) }
-    try {
-        $text = [string](Get-Content -LiteralPath $paths.isoCatalogMenu -Raw -Encoding UTF8)
-    } catch {
-        return $true
-    }
-    if ($text -match '(?i)\bbootsdi\b') { return $true }
-    if ($text -match '(?m)^item \S+`t') { return $true }
-    $rev = [string]$script:AppPxeBootFieldIsoIpxeCatalogRevision
-    if ($text -notmatch "(?m)^#\s*fieldiso-ipxe-rev:\s*$([regex]::Escape($rev))\s*$") { return $true }
-    if ((Get-AppPxeBootFieldIsoWimName) -and $text -notmatch '(?m)^:fieldiso_smb_test\s*$') { return $true }
-    return $false
-}
-
-function Get-AppPxeBootFieldIsoWimbootCoreLines {
-    param(
-        [Parameter(Mandatory)][string]$FieldIsoWim,
-        [string]$EchoLabel
-    )
-    $block = [System.Collections.Generic.List[string]]::new()
-    $recipe = Get-AppPxeBootWimbootRecipe -WimFileName $FieldIsoWim
-    if ($EchoLabel) {
-        [void]$block.Add("echo $EchoLabel")
-    }
-    if (Test-AppPxeBootRecipeFlag -Recipe $recipe -Key 'bootAssetsMissing') {
-        [void]$block.Add('echo WARN: FieldIso boot files missing - re-download FieldIso in Netboot')
-    }
-    [void]$block.Add('imgfree')
-    $optStr = Format-AppPxeBootWimbootKernelOptions -Recipe $recipe
-    [void]$block.Add("kernel `${http_base}/wimboot/wimboot$optStr")
-    $bootmgr = Get-AppPxeBootRecipeValue -Recipe $recipe -Key 'bootmgr'
-    if ($bootmgr) {
-        [void]$block.Add((Format-AppPxeBootWimbootInitrdLine -EfiName 'bootmgfw.efi' -HttpRel $bootmgr -LegacyName 'bootmgr'))
-    }
-    $bcd = Get-AppPxeBootRecipeValue -Recipe $recipe -Key 'bcd'
-    if ($bcd) {
-        [void]$block.Add((Format-AppPxeBootWimbootInitrdLine -EfiName 'BCD' -HttpRel $bcd -LegacyName 'bcd'))
-    }
-    $bootsdi = Get-AppPxeBootRecipeValue -Recipe $recipe -Key 'bootsdi'
-    if ($bootsdi) {
-        [void]$block.Add((Format-AppPxeBootWimbootInitrdLine -EfiName 'boot.sdi' -HttpRel $bootsdi -LegacyName 'boot.sdi'))
-    }
-    return @($block)
-}
-
-function Get-AppPxeBootFieldIsoBootIpxeBlock {
-    param(
-        [Parameter(Mandatory)][string]$EntryLabel,
-        [Parameter(Mandatory)][string]$UrlRel,
-        [Parameter(Mandatory)][string]$FieldIsoWim
-    )
-    $block = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in @(Get-AppPxeBootFieldIsoWimbootCoreLines -FieldIsoWim $FieldIsoWim -EchoLabel "Booting $EntryLabel - FieldIso curl install.wim + DISM (no httpdisk)")) {
-        [void]$block.Add($line)
-    }
-    [void]$block.Add("initrd -n fieldiso.url `${http_base}/fieldiso/bootstrap.url fieldiso.url")
-    [void]$block.Add("initrd -n iso.url `${catalog_base}/$UrlRel iso.url")
-    $installWimUrlRel = $UrlRel -replace '\.iso\.url$','.install.wim.url'
-    [void]$block.Add("initrd -n install.wim.url `${catalog_base}/$installWimUrlRel install.wim.url")
-    [void]$block.Add('echo Loading FieldIso WinPE (~330 MB) - run.ps1 served over HTTP')
-    [void]$block.Add("initrd -n boot.wim `${http_base}/wim/$FieldIsoWim boot.wim")
-    [void]$block.Add('boot')
-    [void]$block.Add('imgfree')
-    [void]$block.Add('echo')
-    [void]$block.Add("echo Boot of $EntryLabel failed - check Caddy HTTP, install.wim under http/iso-wim/, FieldIso overlay v$($script:AppPxeBootFieldIsoOverlayVersion).")
-    [void]$block.Add('goto start')
-    [void]$block.Add('')
-    return @($block)
-}
-
-function Get-AppPxeBootFieldIsoSmbTestIpxeBlock {
-    param(
-        [Parameter(Mandatory)][string]$FieldIsoWim
-    )
-    $block = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in @(Get-AppPxeBootFieldIsoWimbootCoreLines -FieldIsoWim $FieldIsoWim -EchoLabel 'Booting FieldIso SMB lab test - macOS share net use (no imaging)')) {
-        [void]$block.Add($line)
-    }
-    [void]$block.Add("initrd -n fieldiso.url `${http_base}/fieldiso/bootstrap.url fieldiso.url")
-    [void]$block.Add("initrd -n fieldiso.mode `${http_base}/fieldiso/mode/smb-test fieldiso.mode")
-    [void]$block.Add("initrd -n smb-test.unc `${http_base}/fieldiso/smb-test.unc smb-test.unc")
-    # Optional throwaway SMB credential (lab only). Only chained when the operator
-    # has placed <storeRoot>/fieldiso-smb-test.cred - a missing initrd would fail boot.
-    $smbCredSource = Join-Path (Get-AppPxeBootStoreRoot) 'fieldiso-smb-test.cred'
-    if (Test-Path -LiteralPath $smbCredSource) {
-        [void]$block.Add("initrd -n smb-test.cred `${http_base}/fieldiso/smb-test.cred smb-test.cred")
-    }
-    [void]$block.Add('echo Loading FieldIso WinPE - run-smb-test.ps1 over HTTP')
-    [void]$block.Add("initrd -n boot.wim `${http_base}/wim/$FieldIsoWim boot.wim")
-    [void]$block.Add('boot')
-    [void]$block.Add('imgfree')
-    [void]$block.Add('echo')
-    [void]$block.Add("echo FieldIso SMB test boot failed - check run-smb-test.ps1, smb-test.unc, overlay v$($script:AppPxeBootFieldIsoOverlayVersion).")
-    [void]$block.Add('goto start')
-    [void]$block.Add('')
-    return @($block)
 }
 
 function Get-AppPxeBootWimlibImagexPath {
@@ -1455,175 +1241,6 @@ function Invoke-AppPxeBootWimlibExtract {
     }
 }
 
-$script:AppPxeBootFieldIsoOverlayVersion = 12
-
-function Get-AppPxeBootFieldIsoOverlayFiles {
-    $overlayRoot = Get-AppPxeBootFieldIsoOverlayRoot
-    if (-not $overlayRoot) { return @() }
-    @(
-        @{ Source = Join-Path $overlayRoot 'Windows/System32/Mount-IsoFromUrl.cmd'; WimPath = '/Windows/System32/Mount-IsoFromUrl.cmd' }
-        @{ Source = Join-Path $overlayRoot 'Windows/System32/winpeshl.ini'; WimPath = '/Windows/System32/winpeshl.ini' }
-    ) | Where-Object { Test-Path -LiteralPath $_.Source }
-}
-
-function Get-AppPxeBootFieldIsoWimInjectRoot {
-    $bundled = Get-AppPxeBootFieldIsoBundledRoot
-    if (-not $bundled) { return $null }
-    $path = Join-Path $bundled 'wim-inject'
-    if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
-    return $null
-}
-
-function Get-AppPxeBootFieldIsoWimInjectEntries {
-    <#
-    .SYNOPSIS
-        Local files to merge into FieldIso.wim via wimlib update (curl, WinPE-PowerShell tree, etc.).
-    #>
-    $entries = [System.Collections.Generic.List[hashtable]]::new()
-    $seen = @{}
-
-    $bundled = Get-AppPxeBootFieldIsoBundledRoot
-    if ($bundled) {
-        foreach ($toolName in @('curl.exe', '7z.exe', '7za.dll', '7zxa.dll')) {
-            $toolSrc = Join-Path $bundled "tools\$toolName"
-            if (-not (Test-Path -LiteralPath $toolSrc)) { continue }
-            $key = "/Windows/System32/$toolName"
-            if (-not $seen.ContainsKey($key)) {
-                [void]$entries.Add(@{ Source = $toolSrc; WimPath = $key })
-                $seen[$key] = $true
-            }
-        }
-    }
-
-    $injectRoot = Get-AppPxeBootFieldIsoWimInjectRoot
-    if ($injectRoot) {
-        foreach ($file in @(Get-ChildItem -LiteralPath $injectRoot -Recurse -File -ErrorAction SilentlyContinue)) {
-            if ($file.Name -ieq 'README.txt') { continue }
-            $rel = $file.FullName.Substring($injectRoot.Length).TrimStart('\', '/')
-            if ([string]::IsNullOrWhiteSpace($rel)) { continue }
-            $wimPath = '/' + ($rel -replace '\\', '/')
-            if ($seen.ContainsKey($wimPath)) { continue }
-            [void]$entries.Add(@{ Source = $file.FullName; WimPath = $wimPath })
-            $seen[$wimPath] = $true
-        }
-    }
-
-    return @($entries)
-}
-
-function Test-AppPxeBootFieldIsoWinPePowerShellInjectAvailable {
-    $injectRoot = Get-AppPxeBootFieldIsoWimInjectRoot
-    if (-not $injectRoot) { return $false }
-    $ps = Join-Path $injectRoot 'Windows/System32/WindowsPowerShell/v1.0/powershell.exe'
-    return (Test-Path -LiteralPath $ps)
-}
-
-function Get-AppPxeBootFieldIsoOverlayRoot {
-    $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
-    if (-not $root) { return $null }
-    foreach ($rel in @('sidecar/pxe/fieldiso-overlay', 'pxe/fieldiso-overlay')) {
-        $path = Join-Path $root $rel
-        if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
-    }
-    return $null
-}
-
-function Get-AppPxeBootFieldIsoOverlayMarkerPath {
-    param([Parameter(Mandatory)][string]$WimDir)
-    Join-Path $WimDir ".fieldiso-overlay-v$($script:AppPxeBootFieldIsoOverlayVersion)"
-}
-
-function Sync-AppPxeBootFieldIsoWinPeOverlay {
-    <#
-    .SYNOPSIS
-        Patch Mount-IsoFromUrl.cmd (+ optional wim-inject files) into FieldIso.wim.
-    #>
-    param([Parameter(Mandatory)][string]$WimPath)
-
-    $overlayRoot = Get-AppPxeBootFieldIsoOverlayRoot
-    if (-not $overlayRoot) { return @{ skipped = $true; reason = 'no-overlay' } }
-
-    $cmdSrc = Join-Path $overlayRoot 'Windows/System32/Mount-IsoFromUrl.cmd'
-    if (-not (Test-Path -LiteralPath $cmdSrc)) {
-        return @{ skipped = $true; reason = 'no-cmd' }
-    }
-
-    $overlayFiles = @(Get-AppPxeBootFieldIsoOverlayFiles)
-    if ($overlayFiles.Count -eq 0) {
-        return @{ skipped = $true; reason = 'no-overlay-files' }
-    }
-
-    $wimDir = Split-Path -Parent $WimPath
-    $marker = Get-AppPxeBootFieldIsoOverlayMarkerPath -WimDir $wimDir
-    $markerItem = Get-Item -LiteralPath $marker -ErrorAction SilentlyContinue
-    if ($markerItem) {
-        $wimItem = Get-Item -LiteralPath $WimPath -ErrorAction Stop
-        if ($markerItem.LastWriteTime -ge $wimItem.LastWriteTime) {
-            return @{ skipped = $true; reason = 'current' }
-        }
-        Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
-        Write-SidecarLog 'PXE boot: FieldIso WIM newer than overlay marker - re-patching WinPE startup script'
-    }
-
-    $wimlib = Get-AppPxeBootWimlibImagexPath
-    if (-not $wimlib) {
-        Write-SidecarLog 'PXE boot: FieldIso WinPE overlay patch skipped - wimlib missing'
-        return @{ skipped = $true; reason = 'no-wimlib' }
-    }
-
-    $cmdFile = Join-Path ([IO.Path]::GetTempPath()) ("sm-pxe-fieldiso-cmd-$([Guid]::NewGuid().ToString('N')).cmd")
-    $updateFile = Join-Path ([IO.Path]::GetTempPath()) ("sm-pxe-fieldiso-update-$([Guid]::NewGuid().ToString('N')).txt")
-    $tempFiles = [System.Collections.Generic.List[string]]::new()
-    try {
-        $updateLines = [System.Collections.Generic.List[string]]::new()
-        foreach ($of in $overlayFiles) {
-            if ($of.Source -match '\.cmd$') {
-                Copy-Item -LiteralPath $of.Source -Destination $cmdFile -Force
-                [void]$tempFiles.Add($cmdFile)
-                [void]$updateLines.Add("add `"$cmdFile`" $($of.WimPath) --no-acls")
-            } else {
-                [void]$updateLines.Add("add `"$($of.Source)`" $($of.WimPath) --no-acls")
-            }
-        }
-        foreach ($inject in Get-AppPxeBootFieldIsoWimInjectEntries) {
-            [void]$updateLines.Add("add `"$($inject.Source)`" $($inject.WimPath) --no-acls")
-        }
-        Set-Content -LiteralPath $updateFile -Value ($updateLines -join "`n") -Encoding ASCII -Force
-        $injectCount = [Math]::Max(0, $updateLines.Count - $overlayFiles.Count)
-        $runtimeDir = Get-AppPxeBootWimlibRuntimeDirectory -ImagexPath $wimlib
-        Push-Location -LiteralPath $runtimeDir
-        try {
-            Get-Content -LiteralPath $updateFile -Raw | & $wimlib update $WimPath 1 2>&1 | Out-String | ForEach-Object {
-                if ($_ -match '\[ERROR\]|ERROR:') {
-                    Write-SidecarLog "PXE boot: FieldIso overlay wimlib $_".Trim()
-                }
-            }
-        } finally {
-            Pop-Location
-        }
-        if ($LASTEXITCODE -ne 0) {
-            throw "wimlib update failed (exit $LASTEXITCODE)"
-        }
-        Set-Content -LiteralPath $marker -Value ([string]$script:AppPxeBootFieldIsoOverlayVersion) -Encoding ASCII -Force
-        $markerLeaf = Split-Path -Leaf $marker
-        Get-ChildItem -LiteralPath $wimDir -Filter '.fieldiso-overlay-v*' -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -ne $markerLeaf } |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-        Write-SidecarLog "PXE boot: patched FieldIso WinPE overlay (v$($script:AppPxeBootFieldIsoOverlayVersion))$(
-            if ($injectCount -gt 0) { ", +$injectCount inject file(s)" } else { '' }
-        )"
-        return @{ patched = $true }
-    } catch {
-        Write-SidecarLog "PXE boot: FieldIso WinPE overlay patch failed - $($_.Exception.Message)"
-        return @{ patched = $false; error = $_.Exception.Message }
-    } finally {
-        foreach ($tf in @($tempFiles)) {
-            Remove-Item -LiteralPath $tf -Force -ErrorAction SilentlyContinue
-        }
-        Remove-Item -LiteralPath $updateFile -Force -ErrorAction SilentlyContinue
-    }
-}
-
 
 
 function Sync-AppPxeBootWimOverlays {
@@ -1740,43 +1357,43 @@ function Invoke-AppPxeBootWimOverlayBake {
     }
 }
 
-$script:AppPxeBootFieldIsoDriversOs = 'Win11x64'
-$script:AppPxeBootFieldIsoDriverPackExtensions = @('.7z', '.cab', '.exe', '.zip')
+$script:AppPxeBootDriversOs = 'Win11x64'
+$script:AppPxeBootDriverPackExtensions = @('.7z', '.cab', '.exe', '.zip')
 
-function Get-AppPxeBootFieldIsoDriversBundledSeedPath {
+function Get-AppPxeBootDriversBundledSeedPath {
     $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
     if (-not $root) { return $null }
-    foreach ($rel in @('sidecar/pxe/fieldiso-drivers/models.seed.json', 'pxe/fieldiso-drivers/models.seed.json')) {
+    foreach ($rel in @('sidecar/pxe/driver-seed/models.seed.json', 'pxe/driver-seed/models.seed.json')) {
         $path = Join-Path $root ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
         if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
     }
     return $null
 }
 
-function Get-AppPxeBootFieldIsoDriversBundledReadmePath {
+function Get-AppPxeBootDriversBundledReadmePath {
     $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
     if (-not $root) { return $null }
-    foreach ($rel in @('sidecar/pxe/fieldiso-drivers/README.md', 'pxe/fieldiso-drivers/README.md')) {
+    foreach ($rel in @('sidecar/pxe/driver-seed/README.md', 'pxe/driver-seed/README.md')) {
         $path = Join-Path $root ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
         if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
     }
     return $null
 }
 
-function Read-AppPxeBootFieldIsoDriversSeed {
-    $path = Get-AppPxeBootFieldIsoDriversBundledSeedPath
+function Read-AppPxeBootDriversSeed {
+    $path = Get-AppPxeBootDriversBundledSeedPath
     if (-not $path) { return $null }
     try {
         $raw = Get-Content -LiteralPath $path -Raw -Encoding UTF8
         if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
         return ($raw | ConvertFrom-Json)
     } catch {
-        Write-SidecarLog "PXE boot: FieldIso driver seed read failed - $($_.Exception.Message)"
+        Write-SidecarLog "PXE boot: driver seed read failed - $($_.Exception.Message)"
         return $null
     }
 }
 
-function Get-AppPxeBootFieldIsoDriversOsRoot {
+function Get-AppPxeBootDriversOsRoot {
     # User-relocatable driver root: <image library>/Drivers/<Make>/<Model>/ -
     # the MDT-style publish/search convention (Win32_ComputerSystem
     # Manufacturer + Model; its cache-hit search is -Recurse -Depth 1 under
@@ -1785,19 +1402,19 @@ function Get-AppPxeBootFieldIsoDriversOsRoot {
     (Get-AppImageLibraryPaths).driversDir
 }
 
-function Get-AppPxeBootFieldIsoDriversIndexPath {
-    Join-Path (Get-AppPxeBootFieldIsoDriversOsRoot) 'index.json'
+function Get-AppPxeBootDriversIndexPath {
+    Join-Path (Get-AppPxeBootDriversOsRoot) 'index.json'
 }
 
-function Test-AppPxeBootFieldIsoDriverPackExtension {
+function Test-AppPxeBootDriverPackExtension {
     param([Parameter(Mandatory)][string]$Extension)
-    $script:AppPxeBootFieldIsoDriverPackExtensions -contains $Extension.ToLowerInvariant()
+    $script:AppPxeBootDriverPackExtensions -contains $Extension.ToLowerInvariant()
 }
 
-function Get-AppPxeBootFieldIsoDriverPackInFolder {
+function Get-AppPxeBootDriverPackInFolder {
     param([Parameter(Mandatory)][string]$FolderPath)
     $packs = @(Get-ChildItem -LiteralPath $FolderPath -File -ErrorAction SilentlyContinue |
-        Where-Object { Test-AppPxeBootFieldIsoDriverPackExtension -Extension $_.Extension } |
+        Where-Object { Test-AppPxeBootDriverPackExtension -Extension $_.Extension } |
         Sort-Object Length -Descending)
     if ($packs.Count -gt 0) {
         return [string]$packs[0].Name
@@ -1805,7 +1422,7 @@ function Get-AppPxeBootFieldIsoDriverPackInFolder {
     return $null
 }
 
-function Get-AppPxeBootFieldIsoDriverSeedStringProp {
+function Get-AppPxeBootDriverSeedStringProp {
     param(
         [Parameter(Mandatory)]$Model,
         [Parameter(Mandatory)][string]$Name
@@ -1815,7 +1432,7 @@ function Get-AppPxeBootFieldIsoDriverSeedStringProp {
     [string]$prop.Value
 }
 
-function Get-AppPxeBootFieldIsoDriverSeedArrayProp {
+function Get-AppPxeBootDriverSeedArrayProp {
     param(
         [Parameter(Mandatory)]$Model,
         [Parameter(Mandatory)][string]$Name
@@ -1830,32 +1447,32 @@ function Get-AppPxeBootFieldIsoDriverSeedArrayProp {
     return @([string]$value)
 }
 
-function Get-AppPxeBootFieldIsoDriverNsspCatalogLabels {
+function Get-AppPxeBootDriverNsspCatalogLabels {
     param([Parameter(Mandatory)]$Model)
-    $labels = @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $Model -Name 'nsspCatalogLabels')
+    $labels = @(Get-AppPxeBootDriverSeedArrayProp -Model $Model -Name 'nsspCatalogLabels')
     if ($labels.Count -gt 0) { return $labels }
-    @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $Model -Name 'nsspModelNames')
+    @(Get-AppPxeBootDriverSeedArrayProp -Model $Model -Name 'nsspModelNames')
 }
 
-function Sync-AppPxeBootFieldIsoDriverStore {
+function Sync-AppPxeBootDriverStore {
     <#
     .SYNOPSIS
         Ensure OOBD driver folders exist (seed layout) and regenerate index.json.
     #>
-    $osRoot = Get-AppPxeBootFieldIsoDriversOsRoot
+    $osRoot = Get-AppPxeBootDriversOsRoot
     foreach ($dir in @($osRoot, (Join-Path $osRoot '_default'))) {
         if (-not (Test-Path -LiteralPath $dir)) {
             $null = New-Item -Path $dir -ItemType Directory -Force
         }
     }
 
-    $readmeSrc = Get-AppPxeBootFieldIsoDriversBundledReadmePath
+    $readmeSrc = Get-AppPxeBootDriversBundledReadmePath
     $readmeDest = Join-Path $osRoot 'README.md'
     if ($readmeSrc -and (-not (Test-Path -LiteralPath $readmeDest))) {
         Copy-Item -LiteralPath $readmeSrc -Destination $readmeDest -Force
     }
 
-    $seed = Read-AppPxeBootFieldIsoDriversSeed
+    $seed = Read-AppPxeBootDriversSeed
 
     # Layout is <Drivers>/<Make>/<Model>/ - the MDT-style publish/search
     # convention (its cache-hit search is -Recurse -Depth 1, so pre-seeded packs and
@@ -1935,7 +1552,7 @@ function Sync-AppPxeBootFieldIsoDriverStore {
         }
     }
 
-    $index = Write-AppPxeBootFieldIsoDriversIndex
+    $index = Write-AppPxeBootDriversIndex
     # aliases.json for the deploy client (model names / machine types / seed
     # wmiPatterns -> installed pack folders); no-ops unless the installed set changed.
     if (Test-AppSidecarCommand Write-AppPxeBootDriverAliasMap) {
@@ -1946,15 +1563,15 @@ function Sync-AppPxeBootFieldIsoDriverStore {
     @{
         osRoot       = $osRoot
         modelFolders = $folderCount
-        indexPath    = Get-AppPxeBootFieldIsoDriversIndexPath
+        indexPath    = Get-AppPxeBootDriversIndexPath
         readyCount   = if ($index) { [int]$index.readyCount } else { 0 }
         modelCount   = if ($index) { [int]$index.modelCount } else { 0 }
     }
 }
 
-function Write-AppPxeBootFieldIsoDriversIndex {
-    $osRoot = Get-AppPxeBootFieldIsoDriversOsRoot
-    $seed = Read-AppPxeBootFieldIsoDriversSeed
+function Write-AppPxeBootDriversIndex {
+    $osRoot = Get-AppPxeBootDriversOsRoot
+    $seed = Read-AppPxeBootDriversSeed
     $generated = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $readyCount = 0
     $modelCount = 0
@@ -1971,7 +1588,7 @@ function Write-AppPxeBootFieldIsoDriversIndex {
                 # <Drivers>/<Make>/<Model>/ - served via the Caddy /drivers/* route
                 # (handle_path re-roots onto the library, so the tree depth is free).
                 $modelDir = Join-Path (Join-Path $osRoot $vendorName) $folderName
-                $archive = Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $modelDir
+                $archive = Get-AppPxeBootDriverPackInFolder -FolderPath $modelDir
                 $ready = -not [string]::IsNullOrWhiteSpace($archive)
                 if ($ready) { $readyCount++ }
                 [void]$entries.Add(@{
@@ -1980,8 +1597,8 @@ function Write-AppPxeBootFieldIsoDriversIndex {
                         relPath           = "drivers/$vendorName/$folderName"
                         archive           = $archive
                         archiveReady      = $ready
-                        nsspCatalogLabels = @(Get-AppPxeBootFieldIsoDriverNsspCatalogLabels -Model $model)
-                        wmiPatterns       = @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $model -Name 'wmiPatterns')
+                        nsspCatalogLabels = @(Get-AppPxeBootDriverNsspCatalogLabels -Model $model)
+                        wmiPatterns       = @(Get-AppPxeBootDriverSeedArrayProp -Model $model -Name 'wmiPatterns')
                     })
             }
             $vendorsOut[$vendorName] = @($entries)
@@ -1989,13 +1606,13 @@ function Write-AppPxeBootFieldIsoDriversIndex {
     }
 
     $defaultDir = Join-Path $osRoot '_default'
-    $defaultArchive = Get-AppPxeBootFieldIsoDriverPackInFolder -FolderPath $defaultDir
+    $defaultArchive = Get-AppPxeBootDriverPackInFolder -FolderPath $defaultDir
     $defaultReady = -not [string]::IsNullOrWhiteSpace($defaultArchive)
 
     $doc = [ordered]@{
         schema       = 1
         generated    = $generated
-        os           = $script:AppPxeBootFieldIsoDriversOs
+        os           = $script:AppPxeBootDriversOs
         modelCount   = $modelCount
         readyCount   = $readyCount
         default      = @{
@@ -2006,16 +1623,16 @@ function Write-AppPxeBootFieldIsoDriversIndex {
         vendors      = $vendorsOut
     }
 
-    ($doc | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath (Get-AppPxeBootFieldIsoDriversIndexPath) -Encoding UTF8 -Force
+    ($doc | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath (Get-AppPxeBootDriversIndexPath) -Encoding UTF8 -Force
     $doc
 }
 
-function Get-AppPxeBootFieldIsoDriversSummary {
-    Sync-AppPxeBootFieldIsoDriverStore | Out-Null
-    $indexPath = Get-AppPxeBootFieldIsoDriversIndexPath
+function Get-AppPxeBootDriversSummary {
+    Sync-AppPxeBootDriverStore | Out-Null
+    $indexPath = Get-AppPxeBootDriversIndexPath
     if (-not (Test-Path -LiteralPath $indexPath)) {
         return @{
-            osRoot     = Get-AppPxeBootFieldIsoDriversOsRoot
+            osRoot     = Get-AppPxeBootDriversOsRoot
             indexPath  = $indexPath
             modelCount = 0
             readyCount = 0
@@ -2025,7 +1642,7 @@ function Get-AppPxeBootFieldIsoDriversSummary {
     try {
         $idx = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8 | ConvertFrom-Json
         @{
-            osRoot       = Get-AppPxeBootFieldIsoDriversOsRoot
+            osRoot       = Get-AppPxeBootDriversOsRoot
             indexPath    = $indexPath
             modelCount   = [int](Get-AppSidecarJsonProp -Item $idx -Name 'modelCount')
             readyCount   = [int](Get-AppSidecarJsonProp -Item $idx -Name 'readyCount')
@@ -2035,7 +1652,7 @@ function Get-AppPxeBootFieldIsoDriversSummary {
         }
     } catch {
         @{
-            osRoot     = Get-AppPxeBootFieldIsoDriversOsRoot
+            osRoot     = Get-AppPxeBootDriversOsRoot
             indexPath  = $indexPath
             modelCount = 0
             readyCount = 0
@@ -2263,11 +1880,6 @@ function Ensure-AppPxeBootWimBootAssets {
         [switch]$SkipMenuRegen
     )
     try {
-        if (Test-AppPxeBootWimIsFieldIso -FileName $WimFileName) {
-            if (Test-AppPxeBootWimBootAssetsComplete -WimFileName $WimFileName) {
-                return @{ complete = $true; skipped = $true }
-            }
-        }
         $recipe = Get-AppPxeBootWimbootRecipe -WimFileName $WimFileName
         if (-not (Test-AppPxeBootRecipeFlag -Recipe $recipe -Key 'useBootAssets')) {
             return @{ complete = $true; skipped = $true }
@@ -2289,41 +1901,6 @@ function Ensure-AppPxeBootWimBootAssets {
         $overlayWim = Join-Path (Get-AppPxeBootLayoutPaths).wimDir (Get-AppPxeBootSafeWimFileName -FileName $WimFileName)
         if (Test-Path -LiteralPath $overlayWim) {
             Sync-AppPxeBootWimOverlays -WimPath $overlayWim | Out-Null
-        }
-    }
-}
-
-function Ensure-AppPxeBootFieldIsoBootAssets {
-    <#
-    .SYNOPSIS
-        UEFI FieldIso ISO boot needs wim-boot/FieldIso (BCD, boot.sdi, bootmgfw) on every catalog entry.
-        Called before ISO catalog / menu regen so adding a Windows ISO never emits a broken iPXE chain.
-    #>
-    param([switch]$SkipMenuRegen)
-
-    $fieldIsoWim = Get-AppPxeBootFieldIsoWimName
-    if (-not $fieldIsoWim) {
-        return @{ complete = $false; missingWim = $true }
-    }
-    if (Test-AppPxeBootWimBootAssetsComplete -WimFileName $fieldIsoWim) {
-        $wimPath = Join-Path (Get-AppPxeBootLayoutPaths).wimDir $fieldIsoWim
-        if (Test-Path -LiteralPath $wimPath) {
-            Sync-AppPxeBootFieldIsoWinPeOverlay -WimPath $wimPath | Out-Null
-        }
-        return @{ complete = $true; skipped = $true }
-    }
-
-    Write-SidecarLog "PXE boot: preparing FieldIso UEFI boot files (wim-boot/FieldIso) for ISO catalog"
-    try {
-        return Ensure-AppPxeBootWimBootAssets -WimFileName $fieldIsoWim -SkipMenuRegen:$SkipMenuRegen
-    } catch {
-        $msg = $_.Exception.Message
-        Write-SidecarLog "PXE boot: FieldIso boot asset export failed - $msg"
-        throw
-    } finally {
-        $wimPath = Join-Path (Get-AppPxeBootLayoutPaths).wimDir $fieldIsoWim
-        if (Test-Path -LiteralPath $wimPath) {
-            Sync-AppPxeBootFieldIsoWinPeOverlay -WimPath $wimPath | Out-Null
         }
     }
 }
@@ -2559,16 +2136,10 @@ function Write-AppPxeBootMenuFiles {
     <#
     .SYNOPSIS
         Write http/boot.ipxe (+ menu.ipxe) for field PXE.
-        - defaultBootWim = local WIM (not FieldIso) -> auto-boot that WIM (WDS-style); :start menu if boot returns
-        - defaultBootWim = FieldIso + defaultBootIso -> auto-boot that ISO via FieldIso WinPE
-        - defaultBootWim = FieldIso (no defaultBootIso) -> chain straight to ISO catalog (local catalog or WAN)
-        - defaultBootWim unset -> choose menu; first non-FieldIso WIM or ISO catalog when only FieldIso + ISOs
+        - defaultBootWim set -> auto-boot that WIM (WDS-style); :start menu if boot returns
+        - defaultBootWim unset -> choose menu of the imported boot WIMs
+        - nothing imported -> WAN deploy chain when configured, else guidance + shell
     #>
-    param(
-        [switch]$SkipFieldIsoPrepare,
-        [switch]$SkipIsoCatalogRegen,
-        [switch]$BootMenuOnly
-    )
 
     # Task-sequence unattends ride the same regen cadence (save / start / import) so
     # Z:\TaskSequences always matches the panel. Guarded: lib loads after this one.
@@ -2584,9 +2155,6 @@ function Write-AppPxeBootMenuFiles {
             $null = New-Item -Path $dir -ItemType Directory -Force
         }
     }
-    if (-not $BootMenuOnly) {
-        Sync-AppPxeBootFieldIsoHttpAssets | Out-Null
-    }
     $cfg = Read-AppPxeBootConfig
     $port = [int]$cfg.httpPort
     if ($port -lt 1 -or $port -gt 65535) { $port = 8080 }
@@ -2596,38 +2164,15 @@ function Write-AppPxeBootMenuFiles {
 
     $directBootWim = Get-AppPxeBootDirectBootWimName
     $wims = @(Get-AppPxeBootWimInventory)
-    $fieldIsoWim = Get-AppPxeBootFieldIsoWimName
 
     $bootMenuLines = [System.Collections.Generic.List[string]]::new()
-    # Default WIM/ISO toggles only change boot.ipxe - not ISOs/menu.ipxe or urls/*.iso.url.
-    # REVERT: remove -SkipIsoCatalogRegen from Set-AppPxeBootDefault* if catalog must always regen with defaults.
-    $catalogStale = Test-AppPxeBootIsoCatalogStale
-    $ipxeTemplateOutdated = Test-AppPxeBootIsoCatalogIpxeTemplateOutdated
-    $regenCatalog = -not $BootMenuOnly
-    if ($regenCatalog -and $SkipIsoCatalogRegen -and -not $catalogStale -and -not $ipxeTemplateOutdated) {
-        $regenCatalog = $false
-    }
-    if ($regenCatalog) {
-        if ($ipxeTemplateOutdated) {
-            Write-SidecarLog "PXE boot: ISO catalog iPXE template outdated (rev $($script:AppPxeBootFieldIsoIpxeCatalogRevision)) - regenerating menu"
-        }
-        Write-AppPxeBootLocalIsoCatalog -SkipFieldIsoPrepare:$SkipFieldIsoPrepare | Out-Null
-    } elseif ($BootMenuOnly) {
-        Write-SidecarLog 'PXE boot: boot menu only (WIM library change - ISO catalog unchanged)'
-    } elseif ($SkipIsoCatalogRegen -and $catalogStale) {
-        Write-SidecarLog 'PXE boot: boot menu only (default change - ISO catalog regen deferred; catalog stale until Start field PXE or ISO change)'
-    } elseif ($SkipIsoCatalogRegen) {
-        Write-SidecarLog 'PXE boot: boot menu only (skipped ISO catalog regen - catalog still fresh)'
-    }
     $httpBaseLiteral = Get-AppPxeBootLocalHttpBaseUrl
-    $catalogBaseLiteral = Get-AppPxeBootLocalIsoCatalogUrl
     [void]$bootMenuLines.Add('#!ipxe')
     [void]$bootMenuLines.Add("set http_port $port")
     if ($wanDeployEnabled) {
         [void]$bootMenuLines.Add("set deploy_base $deployBase")
     }
     [void]$bootMenuLines.Add("set http_base $httpBaseLiteral")
-    [void]$bootMenuLines.Add("set catalog_base $catalogBaseLiteral")
     $autoBoot = Test-AppPxeBootAutoBootDefaultOnPxe -Config $cfg
 
     if ($directBootWim) {
@@ -2648,11 +2193,7 @@ function Write-AppPxeBootMenuFiles {
         }
         [void]$bootMenuLines.Add('echo')
         [void]$bootMenuLines.Add("echo Auto-boot of $directBootWim failed - opening local menu.")
-        if ($wanDeployEnabled) {
-            [void]$bootMenuLines.Add('echo Pick Default (local) to retry, open the ISO catalog, or use WAN backup.')
-        } else {
-            [void]$bootMenuLines.Add('echo Pick Default (local) to retry or open the local ISO catalog.')
-        }
+        [void]$bootMenuLines.Add('echo Pick Default (local) to retry, or another boot image.')
         [void]$bootMenuLines.Add('goto start')
         [void]$bootMenuLines.Add('')
         [void]$bootMenuLines.Add(':start')
@@ -2664,14 +2205,10 @@ function Write-AppPxeBootMenuFiles {
         foreach ($wim in $wims) {
             $name = [string]$wim.fileName
             if ($name -eq $directBootWim) { continue }
-            if (Test-AppPxeBootWimIsFieldIso -FileName $name) { continue }
             $id = Get-AppPxeBootMenuItemId -FileName $name
             [void]$bootMenuLines.Add("item $id`t$name")
         }
         [void]$bootMenuLines.Add('item --gap -- ------------------------------')
-        foreach ($line in (Get-AppPxeBootIsoCatalogMenuIpxeLines -Config $cfg)) {
-            [void]$bootMenuLines.Add($line)
-        }
         foreach ($line in @(Get-AppPxeBootIpxeMenuUtilityItemLines)) { [void]$bootMenuLines.Add([string]$line) }
         $defaultTarget = Get-AppPxeBootMenuDefaultChooseTarget -DirectBootWim $directBootWim -BootableWims $wims
         [void]$bootMenuLines.Add("choose --default $defaultTarget target || goto start")
@@ -2680,7 +2217,6 @@ function Write-AppPxeBootMenuFiles {
         foreach ($wim in $wims) {
             $name = [string]$wim.fileName
             if ($name -eq $directBootWim) { continue }
-            if (Test-AppPxeBootWimIsFieldIso -FileName $name) { continue }
             $id = Get-AppPxeBootMenuItemId -FileName $name
             [void]$bootMenuLines.Add(":$id")
             foreach ($bootLine in (Get-AppPxeBootWimbootIpxeBlock -WimFileName $name -EchoLabel "Booting $name...")) {
@@ -2690,9 +2226,6 @@ function Write-AppPxeBootMenuFiles {
             [void]$bootMenuLines.Add("echo Boot of $name failed.")
             [void]$bootMenuLines.Add('goto start')
             [void]$bootMenuLines.Add('')
-        }
-        foreach ($line in (Get-AppPxeBootIsoCatalogBootIpxeBlock -Config $cfg -HttpPort $port)) {
-            [void]$bootMenuLines.Add($line)
         }
         foreach ($line in @(Get-AppPxeBootIpxeLocalDiskHandlerLines)) { [void]$bootMenuLines.Add([string]$line) }
         [void]$bootMenuLines.Add(':retry')
@@ -2707,146 +2240,62 @@ function Write-AppPxeBootMenuFiles {
         } else {
             Write-SidecarLog "PXE boot: boot.ipxe menu-first - default $directBootWim highlighted (autoBootDefault off)"
         }
-    } else {
-        $localIsos = @(Get-AppPxeBootIsoInventory)
-        $bootableWims = @($wims | Where-Object { -not (Test-AppPxeBootWimIsFieldIso -FileName $_.fileName) })
-        $hasLocalMenu = ($bootableWims.Count -gt 0) -or ($localIsos.Count -gt 0 -and $fieldIsoWim)
-
-        if ($hasLocalMenu) {
-            $autoIsoCatalog = Test-AppPxeBootFieldIsoIsDefaultBoot
-            $defaultIso = if ($autoIsoCatalog) { Get-AppPxeBootDefaultIsoName } else { $null }
-            $defaultIsoMenuId = if ($defaultIso) { Get-AppPxeBootIsoCatalogMenuId -FileName $defaultIso } else { $null }
-            $defaultIsoLabel = if ($defaultIso) { Get-AppPxeBootIsoDisplayLabel -FileName $defaultIso } else { $null }
-            if ($autoIsoCatalog -and $defaultIso -and $fieldIsoWim) {
-                [void]$bootMenuLines.Add("# Netboot field PXE - default FieldIso -> auto-boot $defaultIso - generated $generated")
-            } elseif ($autoIsoCatalog) {
-                [void]$bootMenuLines.Add("# Netboot field PXE - default FieldIso -> ISO catalog - generated $generated")
-            } else {
-                [void]$bootMenuLines.Add("# Netboot field PXE - local menu - generated $generated")
+    } elseif ($wims.Count -gt 0) {
+        [void]$bootMenuLines.Add("# Netboot field PXE - local menu - generated $generated")
+        [void]$bootMenuLines.Add('goto start')
+        [void]$bootMenuLines.Add('')
+        [void]$bootMenuLines.Add(':start')
+        foreach ($line in @(Get-AppPxeBootMenuBrandingConsoleIpxeLines)) { [void]$bootMenuLines.Add([string]$line) }
+        [void]$bootMenuLines.Add('menu Field PXE - choose boot image')
+        foreach ($line in @(Get-AppPxeBootMenuBrandingSubtitleIpxeLines)) { [void]$bootMenuLines.Add([string]$line) }
+        [void]$bootMenuLines.Add('item --gap -- ------------------------------')
+        foreach ($wim in $wims) {
+            $name = [string]$wim.fileName
+            $id = Get-AppPxeBootMenuItemId -FileName $name
+            [void]$bootMenuLines.Add("item $id`t$name")
+        }
+        [void]$bootMenuLines.Add('item --gap -- ------------------------------')
+        foreach ($line in @(Get-AppPxeBootIpxeMenuUtilityItemLines)) { [void]$bootMenuLines.Add([string]$line) }
+        $defaultTarget = Get-AppPxeBootMenuDefaultChooseTarget -DirectBootWim $null -BootableWims $wims
+        [void]$bootMenuLines.Add("choose --default $defaultTarget target || goto start")
+        [void]$bootMenuLines.Add('goto ${target}')
+        [void]$bootMenuLines.Add('')
+        foreach ($wim in $wims) {
+            $name = [string]$wim.fileName
+            $id = Get-AppPxeBootMenuItemId -FileName $name
+            [void]$bootMenuLines.Add(":$id")
+            foreach ($bootLine in (Get-AppPxeBootWimbootIpxeBlock -WimFileName $name -EchoLabel "Booting $name...")) {
+                [void]$bootMenuLines.Add($bootLine)
             }
-            if ($autoBoot -and $autoIsoCatalog -and $defaultIso -and $fieldIsoWim) {
-                [void]$bootMenuLines.Add("goto $($defaultIsoMenuId)_run")
-            } elseif ($autoBoot -and $autoIsoCatalog) {
-                [void]$bootMenuLines.Add('goto iso_catalog')
-            } else {
-                [void]$bootMenuLines.Add('goto start')
-            }
-            [void]$bootMenuLines.Add('')
-            if ($defaultIsoMenuId -and $fieldIsoWim) {
-                [void]$bootMenuLines.Add(":${defaultIsoMenuId}")
-                [void]$bootMenuLines.Add("chain `${http_base}/boot.ipxe?t=`${buildsign} || goto $($defaultIsoMenuId)_run")
-                [void]$bootMenuLines.Add('')
-                [void]$bootMenuLines.Add(":$($defaultIsoMenuId)_run")
-                $urlRel = "urls/$defaultIsoMenuId.iso.url"
-                foreach ($line in (Get-AppPxeBootFieldIsoBootIpxeBlock -EntryLabel $defaultIsoLabel -UrlRel $urlRel -FieldIsoWim $fieldIsoWim)) {
-                    [void]$bootMenuLines.Add($line)
-                }
-                [void]$bootMenuLines.Add('echo')
-                [void]$bootMenuLines.Add("echo Auto-boot of $defaultIso failed - opening local menu.")
-                if ($wanDeployEnabled) {
-                    [void]$bootMenuLines.Add('echo Pick Default ISO to retry, open the ISO catalog, or use WAN backup.')
-                } else {
-                    [void]$bootMenuLines.Add('echo Pick Default ISO to retry or open the local ISO catalog.')
-                }
-                [void]$bootMenuLines.Add('goto start')
-                [void]$bootMenuLines.Add('')
-            }
-            [void]$bootMenuLines.Add(':start')
-            foreach ($line in @(Get-AppPxeBootMenuBrandingConsoleIpxeLines)) { [void]$bootMenuLines.Add([string]$line) }
-            [void]$bootMenuLines.Add('menu Field PXE - choose boot image')
-            foreach ($line in @(Get-AppPxeBootMenuBrandingSubtitleIpxeLines)) { [void]$bootMenuLines.Add([string]$line) }
-            [void]$bootMenuLines.Add('item --gap -- ------------------------------')
-            foreach ($wim in $bootableWims) {
-                $name = [string]$wim.fileName
-                $id = Get-AppPxeBootMenuItemId -FileName $name
-                [void]$bootMenuLines.Add("item $id`t$name")
-            }
-            if ($defaultIsoMenuId -and $fieldIsoWim) {
-                if ($bootableWims.Count -gt 0) {
-                    [void]$bootMenuLines.Add('item --gap -- ------------------------------')
-                }
-                [void]$bootMenuLines.Add("item ${defaultIsoMenuId}`tDefault (local): $defaultIsoLabel")
-            }
-            [void]$bootMenuLines.Add('item --gap -- ------------------------------')
-            foreach ($line in (Get-AppPxeBootIsoCatalogMenuIpxeLines -Config $cfg)) {
-                [void]$bootMenuLines.Add($line)
-            }
-            foreach ($line in @(Get-AppPxeBootIpxeMenuUtilityItemLines)) { [void]$bootMenuLines.Add([string]$line) }
-            $defaultTarget = Get-AppPxeBootMenuDefaultChooseTarget -DirectBootWim $null -BootableWims $bootableWims `
-                -DefaultIsoMenuId $defaultIsoMenuId
-            [void]$bootMenuLines.Add("choose --default $defaultTarget target || goto start")
-            [void]$bootMenuLines.Add('goto ${target}')
-            [void]$bootMenuLines.Add('')
-            foreach ($wim in $bootableWims) {
-                $name = [string]$wim.fileName
-                $id = Get-AppPxeBootMenuItemId -FileName $name
-                [void]$bootMenuLines.Add(":$id")
-                foreach ($bootLine in (Get-AppPxeBootWimbootIpxeBlock -WimFileName $name -EchoLabel "Booting $name...")) {
-                    [void]$bootMenuLines.Add($bootLine)
-                }
-                [void]$bootMenuLines.Add('echo')
-                [void]$bootMenuLines.Add("echo Boot of $name failed.")
-                [void]$bootMenuLines.Add('goto start')
-                [void]$bootMenuLines.Add('')
-            }
-            if ($defaultIsoMenuId -and $fieldIsoWim) {
-                [void]$bootMenuLines.Add(":${defaultIsoMenuId}")
-                foreach ($line in (Get-AppPxeBootFieldIsoBootIpxeBlock -EntryLabel $defaultIsoLabel -UrlRel "urls/$defaultIsoMenuId.iso.url" -FieldIsoWim $fieldIsoWim)) {
-                    [void]$bootMenuLines.Add($line)
-                }
-                [void]$bootMenuLines.Add('echo')
-                [void]$bootMenuLines.Add("echo Boot of $defaultIso failed.")
-                [void]$bootMenuLines.Add('goto start')
-                [void]$bootMenuLines.Add('')
-            }
-            foreach ($line in (Get-AppPxeBootIsoCatalogBootIpxeBlock -Config $cfg -HttpPort $port)) {
-                [void]$bootMenuLines.Add($line)
-            }
-            foreach ($line in @(Get-AppPxeBootIpxeLocalDiskHandlerLines)) { [void]$bootMenuLines.Add([string]$line) }
-            [void]$bootMenuLines.Add(':retry')
-            [void]$bootMenuLines.Add('chain ${http_base}/boot.ipxe?t=${buildsign} || chain ${http_base}/boot.ipxe || goto start')
-            [void]$bootMenuLines.Add('')
-            [void]$bootMenuLines.Add(':shell')
-            [void]$bootMenuLines.Add('shell')
+            [void]$bootMenuLines.Add('echo')
+            [void]$bootMenuLines.Add("echo Boot of $name failed.")
             [void]$bootMenuLines.Add('goto start')
-            if ($autoBoot -and $autoIsoCatalog -and $defaultIso) {
-                if ($wanDeployEnabled) {
-                    Write-SidecarLog "PXE boot: boot.ipxe auto-boots ISO $defaultIso (FieldIso default); catalog fallback; WAN backup $deployBase"
-                } else {
-                    Write-SidecarLog "PXE boot: boot.ipxe auto-boots ISO $defaultIso (FieldIso default); local catalog only"
-                }
-            } elseif ($autoIsoCatalog) {
-                if ($wanDeployEnabled) {
-                    Write-SidecarLog "PXE boot: boot.ipxe opens ISO catalog (FieldIso default); $($localIsos.Count) ISO(s); WAN backup $deployBase"
-                } else {
-                    Write-SidecarLog "PXE boot: boot.ipxe opens local ISO catalog (FieldIso default); $($localIsos.Count) ISO(s)"
-                }
-            } elseif (-not $autoBoot) {
-                Write-SidecarLog 'PXE boot: boot.ipxe menu-first (autoBootDefault off - client must pick boot target)'
-            } else {
-                if ($wanDeployEnabled) {
-                    Write-SidecarLog "PXE boot: boot.ipxe local menu ($($bootableWims.Count) WIM(s), $($localIsos.Count) ISO(s)); WAN backup $deployBase"
-                } else {
-                    Write-SidecarLog "PXE boot: boot.ipxe local menu ($($bootableWims.Count) WIM(s), $($localIsos.Count) ISO(s))"
-                }
-            }
+            [void]$bootMenuLines.Add('')
+        }
+        foreach ($line in @(Get-AppPxeBootIpxeLocalDiskHandlerLines)) { [void]$bootMenuLines.Add([string]$line) }
+        [void]$bootMenuLines.Add(':retry')
+        [void]$bootMenuLines.Add('chain ${http_base}/boot.ipxe?t=${buildsign} || chain ${http_base}/boot.ipxe || goto start')
+        [void]$bootMenuLines.Add('')
+        [void]$bootMenuLines.Add(':shell')
+        [void]$bootMenuLines.Add('shell')
+        [void]$bootMenuLines.Add('goto start')
+        Write-SidecarLog "PXE boot: boot.ipxe local menu ($($wims.Count) WIM(s))"
+    } else {
+        if ($wanDeployEnabled) {
+            [void]$bootMenuLines.Add("# Netboot field PXE - deploy chain - generated $generated")
+            [void]$bootMenuLines.Add('echo Loading deploy menu...')
+            [void]$bootMenuLines.Add('chain ${deploy_base}/menu.ipxe?t=${buildsign} || chain ${deploy_base}/menu.ipxe || goto failed')
+            [void]$bootMenuLines.Add(':failed')
+            [void]$bootMenuLines.Add('echo Could not load PXE menu from deploy server.')
+            [void]$bootMenuLines.Add('shell')
+            Write-SidecarLog "PXE boot: boot.ipxe chains deploy server ($deployBase)"
         } else {
-            if ($wanDeployEnabled) {
-                [void]$bootMenuLines.Add("# Netboot field PXE - deploy ISO catalog - generated $generated")
-                [void]$bootMenuLines.Add('echo Loading deploy ISO menu...')
-                [void]$bootMenuLines.Add('chain ${deploy_base}/menu.ipxe?t=${buildsign} || chain ${deploy_base}/menu.ipxe || goto failed')
-                [void]$bootMenuLines.Add(':failed')
-                [void]$bootMenuLines.Add('echo Could not load PXE menu from deploy server.')
-                [void]$bootMenuLines.Add('shell')
-                Write-SidecarLog "PXE boot: boot.ipxe chains deploy ISO catalog ($deployBase)"
-            } else {
-                [void]$bootMenuLines.Add("# Netboot field PXE - no local boot assets - generated $generated")
-                [void]$bootMenuLines.Add('echo No local boot WIM or ISO on this workstation.')
-                [void]$bootMenuLines.Add("echo Open Netboot in $(Get-AppProductDisplayName) - add FieldIso.wim plus ISOs or a boot WIM.")
-                [void]$bootMenuLines.Add('echo Enable HTTP + TFTP, then reboot the client.')
-                [void]$bootMenuLines.Add('shell')
-                Write-SidecarLog 'PXE boot: boot.ipxe has no local menu assets (local HTTP only - add WIM/ISO in Netboot)'
-            }
+            [void]$bootMenuLines.Add("# Netboot field PXE - no local boot assets - generated $generated")
+            [void]$bootMenuLines.Add('echo No boot WIM on this workstation.')
+            [void]$bootMenuLines.Add("echo Open Netboot in $(Get-AppProductDisplayName) and add a boot WIM (import from a Windows ISO).")
+            [void]$bootMenuLines.Add('echo Enable HTTP + TFTP, then reboot the client.')
+            [void]$bootMenuLines.Add('shell')
+            Write-SidecarLog 'PXE boot: boot.ipxe has no local menu assets (add a boot WIM in Netboot)'
         }
     }
 
@@ -3395,14 +2844,11 @@ function Ensure-AppPxeBootP7zipTools {
     }
 }
 
-function Get-AppPxeBootWindowsFieldIso7zToolsDir {
-    $bundled = Get-AppPxeBootFieldIsoBundledRoot
-    if ($bundled) {
-        $toolsDir = Join-Path $bundled 'tools'
-        $sevenZ = Join-Path $toolsDir '7z.exe'
-        if (Test-Path -LiteralPath $sevenZ) {
-            return (Resolve-Path -LiteralPath $toolsDir).Path
-        }
+function Get-AppPxeBootWindows7zToolsDir {
+    # Same bundled pxe/tools payload the deploy client injects.
+    $toolsDir = Get-AppPxeBootDeployClientToolsDir
+    if ($toolsDir -and (Test-Path -LiteralPath (Join-Path $toolsDir '7z.exe'))) {
+        return $toolsDir
     }
     return $null
 }
@@ -3416,7 +2862,7 @@ function Get-AppPxeBootHost7zPath {
     }
 
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
-        $toolsDir = Get-AppPxeBootWindowsFieldIso7zToolsDir
+        $toolsDir = Get-AppPxeBootWindows7zToolsDir
         if ($toolsDir) {
             return (Join-Path $toolsDir '7z.exe')
         }
@@ -3432,7 +2878,7 @@ function Get-AppPxeBoot7zWorkDirectory {
         }
     }
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
-        $toolsDir = Get-AppPxeBootWindowsFieldIso7zToolsDir
+        $toolsDir = Get-AppPxeBootWindows7zToolsDir
         if ($toolsDir) { return $toolsDir }
     }
     $parent = Split-Path -Parent $SevenZPath
@@ -3471,72 +2917,6 @@ function Write-AppPxeBootIsoUrlFile {
     )
     $utf8NoBom = New-Object System.Text.UTF8Encoding $false
     [System.IO.File]::WriteAllText($Path, $IsoHttpUrl.Trim() + "`n", $utf8NoBom)
-}
-
-function Write-AppPxeBootFieldIsoBootstrapUrlFile {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$HttpBaseUrl
-    )
-    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-    [System.IO.File]::WriteAllText($Path, $HttpBaseUrl.Trim().TrimEnd('/') + "`n", $utf8NoBom)
-}
-
-function Get-AppPxeBootFieldIsoBundledRoot {
-    $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
-    if (-not $root) { return $null }
-    foreach ($rel in @('sidecar/pxe/fieldiso', 'pxe/fieldiso')) {
-        $path = Join-Path $root ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
-        if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
-    }
-    return $null
-}
-
-function Write-AppPxeBootFieldIsoSmbTestHttpAssets {
-    param(
-        [Parameter(Mandatory)][hashtable]$Paths,
-        [string]$LanIp
-    )
-    $modeDir = Join-Path $Paths.fieldisoDir 'mode'
-    if (-not (Test-Path -LiteralPath $modeDir)) {
-        $null = New-Item -Path $modeDir -ItemType Directory -Force
-    }
-    Set-Content -LiteralPath (Join-Path $modeDir 'smb-test') -Value 'smb-test' -Encoding ASCII -NoNewline -Force
-
-    $hostPart = if ([string]::IsNullOrWhiteSpace($LanIp)) {
-        try { [System.Net.Dns]::GetHostName() } catch { 'localhost' }
-    } else {
-        [string]$LanIp
-    }
-    # Trailing '$' = hidden share: macOS smbd (like Windows) does not advertise it
-    # in browse/enumeration, but WinPE mounts it by explicit UNC so hiding is free.
-    $shareName = 'SM_SMB_SPIKE$'
-    $unc = "\\$hostPart\$shareName"
-    Set-Content -LiteralPath (Join-Path $Paths.fieldisoDir 'smb-test.unc') -Value $unc -Encoding ASCII -NoNewline -Force
-
-    # Optional throwaway SMB credential for the authenticated lab mount test.
-    # Operator creates <storeRoot>/fieldiso-smb-test.cred (line 1 = user, line 2 = password,
-    # a low-value read-only-share local account - NEVER a sudo/admin account). It is then
-    # served at http/fieldiso/smb-test.cred and chained as an initrd in smb-test mode.
-    # ASCII, no BOM - WinPE 'set /p' breaks on a UTF-8 BOM (same reason as iso.url files).
-    $credSource = Join-Path $Paths.storeRoot 'fieldiso-smb-test.cred'
-    $credDest = Join-Path $Paths.fieldisoDir 'smb-test.cred'
-    if (Test-Path -LiteralPath $credSource) {
-        $credLines = @(Get-Content -LiteralPath $credSource -ErrorAction SilentlyContinue | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        if ($credLines.Count -ge 2) {
-            # CRLF, not LF: WinPE's `set /p` (in Mount-IsoFromUrl.cmd) needs CRLF to
-            # split the two lines - an LF-only file makes it read BOTH lines into the
-            # username. Write the bytes explicitly so the macOS/pwsh default LF does
-            # not leak through. (run-smb-test.ps1 also reads this file directly.)
-            $credText = ('{0}{2}{1}{2}' -f ([string]$credLines[0]).Trim(), ([string]$credLines[1]).Trim(), "`r`n")
-            Set-Content -LiteralPath $credDest -Value $credText -Encoding ASCII -NoNewline -Force
-        } else {
-            Write-SidecarLog 'PXE SMB lab: fieldiso-smb-test.cred needs two lines (user, password) - credential not served.'
-            if (Test-Path -LiteralPath $credDest) { Remove-Item -LiteralPath $credDest -Force -ErrorAction SilentlyContinue }
-        }
-    } elseif (Test-Path -LiteralPath $credDest) {
-        Remove-Item -LiteralPath $credDest -Force -ErrorAction SilentlyContinue
-    }
 }
 
 function Write-AppPxeBootWimOverlayRuntimeAssets {
@@ -3588,15 +2968,13 @@ function Get-AppPxeBootDeployClientStartnetSource {
 }
 
 function Get-AppPxeBootDeployClientToolsDir {
-    # Windows binaries injected beside the client. Kept with the FieldIso tools
-    # (one fetch script, scripts/fetch-fieldiso-tools.ps1) and shipped in the
-    # bundle since 2026-08-23 - before that prepare-bundle-deps stripped them as
-    # "maintainer-only", which left a corporate install with no way to expand a
-    # vendor driver pack or push a log line.
+    # Windows binaries injected beside the client (fetched by scripts/fetch-winpe-tools.ps1,
+    # shipped in the bundle since 2026-08-23) - without them a corporate install has no
+    # way to expand a vendor driver pack or push a log line.
     $candidates = @()
-    if ($SidecarRoot) { $candidates += (Join-Path $SidecarRoot 'pxe/fieldiso/tools') }
+    if ($SidecarRoot) { $candidates += (Join-Path $SidecarRoot 'pxe/tools') }
     if (Test-Path variable:script:AppSidecarProjectRoot) {
-        if ($script:AppSidecarProjectRoot) { $candidates += (Join-Path $script:AppSidecarProjectRoot 'sidecar/pxe/fieldiso/tools') }
+        if ($script:AppSidecarProjectRoot) { $candidates += (Join-Path $script:AppSidecarProjectRoot 'sidecar/pxe/tools') }
     }
     foreach ($c in $candidates) {
         $path = ($c -replace '/', [IO.Path]::DirectorySeparatorChar)
@@ -3887,60 +3265,6 @@ function Write-AppPxeBootDeployOverlayFiles {
     }
 }
 
-function Sync-AppPxeBootFieldIsoHttpAssets {
-    <#
-    .SYNOPSIS
-        Copy HTTP-served FieldIso bootstrap (run.ps1, tools README) into the PXE store for Caddy.
-    #>
-    $paths = Get-AppPxeBootLayoutPaths
-    foreach ($dir in @($paths.fieldisoDir, $paths.fieldisoToolsDir)) {
-        if (-not (Test-Path -LiteralPath $dir)) {
-            $null = New-Item -Path $dir -ItemType Directory -Force
-        }
-    }
-
-    $bundled = Get-AppPxeBootFieldIsoBundledRoot
-    if ($bundled) {
-        $runSrc = Join-Path $bundled 'run.ps1'
-        if (Test-Path -LiteralPath $runSrc) {
-            Copy-Item -LiteralPath $runSrc -Destination $paths.fieldisoRunScript -Force
-        }
-        $smbTestSrc = Join-Path $bundled 'run-smb-test.ps1'
-        if (Test-Path -LiteralPath $smbTestSrc) {
-            Copy-Item -LiteralPath $smbTestSrc -Destination (Join-Path $paths.fieldisoDir 'run-smb-test.ps1') -Force
-        }
-        $toolsReadme = Join-Path $bundled 'tools\README.txt'
-        if (Test-Path -LiteralPath $toolsReadme) {
-            Copy-Item -LiteralPath $toolsReadme -Destination (Join-Path $paths.fieldisoToolsDir 'README.txt') -Force
-        }
-        foreach ($toolName in @('curl.exe', '7z.exe', '7za.dll', '7zxa.dll')) {
-            $toolSrc = Join-Path $bundled "tools\$toolName"
-            if (Test-Path -LiteralPath $toolSrc) {
-                Copy-Item -LiteralPath $toolSrc -Destination (Join-Path $paths.fieldisoToolsDir $toolName) -Force
-            }
-        }
-    }
-
-    $cfg = Read-AppPxeBootConfig
-    $port = [int]$cfg.httpPort
-    if ($port -lt 1 -or $port -gt 65535) { $port = 8080 }
-    $httpBase = Get-AppPxeBootLocalHttpBaseUrl
-    $lanIp = Get-AppPxeBootLanIp -InterfaceId $cfg.interfaceId
-    if ($lanIp) {
-        Write-AppPxeBootFieldIsoBootstrapUrlFile -Path $paths.fieldisoBootstrapUrl -HttpBaseUrl $httpBase
-    } elseif (Test-Path -LiteralPath $paths.fieldisoBootstrapUrl) {
-        Remove-Item -LiteralPath $paths.fieldisoBootstrapUrl -Force -ErrorAction SilentlyContinue
-    }
-    Write-AppPxeBootFieldIsoSmbTestHttpAssets -Paths $paths -LanIp $lanIp
-    Write-AppPxeBootWimOverlayRuntimeAssets -LanIp $lanIp
-
-    @{
-        runScript   = $paths.fieldisoRunScript
-        bootstrapUrl = $paths.fieldisoBootstrapUrl
-        toolsDir    = $paths.fieldisoToolsDir
-    }
-}
-
 function Get-AppPxeBootWanIsoCatalogUrl {
     $cfg = Read-AppPxeBootConfig
     $url = [string]$cfg.deployMenuUrl
@@ -3948,10 +3272,6 @@ function Get-AppPxeBootWanIsoCatalogUrl {
         $url = Get-AppPxeBootDefaultDeployMenuUrl
     }
     return $url.Trim().TrimEnd('/')
-}
-
-function Get-AppPxeBootSiteIsoCatalogMenuLabel {
-    "$(Get-AppProductDisplayName) boot ISO catalog"
 }
 
 $script:AppPxeBootWinPeBackgroundName = 'winpe.jpg'
@@ -4150,510 +3470,6 @@ function Get-AppPxeBootLocalHttpBaseUrl {
         return "http://`${next-server}:$port"
     }
     return "http://${lanIp}:$port"
-}
-
-function Get-AppPxeBootLocalIsoCatalogUrl {
-    param([switch]$ForIpxe)
-    return "$(Get-AppPxeBootLocalHttpBaseUrl -ForIpxe:$ForIpxe)/ISOs"
-}
-
-function Test-AppPxeBootLocalIsoCatalogReady {
-    $fieldIsoWim = Get-AppPxeBootFieldIsoWimName
-    if (-not $fieldIsoWim) { return $false }
-    if (@(Get-AppPxeBootIsoInventory).Count -eq 0) { return $false }
-    $menuPath = (Get-AppPxeBootLayoutPaths).isoCatalogMenu
-    return (Test-Path -LiteralPath $menuPath)
-}
-
-function Test-AppPxeBootIsoCatalogStale {
-    $paths = Get-AppPxeBootLayoutPaths
-    $isos = @(Get-AppPxeBootIsoInventory)
-    $fieldIsoWim = Get-AppPxeBootFieldIsoWimName
-    $shouldHaveCatalog = ($isos.Count -gt 0) -and [bool]$fieldIsoWim
-
-    if (-not $shouldHaveCatalog) {
-        return (Test-Path -LiteralPath $paths.isoCatalogMenu) -or (Test-Path -LiteralPath $paths.isoCatalogJson)
-    }
-    # ISOs + FieldIso on disk but menu.ipxe / urls not built yet (typical after manual copy).
-    if (-not (Test-AppPxeBootLocalIsoCatalogReady)) { return $true }
-    if (-not (Test-Path -LiteralPath $paths.isoCatalogJson)) { return $true }
-
-    try {
-        $catalog = Get-Content -LiteralPath $paths.isoCatalogJson -Raw -Encoding UTF8 | ConvertFrom-Json
-        $catalogFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($entry in @($catalog.entries)) {
-            $path = [string](Get-AppSidecarJsonProp -Item $entry -Name 'path')
-            if ($path -match '(?i)^iso/(.+)$') {
-                [void]$catalogFiles.Add($Matches[1])
-            }
-        }
-        $diskFiles = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($iso in $isos) {
-            [void]$diskFiles.Add([string]$iso.fileName)
-        }
-        if ($catalogFiles.Count -ne $diskFiles.Count) { return $true }
-        foreach ($name in $diskFiles) {
-            if (-not $catalogFiles.Contains($name)) { return $true }
-        }
-        return $false
-    } catch {
-        return $true
-    }
-}
-
-function Sync-AppPxeBootIsoCatalogIfStale {
-    if (-not (Test-AppPxeBootIsoCatalogStale)) { return $false }
-    Write-AppPxeBootMenuFiles
-    $isoCount = @(Get-AppPxeBootIsoInventory).Count
-    Write-SidecarLog "PXE boot: regenerated ISO catalog and boot menu ($isoCount ISO(s) on disk)"
-    return $true
-}
-
-function Write-AppPxeBootLocalIsoCatalog {
-    param([switch]$SkipFieldIsoPrepare)
-
-    $paths = Get-AppPxeBootLayoutPaths
-    Initialize-AppPxeBootStore | Out-Null
-    foreach ($dir in @($paths.isoCatalogDir, $paths.isoUrlDir)) {
-        if (-not (Test-Path -LiteralPath $dir)) {
-            $null = New-Item -Path $dir -ItemType Directory -Force
-        }
-    }
-
-    $cfg = Read-AppPxeBootConfig
-    $port = [int]$cfg.httpPort
-    if ($port -lt 1 -or $port -gt 65535) { $port = 8080 }
-    $lanIp = Get-AppPxeBootLanIp -InterfaceId $cfg.interfaceId
-    $fieldIsoWim = Get-AppPxeBootFieldIsoWimName
-    $isos = @(Get-AppPxeBootIsoInventory)
-    if ($isos.Count -gt 0 -and $fieldIsoWim -and -not $SkipFieldIsoPrepare) {
-        try {
-            Ensure-AppPxeBootFieldIsoBootAssets -SkipMenuRegen | Out-Null
-        } catch {
-            Write-SidecarLog "PXE boot: ISO catalog regen without FieldIso boot files - $($_.Exception.Message)"
-        }
-    }
-    $wanBase = Get-AppPxeBootWanIsoCatalogUrl
-    $wanDeployEnabled = Test-AppPxeBootWanDeployMenuEnabled
-    $httpBaseLiteral = Get-AppPxeBootLocalHttpBaseUrl
-    $catalogBaseLiteral = Get-AppPxeBootLocalIsoCatalogUrl
-    $generated = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-
-    $expectedUrls = [System.Collections.Generic.HashSet[string]]::new()
-    $entries = [System.Collections.Generic.List[hashtable]]::new()
-    foreach ($iso in $isos) {
-        $fileName = [string]$iso.fileName
-        $slug = (Get-AppPxeBootIsoMenuItemId -FileName $fileName) -replace '^iso_', ''
-        $urlFileName = "$slug.iso.url"
-        $installWimUrlFileName = "$slug.install.wim.url"
-        $urlPath = Join-Path $paths.isoUrlDir $urlFileName
-        $installWimUrlPath = Join-Path $paths.isoUrlDir $installWimUrlFileName
-        $isoHttpUrl = Get-AppPxeBootIsoHttpUrl -FileName $fileName -Port $port -LanIp $lanIp
-        $installWimHttpUrl = Get-AppPxeBootInstallWimHttpUrl -FileName $fileName -Port $port -LanIp $lanIp
-        Write-AppPxeBootIsoUrlFile -Path $urlPath -IsoHttpUrl $isoHttpUrl
-        Write-AppPxeBootIsoUrlFile -Path $installWimUrlPath -IsoHttpUrl $installWimHttpUrl
-        [void]$expectedUrls.Add($urlFileName)
-        [void]$expectedUrls.Add($installWimUrlFileName)
-        [void]$entries.Add(@{
-                id      = $slug
-                label   = if ($iso.label) { [string]$iso.label } else { ([IO.Path]::GetFileNameWithoutExtension($fileName) -replace '_', ' ') }
-                type    = 'fieldiso-http'
-                path    = "iso/$fileName"
-                isoUrl  = "urls/$urlFileName"
-                installWimUrl = "urls/$installWimUrlFileName"
-                httpPort = $port
-            })
-    }
-
-    foreach ($existing in @(Get-ChildItem -LiteralPath $paths.isoUrlDir -Filter '*.url' -File -ErrorAction SilentlyContinue)) {
-        if (-not $expectedUrls.Contains($existing.Name)) {
-            Remove-Item -LiteralPath $existing.FullName -Force -ErrorAction SilentlyContinue
-        }
-    }
-
-    if ($entries.Count -eq 0 -or -not $fieldIsoWim) {
-        foreach ($artifact in @($paths.isoCatalogMenu, $paths.isoCatalogJson)) {
-            if (Test-Path -LiteralPath $artifact) {
-                Remove-Item -LiteralPath $artifact -Force -ErrorAction SilentlyContinue
-            }
-        }
-        return @{
-            entryCount = 0
-            menuPath   = $paths.isoCatalogMenu
-            catalogUrl = $catalogBaseLiteral
-        }
-    }
-
-    $catalog = @{
-        generated  = $generated
-        baseUrl    = $catalogBaseLiteral
-        entryCount = $entries.Count
-        entries    = @($entries)
-    }
-    ($catalog | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $paths.isoCatalogJson -Encoding UTF8 -Force
-
-    $catalogIpxeAcc = [System.Collections.Generic.List[string]]::new()
-    [void]$catalogIpxeAcc.Add('#!ipxe')
-    [void]$catalogIpxeAcc.Add("# fieldiso-ipxe-rev: $($script:AppPxeBootFieldIsoIpxeCatalogRevision)")
-    [void]$catalogIpxeAcc.Add("# Generated by $(Get-AppProductDisplayName) - boot ISO catalog")
-    [void]$catalogIpxeAcc.Add("# $generated")
-    [void]$catalogIpxeAcc.Add("set http_port $port")
-    if ($wanDeployEnabled) {
-        [void]$catalogIpxeAcc.Add("set deploy_base $wanBase")
-    }
-    [void]$catalogIpxeAcc.Add("set http_base $httpBaseLiteral")
-    [void]$catalogIpxeAcc.Add("set catalog_base $catalogBaseLiteral")
-    [void]$catalogIpxeAcc.Add('')
-    [void]$catalogIpxeAcc.Add(':start')
-    foreach ($line in @(Get-AppPxeBootMenuBrandingConsoleIpxeLines)) { [void]$catalogIpxeAcc.Add([string]$line) }
-    [void]$catalogIpxeAcc.Add("menu $(Get-AppProductDisplayName) boot ISO catalog")
-    foreach ($line in @(Get-AppPxeBootMenuBrandingSubtitleIpxeLines)) { [void]$catalogIpxeAcc.Add([string]$line) }
-    [void]$catalogIpxeAcc.Add("item --gap -- ----- $(Get-AppProductDisplayName) (HTTP) -----")
-    if ($fieldIsoWim) {
-        [void]$catalogIpxeAcc.Add('item --gap -- ----- Lab -----')
-        [void]$catalogIpxeAcc.Add((Format-AppPxeBootIpxeMenuItemLine -Id 'fieldiso_smb_test' -Label 'FieldIso SMB test (macOS share)'))
-    }
-    foreach ($entry in @($entries)) {
-        [void]$catalogIpxeAcc.Add("item $($entry.id)`t$($entry.label)")
-    }
-    if ($wanDeployEnabled) {
-        [void]$catalogIpxeAcc.Add('item --gap -- ----- Backup -----')
-        [void]$catalogIpxeAcc.Add((Format-AppPxeBootIpxeMenuItemLine -Id 'wan_catalog' -Label 'Deploy server catalog (WAN)'))
-    }
-    foreach ($line in @(Get-AppPxeBootIpxeMenuUtilityItemLines)) { [void]$catalogIpxeAcc.Add([string]$line) }
-    [void]$catalogIpxeAcc.Add('choose target || goto start')
-    [void]$catalogIpxeAcc.Add('goto ${target}')
-    [void]$catalogIpxeAcc.Add('')
-
-    if ($fieldIsoWim) {
-        [void]$catalogIpxeAcc.Add(':fieldiso_smb_test')
-        foreach ($line in (Get-AppPxeBootFieldIsoSmbTestIpxeBlock -FieldIsoWim $fieldIsoWim)) {
-            [void]$catalogIpxeAcc.Add($line)
-        }
-    }
-
-    [void]$catalogIpxeAcc.Add(':retry')
-    [void]$catalogIpxeAcc.Add('chain ${catalog_base}/menu.ipxe?t=${buildsign} || chain ${catalog_base}/menu.ipxe || goto start')
-    [void]$catalogIpxeAcc.Add('')
-    foreach ($line in @(Get-AppPxeBootIpxeLocalDiskHandlerLines)) { [void]$catalogIpxeAcc.Add([string]$line) }
-    [void]$catalogIpxeAcc.Add(':shell')
-    [void]$catalogIpxeAcc.Add('shell')
-    [void]$catalogIpxeAcc.Add('goto start')
-    if ($wanDeployEnabled) {
-        [void]$catalogIpxeAcc.Add('')
-        [void]$catalogIpxeAcc.Add(':wan_catalog')
-        [void]$catalogIpxeAcc.Add('echo Loading deploy ISO catalog (WAN)...')
-        [void]$catalogIpxeAcc.Add('chain ${deploy_base}/menu.ipxe?t=${buildsign} || chain ${deploy_base}/menu.ipxe || goto start')
-        [void]$catalogIpxeAcc.Add('')
-    }
-
-    foreach ($entry in @($entries)) {
-        $eid = [string]$entry.id
-        $urlRel = [string]$entry.isoUrl
-        [void]$catalogIpxeAcc.Add(":$eid")
-        foreach ($line in (Get-AppPxeBootFieldIsoBootIpxeBlock -EntryLabel ([string]$entry.label) -UrlRel $urlRel -FieldIsoWim $fieldIsoWim)) {
-            [void]$catalogIpxeAcc.Add($line)
-        }
-    }
-
-    ($catalogIpxeAcc -join "`n").TrimEnd() + "`n" | Set-Content -LiteralPath $paths.isoCatalogMenu -Encoding UTF8 -Force
-    Write-SidecarLog "PXE boot: wrote local ISO catalog ($($entries.Count) ISO(s)) at ISOs/menu.ipxe"
-    @{
-        entryCount = $entries.Count
-        menuPath   = $paths.isoCatalogMenu
-        catalogUrl = $catalogBaseLiteral
-    }
-}
-
-function Get-AppPxeBootIsoCatalogMenuIpxeLines {
-    param([Parameter(Mandatory)]$Config)
-    if (-not (Test-AppPxeBootWanDeployMenuEnabled)) {
-        if (-not (Test-AppPxeBootLocalIsoCatalogReady)) {
-            return @()
-        }
-        $siteCatalog = Get-AppPxeBootSiteIsoCatalogMenuLabel
-        return @("item iso_catalog`t$siteCatalog")
-    }
-    $siteCatalog = Get-AppPxeBootSiteIsoCatalogMenuLabel
-    $useLocalPrimary = ([string]$Config.isoCatalogSource -ne 'wan') -and (Test-AppPxeBootLocalIsoCatalogReady)
-    if ($useLocalPrimary) {
-        return @("item iso_catalog`t$siteCatalog")
-    }
-    return @((Format-AppPxeBootIpxeMenuItemLine -Id 'iso_catalog' -Label 'Deploy server ISO catalog (WAN)'))
-}
-
-function Get-AppPxeBootIsoCatalogBootIpxeBlock {
-    param(
-        [Parameter(Mandatory)]$Config,
-        [Parameter(Mandatory)][int]$HttpPort
-    )
-    $block = [System.Collections.Generic.List[string]]::new()
-    $wanDeployEnabled = Test-AppPxeBootWanDeployMenuEnabled
-    $useLocalPrimary = ([string]$Config.isoCatalogSource -ne 'wan') -and (Test-AppPxeBootLocalIsoCatalogReady)
-    $siteCatalog = Get-AppPxeBootSiteIsoCatalogMenuLabel
-    [void]$block.Add(':iso_catalog')
-    if ($useLocalPrimary -or -not $wanDeployEnabled) {
-        if (Test-AppPxeBootLocalIsoCatalogReady) {
-            [void]$block.Add("echo Loading $siteCatalog...")
-            if ($wanDeployEnabled) {
-                [void]$block.Add('chain ${catalog_base}/menu.ipxe?t=${buildsign} || chain ${catalog_base}/menu.ipxe || goto iso_catalog_wan')
-                [void]$block.Add(':iso_catalog_wan')
-                [void]$block.Add('echo Loading deploy ISO catalog (WAN backup)...')
-                [void]$block.Add('chain ${deploy_base}/menu.ipxe?t=${buildsign} || chain ${deploy_base}/menu.ipxe || goto start')
-            } else {
-                [void]$block.Add('chain ${catalog_base}/menu.ipxe?t=${buildsign} || chain ${catalog_base}/menu.ipxe || goto iso_catalog_failed')
-                [void]$block.Add(':iso_catalog_failed')
-                [void]$block.Add('echo Local ISO catalog failed - check HTTP and ISOs/FieldIso.wim in Netboot.')
-                [void]$block.Add('goto start')
-            }
-        } else {
-            [void]$block.Add('echo Local ISO catalog not ready - add FieldIso.wim and ISOs in Netboot.')
-            [void]$block.Add('goto start')
-        }
-    } else {
-        [void]$block.Add('echo Loading deploy ISO catalog...')
-        [void]$block.Add('chain ${deploy_base}/menu.ipxe?t=${buildsign} || chain ${deploy_base}/menu.ipxe || goto start')
-    }
-    [void]$block.Add('')
-    return @($block)
-}
-
-function Get-AppPxeBootFieldIsoWimName {
-    $paths = Get-AppPxeBootLayoutPaths
-    foreach ($candidate in @('FieldIso.wim', 'FieldISO.wim')) {
-        if (Test-Path -LiteralPath (Join-Path $paths.wimDir $candidate)) {
-            return $candidate
-        }
-    }
-    foreach ($wim in @(Get-AppPxeBootWimInventory)) {
-        if (Test-AppPxeBootWimIsFieldIso -FileName $wim.fileName) {
-            return [string]$wim.fileName
-        }
-    }
-    return $null
-}
-
-function Get-AppPxeBootFieldIsoManifestDefaultUrls {
-    @{
-        Manifest = if ($env:APP_PXE_FIELDISO_MANIFEST_URL) {
-            [string]$env:APP_PXE_FIELDISO_MANIFEST_URL
-        } else {
-            (Get-AppProductAssetFeedUrl -Name 'pxe-fieldiso.json')
-        }
-        Wim = if ($env:APP_PXE_FIELDISO_WIM_URL) {
-            [string]$env:APP_PXE_FIELDISO_WIM_URL
-        } else {
-            (Get-AppProductAssetFeedUrl -Name 'FieldIso.wim')
-        }
-    }
-}
-
-function Get-AppPxeBootFieldIsoBundledManifestPath {
-    $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
-    if (-not $root) { return $null }
-    $path = Join-Path $root 'packaging/pxe-fieldiso.json'
-    if (Test-Path -LiteralPath $path) { return $path }
-    return $null
-}
-
-function Get-AppPxeBootFieldIsoManifestProp {
-    param(
-        $Item,
-        [Parameter(Mandatory)][string]$Name
-    )
-    # Sidecar runs under Set-StrictMode (NpsLogViewer.ps1); optional JSON keys must not be accessed directly.
-    if (-not $Item) { return $null }
-    if (-not ($Item.PSObject.Properties.Name -contains $Name)) { return $null }
-    return $Item.$Name
-}
-
-function Read-AppPxeBootFieldIsoManifestObject {
-    param($Obj)
-    if ($null -eq $Obj) { return $null }
-    $schemaVal = Get-AppPxeBootFieldIsoManifestProp -Item $Obj -Name 'schema'
-    $schema = if ($null -ne $schemaVal) { [int]$schemaVal } else { 0 }
-    if ($schema -ne 1) { return $null }
-    $defaultUrls = Get-AppPxeBootFieldIsoManifestDefaultUrls
-    $fileNameProp = Get-AppPxeBootFieldIsoManifestProp -Item $Obj -Name 'fileName'
-    $fileName = if ($fileNameProp) { [string]$fileNameProp } else { 'FieldIso.wim' }
-    $wimUrlProp = Get-AppPxeBootFieldIsoManifestProp -Item $Obj -Name 'wimUrl'
-    $wimUrl = if ($wimUrlProp) { [string]$wimUrlProp.Trim() } else { $defaultUrls.Wim }
-    $labelProp = Get-AppPxeBootFieldIsoManifestProp -Item $Obj -Name 'label'
-    $sizeProp = Get-AppPxeBootFieldIsoManifestProp -Item $Obj -Name 'sizeBytes'
-    $shaProp = Get-AppPxeBootFieldIsoManifestProp -Item $Obj -Name 'sha256'
-    $manifestUrlProp = Get-AppPxeBootFieldIsoManifestProp -Item $Obj -Name 'manifestUrl'
-    $updatedProp = Get-AppPxeBootFieldIsoManifestProp -Item $Obj -Name 'updated'
-    @{
-        schema      = 1
-        fileName    = $fileName
-        label       = if ($labelProp) { [string]$labelProp } else { 'FieldIso.wim' }
-        sizeBytes   = if ($null -ne $sizeProp) { [long]$sizeProp } else { 0 }
-        sha256      = if ($shaProp) { [string]$shaProp.Trim().ToLower() } else { $null }
-        wimUrl      = $wimUrl
-        manifestUrl = if ($manifestUrlProp) { [string]$manifestUrlProp.Trim() } else { $defaultUrls.Manifest }
-        updated     = if ($updatedProp) { [string]$updatedProp } else { $null }
-        source      = 'unknown'
-    }
-}
-
-function Get-AppPxeBootFieldIsoManifest {
-    param([switch]$UseCache)
-
-    if ($UseCache -and $null -ne $script:AppPxeBootFieldIsoManifestCache -and $script:AppPxeBootFieldIsoManifestCacheAt) {
-        $age = ((Get-Date) - $script:AppPxeBootFieldIsoManifestCacheAt).TotalSeconds
-        if ($age -lt 300) {
-            return $script:AppPxeBootFieldIsoManifestCache
-        }
-    }
-
-    $urls = Get-AppPxeBootFieldIsoManifestDefaultUrls
-    $result = $null
-    if ($env:APP_SKIP_REMOTE_PXE_FIELDISO_MANIFEST -ne '1') {
-        try {
-            $remote = Invoke-RestMethod -Uri $urls.Manifest -Method Get -TimeoutSec 15 -Headers @{ Accept = 'application/json' } -ErrorAction Stop
-            $parsed = Read-AppPxeBootFieldIsoManifestObject -Obj $remote
-            if ($parsed) {
-                $parsed['source'] = 'remote'
-                $result = $parsed
-            }
-        } catch {
-            Write-SidecarLogVerbose "PXE boot: FieldIso manifest fetch failed ($($urls.Manifest)): $($_.Exception.Message)"
-        }
-    }
-    if (-not $result) {
-        $bundledPath = Get-AppPxeBootFieldIsoBundledManifestPath
-        if ($bundledPath) {
-            try {
-                $local = Get-Content -LiteralPath $bundledPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                $parsed = Read-AppPxeBootFieldIsoManifestObject -Obj $local
-                if ($parsed) {
-                    $parsed['source'] = 'bundled'
-                    $result = $parsed
-                }
-            } catch {
-                Write-SidecarLogVerbose "PXE boot: bundled FieldIso manifest read failed: $($_.Exception.Message)"
-            }
-        }
-    }
-    if (-not $result) {
-        $result = @{
-            schema      = 1
-            fileName    = 'FieldIso.wim'
-            label       = 'FieldIso.wim'
-            sizeBytes   = 335544320
-            sha256      = $null
-            wimUrl      = $urls.Wim
-            manifestUrl = $urls.Manifest
-            updated     = $null
-            source      = 'default'
-        }
-    }
-    $script:AppPxeBootFieldIsoManifestCache = $result
-    $script:AppPxeBootFieldIsoManifestCacheAt = Get-Date
-    return $result
-}
-
-function Test-AppPxeBootFieldIsoWimFile {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [string]$ExpectedSha256,
-        [long]$MinSizeBytes = 104857600
-    )
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    $item = Get-Item -LiteralPath $Path
-    if ($item.Length -lt $MinSizeBytes) { return $false }
-    if ($ExpectedSha256) {
-        $hash = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLower()
-        if ($hash -ne $ExpectedSha256.ToLower()) { return $false }
-    }
-    return $true
-}
-
-function Get-AppPxeBootFieldIsoDownloadStatus {
-    param([switch]$SkipHash)
-    $manifest = Get-AppPxeBootFieldIsoManifest -UseCache:$SkipHash
-    $fileName = Get-AppPxeBootFieldIsoWimName
-    $paths = Get-AppPxeBootLayoutPaths
-    $dest = Join-Path $paths.wimDir 'FieldIso.wim'
-    $sizeBytes = $null
-    $sha256 = $null
-    if ($fileName -and (Test-Path -LiteralPath $dest)) {
-        $item = Get-Item -LiteralPath $dest
-        $sizeBytes = [long]$item.Length
-        if ($manifest.sha256 -and -not $SkipHash) {
-            $sha256 = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLower()
-        }
-    }
-    @{
-        present      = [bool]$fileName
-        fileName     = $fileName
-        sizeBytes    = $sizeBytes
-        sha256       = $sha256
-        expectedSize = [long]$manifest.sizeBytes
-        expectedSha256 = $manifest.sha256
-        wimUrl       = [string]$manifest.wimUrl
-        manifestUrl  = [string]$manifest.manifestUrl
-        manifestSource = [string]$manifest.source
-        label        = [string]$manifest.label
-    }
-}
-
-function Download-AppPxeBootFieldIsoWim {
-    param([switch]$ReplaceExisting)
-    $manifest = Get-AppPxeBootFieldIsoManifest
-    $targetName = Get-AppPxeBootSafeWimFileName -FileName ([string]$manifest.fileName)
-    $paths = Initialize-AppPxeBootStore
-    $dest = Join-Path $paths.wimDir $targetName
-    if ((Test-Path -LiteralPath $dest) -and -not $ReplaceExisting) {
-        if (Test-AppPxeBootFieldIsoWimFile -Path $dest -ExpectedSha256 $manifest.sha256) {
-            try { Ensure-AppPxeBootFieldIsoBootAssets -SkipMenuRegen | Out-Null } catch { }
-            return @{
-                fileName  = $targetName
-                sizeBytes = [long](Get-Item -LiteralPath $dest).Length
-                skipped   = $true
-                library   = (Get-AppPxeBootWimLibraryResponse)
-            }
-        }
-        throw "PXE boot: $targetName already exists - use replace to re-download."
-    }
-
-    $wimUrl = [string]$manifest.wimUrl
-    if ([string]::IsNullOrWhiteSpace($wimUrl)) {
-        throw 'PXE boot: FieldIso download URL not configured.'
-    }
-
-    $tmp = Join-Path $paths.storeRoot ("download-$targetName.part")
-    if (Test-Path -LiteralPath $tmp) {
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-    }
-
-    $sizeMb = if ($manifest.sizeBytes -gt 0) { [math]::Round($manifest.sizeBytes / 1MB, 0) } else { 320 }
-    Write-SidecarLog "PXE boot: downloading $targetName (~${sizeMb} MB)..."
-    try {
-        Invoke-WebRequest -Uri $wimUrl -OutFile $tmp -UseBasicParsing -TimeoutSec 3600 -ErrorAction Stop
-    } catch {
-        if (Test-Path -LiteralPath $tmp) {
-            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        }
-        throw "PXE boot: FieldIso download failed - $($_.Exception.Message)"
-    }
-
-    if (-not (Test-AppPxeBootFieldIsoWimFile -Path $tmp -ExpectedSha256 $manifest.sha256)) {
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        throw 'PXE boot: downloaded FieldIso.wim failed validation (size or SHA256).'
-    }
-
-    Move-Item -LiteralPath $tmp -Destination $dest -Force
-    Write-SidecarLog "PXE boot: installed $targetName ($([math]::Round((Get-Item -LiteralPath $dest).Length / 1MB, 1)) MB)"
-    Sync-AppPxeBootFieldIsoWinPeOverlay -WimPath $dest | Out-Null
-    Ensure-AppPxeBootFieldIsoBootAssets -SkipMenuRegen | Out-Null
-    Write-AppPxeBootMenuFiles
-    @{
-        fileName  = $targetName
-        sizeBytes = [long](Get-Item -LiteralPath $dest).Length
-        skipped   = $false
-        library   = (Get-AppPxeBootWimLibraryResponse)
-    }
 }
 
 function Get-AppPxeBootOptionalAssetsManifestDefaultUrl {
@@ -4914,7 +3730,7 @@ function Download-AppPxeBootOptionalAsset {
     Move-Item -LiteralPath $tmp -Destination $dest -Force
     Write-SidecarLog "PXE boot: installed $targetName ($([math]::Round((Get-Item -LiteralPath $dest).Length / 1MB, 1)) MB)"
 
-    if ($kind -eq 'wim' -and -not (Test-AppPxeBootWimIsFieldIso -FileName $targetName)) {
+    if ($kind -eq 'wim') {
         Ensure-AppPxeBootWimBootAssets -WimFileName $targetName | Out-Null
     }
 
@@ -4931,8 +3747,6 @@ function Download-AppPxeBootOptionalAsset {
 
 function Get-AppPxeBootIsoInventory {
     $paths = Get-AppPxeBootLayoutPaths
-    $cfg = Read-AppPxeBootConfig
-    $defaultName = if ($cfg.defaultBootIso) { [string]$cfg.defaultBootIso } else { $null }
     $files = @(Get-ChildItem -LiteralPath $paths.isoDir -Filter '*.iso' -File -ErrorAction SilentlyContinue | Sort-Object Name)
     @($files | ForEach-Object {
         $name = $_.Name
@@ -4941,9 +3755,7 @@ function Get-AppPxeBootIsoInventory {
             sizeBytes  = [long]$_.Length
             modifiedAt = $_.LastWriteTimeUtc.ToString('o')
             httpPath   = "iso/$name"
-            isoUrlRel  = Get-AppPxeBootIsoUrlRel -FileName $name
             label      = ([IO.Path]::GetFileNameWithoutExtension($name) -replace '_', ' ')
-            isDefault  = ($defaultName -and ($name -eq $defaultName))
         }
     })
 }
@@ -4990,13 +3802,6 @@ function Test-AppPxeBootLayoutUncached {
             )
         }
     }
-    if (Get-AppPxeBootFieldIsoWimName) {
-        if (-not (Test-AppPxeBootFieldIsoWinPePowerShellInjectAvailable)) {
-            [void]$warnings.Add(
-                'FieldIso.wim - WinPE-PowerShell not built in (wim-inject/ empty). On Windows: scripts/prepare-fieldiso-wim-inject.ps1, then Mac: inject-fieldiso-winpe-tools.sh or rebuild FieldIso.wim'
-            )
-        }
-    }
     if (-not (Test-Path -LiteralPath $paths.wimboot)) {
         if (Get-AppPxeBootBundledWimbootPath) {
             [void]$warnings.Add('http/wimboot/wimboot - bundled copy pending (start field PXE)')
@@ -5008,19 +3813,9 @@ function Test-AppPxeBootLayoutUncached {
     $isoFiles = @(Get-ChildItem -LiteralPath $paths.isoDir -Filter '*.iso' -File -ErrorAction SilentlyContinue)
     $cfg = Read-AppPxeBootConfig
     if ($wimFiles.Count -eq 0) {
-        [void]$warnings.Add('http/wim/*.wim - add a boot WIM below (FieldIso / LiteTouch / TechTools)')
+        [void]$warnings.Add('http/wim/*.wim - add a boot WIM below (import from a Windows ISO)')
     }
     if ($isoFiles.Count -gt 0) {
-        $fieldIso = Get-AppPxeBootFieldIsoWimName
-        if (-not $fieldIso) {
-            [void]$warnings.Add('http/iso/*.iso - local ISO boot needs FieldIso.wim in Boot WIM library')
-        } elseif (-not (Test-AppPxeBootWimBootAssetsComplete -WimFileName $fieldIso)) {
-            [void]$warnings.Add(
-                "http/wim-boot/FieldIso/ - BCD/boot.sdi/bootmgfw missing (save settings or add an ISO to regen; ISO catalog boot will fail UEFI until fixed)"
-            )
-        } elseif (Test-AppPxeBootIsoCatalogStale) {
-            [void]$warnings.Add('http/ISOs/menu.ipxe - catalog stale; save settings, start field PXE, or wait for status refresh')
-        }
         foreach ($iso in $isoFiles) {
             # Mount-and-serve only: install.wim is exposed live from the mounted ISO
             # once imaging services run - warn only when services are up but the
@@ -5049,7 +3844,7 @@ function Test-AppPxeBootLayoutUncached {
         }
     }
 
-    $drivers = Get-AppPxeBootFieldIsoDriversSummary
+    $drivers = Get-AppPxeBootDriversSummary
     if ([int]$drivers.modelCount -gt 0 -and [int]$drivers.readyCount -eq 0) {
         [void]$warnings.Add('Drivers/<model> - model folders exist but no driver packs yet (.cab/.exe/.7z - Open drivers folder or aria2 Tracker)')
     }
@@ -5064,16 +3859,11 @@ function Test-AppPxeBootLayoutUncached {
         wimFiles           = @($wimFiles | ForEach-Object { $_.Name })
         isoFiles           = @($isoFiles | ForEach-Object { $_.Name })
         defaultBootWim     = if ($cfg.defaultBootWim) { [string]$cfg.defaultBootWim } else { $null }
-        defaultBootIso     = if ($cfg.defaultBootIso) { [string]$cfg.defaultBootIso } else { $null }
         wims               = @(Get-AppPxeBootWimInventory)
         isos               = @(Get-AppPxeBootIsoInventory)
-        fieldIsoWim        = Get-AppPxeBootFieldIsoWimName
-        isoCatalogSource   = if ($cfg.isoCatalogSource -eq 'wan') { 'wan' } else { 'local' }
         localHttpOnly      = -not (Test-AppPxeBootWanDeployMenuEnabled)
-        localIsoCatalogUrl = Get-AppPxeBootLocalIsoCatalogUrl
         wanIsoCatalogUrl   = if (Test-AppPxeBootWanDeployMenuEnabled) { Get-AppPxeBootWanIsoCatalogUrl } else { $null }
-        isoCatalogReady    = (Test-AppPxeBootLocalIsoCatalogReady)
-        fieldIsoDrivers    = $drivers
+        driversSummary     = $drivers
         missing            = @($missing)
         warnings           = @($warnings)
     }
@@ -8087,7 +6877,6 @@ function Get-AppPxeBootStatus {
     )
 
     if (-not $SkipCatalogSync) {
-        Sync-AppPxeBootIsoCatalogIfStale | Out-Null
     }
     $cfg = Read-AppPxeBootConfig
     if ($Layout) {
@@ -8166,11 +6955,8 @@ function Get-AppPxeBootStatus {
         imagingClientsActive = @(Get-AppPxeBootImagingClients | Where-Object { $_.active }).Count
         startedAt         = $script:AppPxeBootState.StartedAt
         deployMenuUrl        = if (Test-AppPxeBootWanDeployMenuEnabled) { Get-AppPxeBootWanIsoCatalogUrl } else { $null }
-        isoCatalogSource     = if ($cfg.isoCatalogSource -eq 'wan') { 'wan' } else { 'local' }
         localHttpOnly        = -not (Test-AppPxeBootWanDeployMenuEnabled)
-        localIsoCatalogUrl   = Get-AppPxeBootLocalIsoCatalogUrl
         wanIsoCatalogUrl     = if (Test-AppPxeBootWanDeployMenuEnabled) { Get-AppPxeBootWanIsoCatalogUrl } else { $null }
-        localIsoCatalogReady = (Test-AppPxeBootLocalIsoCatalogReady)
         router               = $router
         bundledSnponly    = [bool](Get-AppPxeBootBundledSnponlyPath)
         bundledWimboot    = [bool](Get-AppPxeBootBundledWimbootPath)
@@ -8179,7 +6965,6 @@ function Get-AppPxeBootStatus {
         tftpd64Path       = Resolve-AppPxeBootTftpd64Path -ConfiguredPath $cfg.tftpd64Path
         defaultBootWim    = $defaultWim
         defaultBootWimUrl = $defaultBootWimUrl
-        defaultBootIso    = Get-AppPxeBootDefaultIsoName
         bootChainMode     = Get-AppPxeBootBootChainMode
         defaultWimbootKernelOptions = if ($defaultWim) {
             Format-AppPxeBootWimbootKernelOptions -Recipe (Get-AppPxeBootWimbootRecipe -WimFileName $defaultWim)
@@ -8189,8 +6974,6 @@ function Get-AppPxeBootStatus {
         } else { $false }
         wims              = @(Get-AppPxeBootWimInventory)
         isos              = @(Get-AppPxeBootIsoInventory)
-        fieldIsoWim       = Get-AppPxeBootFieldIsoWimName
-        fieldIso          = Get-AppPxeBootFieldIsoDownloadStatus -SkipHash:$SkipHeavyChecks
         optionalAssets    = Get-AppPxeBootOptionalAssetsStatus -SkipHash:$SkipHeavyChecks
         caddy             = Get-AppPxeBootCaddyDownloadStatus
         httpLastError     = $script:AppPxeBootState.HttpLastError
@@ -8228,12 +7011,19 @@ function Get-AppPxeBootStatus {
 # the same way it reads the configured deploy share.
 $script:AppPxeBootImageLibraryShareName = 'Deploy$'
 
-# --- Throwaway SMB account (reused from the FieldIso authenticated-SMB spike) ---
-# WinPE can consume a low-value local WORKGROUP account for Deploy$
-# auto-connect (credentials carried in the overlay's deploy.cred). Same cred file the
-# FieldIso smb-test serves, so the two share one throwaway account.
+# --- Throwaway SMB account ---
+# One hidden local account used to authenticate the Deploy$ share. Its identity
+# lives in a cred file in the store; created once, reused across restarts.
 function Get-AppPxeBootSmbCredFilePath {
-    Join-Path (Get-AppPxeBootStoreRoot) 'fieldiso-smb-test.cred'
+    # Renamed from fieldiso-smb-test.cred when FieldIso left the product (2026-08-24);
+    # migrate the old file so the existing account (and the SMB fast-path marker built
+    # on it) survives the rename.
+    $new = Join-Path (Get-AppPxeBootStoreRoot) 'smb-throwaway.cred'
+    $old = Join-Path (Get-AppPxeBootStoreRoot) 'fieldiso-smb-test.cred'
+    if (-not (Test-Path -LiteralPath $new) -and (Test-Path -LiteralPath $old)) {
+        Move-Item -LiteralPath $old -Destination $new -Force -ErrorAction SilentlyContinue
+    }
+    $new
 }
 
 function Read-AppPxeBootSmbThrowawayCred {
@@ -8975,7 +7765,6 @@ function Get-AppPxeBootWimLibraryLayoutSnapshotUncached {
     $wimFiles = @(Get-ChildItem -LiteralPath $paths.wimDir -Filter '*.wim' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
     $isoFiles = @(Get-ChildItem -LiteralPath $paths.isoDir -Filter '*.iso' -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
     $defaultName = if ($cfg.defaultBootWim) { [string]$cfg.defaultBootWim } else { $null }
-    $defaultIsoName = if ($cfg.defaultBootIso) { [string]$cfg.defaultBootIso } else { $null }
     @{
         ok                 = $true
         storeRoot          = $paths.storeRoot
@@ -8986,16 +7775,11 @@ function Get-AppPxeBootWimLibraryLayoutSnapshotUncached {
         wimFiles           = @($wimFiles)
         isoFiles           = @($isoFiles)
         defaultBootWim     = $defaultName
-        defaultBootIso     = $defaultIsoName
         wims               = @(Get-AppPxeBootWimInventory)
         isos               = @(Get-AppPxeBootIsoInventory)
-        fieldIsoWim        = Get-AppPxeBootFieldIsoWimName
-        isoCatalogSource   = if ($cfg.isoCatalogSource -eq 'wan') { 'wan' } else { 'local' }
         localHttpOnly      = -not (Test-AppPxeBootWanDeployMenuEnabled)
-        localIsoCatalogUrl = Get-AppPxeBootLocalIsoCatalogUrl
         wanIsoCatalogUrl   = if (Test-AppPxeBootWanDeployMenuEnabled) { Get-AppPxeBootWanIsoCatalogUrl } else { $null }
-        isoCatalogReady    = (Test-AppPxeBootLocalIsoCatalogReady)
-        fieldIsoDrivers    = $null
+        driversSummary     = $null
         missing            = @()
         warnings           = @()
     }
@@ -9011,7 +7795,6 @@ function Get-AppPxeBootWimLibraryResponse {
     @{
         wims        = @(Get-AppPxeBootWimInventory)
         isos        = @(Get-AppPxeBootIsoInventory)
-        fieldIsoWim = Get-AppPxeBootFieldIsoWimName
         config      = Read-AppPxeBootConfig
         layout      = $layout
         status      = if ($SkipStatusRefresh) { $null } else { Get-AppPxeBootStatus -SkipCatalogSync -Layout $layout }
@@ -9156,12 +7939,6 @@ function Remove-AppPxeBootWim {
     Remove-Item -LiteralPath $dest -Force
     Write-SidecarLog "PXE boot: removed boot WIM $name"
 
-    $removedFieldIso = ($name -match '^FieldIso\.wim$')
-    if ($removedFieldIso) {
-        Get-ChildItem -LiteralPath $paths.wimDir -Filter '.fieldiso-overlay-v*' -File -ErrorAction SilentlyContinue |
-            Remove-Item -Force -ErrorAction SilentlyContinue
-    }
-
     $stem = [IO.Path]::GetFileNameWithoutExtension($name)
     $bootDir = Join-Path $paths.httpRoot "wim-boot/$stem"
     if (Test-Path -LiteralPath $bootDir) {
@@ -9182,13 +7959,7 @@ function Remove-AppPxeBootWim {
             -DefaultBootWim $newDefault | Out-Null
     }
 
-    # Boot menu always; ISO catalog only when FieldIso removed (catalog entries need FieldIso.wim).
-    # SkipFieldIsoPrepare - no wimlib overlay / boot-asset export on delete.
-    if ($removedFieldIso) {
-        Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare
-    } else {
-        Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare -BootMenuOnly
-    }
+    Write-AppPxeBootMenuFiles
     Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh -SkipLayoutProbe
 }
 
@@ -9894,65 +8665,7 @@ function Remove-AppPxeBootIso {
     Remove-Item -LiteralPath $dest -Force
     Write-SidecarLog "PXE boot: removed ISO $name"
 
-    $cfg = Read-AppPxeBootConfig
-    if ($cfg.defaultBootIso -eq $name) {
-        $existing = Read-AppPxeBootConfig
-        Write-AppPxeBootConfig `
-            -HttpPort ([int]$existing.httpPort) `
-            -InterfaceId $existing.interfaceId `
-            -DeployMenuUrl $existing.deployMenuUrl `
-            -IsoCatalogSource $existing.isoCatalogSource `
-            -Tftpd64Path $existing.tftpd64Path `
-            -TftpMode $existing.tftpMode `
-            -DefaultBootIso '' | Out-Null
-        Write-SidecarLog 'PXE boot: default boot ISO cleared (removed from library)'
-    }
-
-    Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare
-    Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh
-}
-
-function Set-AppPxeBootDefaultIso {
-    param(
-        [string]$FileName,
-        [switch]$Clear
-    )
-    $existing = Read-AppPxeBootConfig
-    if ($Clear -or [string]::IsNullOrWhiteSpace($FileName)) {
-        Write-AppPxeBootConfig `
-            -HttpPort ([int]$existing.httpPort) `
-            -InterfaceId $existing.interfaceId `
-            -DeployMenuUrl $existing.deployMenuUrl `
-            -IsoCatalogSource $existing.isoCatalogSource `
-            -Tftpd64Path $existing.tftpd64Path `
-            -TftpMode $existing.tftpMode `
-            -DefaultBootIso '' | Out-Null
-        Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare -SkipIsoCatalogRegen
-        Write-SidecarLog 'PXE boot: default boot ISO cleared - FieldIso default opens ISO catalog menu'
-        return (Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh)
-    }
-    $name = Get-AppPxeBootSafeIsoFileName -FileName $FileName
-    $dest = Join-Path (Get-AppPxeBootLayoutPaths).isoDir $name
-    if (-not (Test-Path -LiteralPath $dest)) {
-        throw "PXE boot: ISO not found: $name"
-    }
-    if (-not (Get-AppPxeBootFieldIsoWimName)) {
-        throw 'PXE boot: default ISO requires FieldIso.wim in the boot WIM library.'
-    }
-    if (-not (Test-AppPxeBootFieldIsoIsDefaultBoot)) {
-        Write-SidecarLog "PXE boot: default ISO set to $name (applies when FieldIso.wim is the default boot WIM)"
-    }
-    $existing = Read-AppPxeBootConfig
-    Write-AppPxeBootConfig `
-        -HttpPort ([int]$existing.httpPort) `
-        -InterfaceId $existing.interfaceId `
-        -DeployMenuUrl $existing.deployMenuUrl `
-        -IsoCatalogSource $existing.isoCatalogSource `
-        -Tftpd64Path $existing.tftpd64Path `
-        -TftpMode $existing.tftpMode `
-        -DefaultBootIso $name | Out-Null
-    Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare -SkipIsoCatalogRegen
-    Write-SidecarLog "PXE boot: default boot ISO set to $name"
+    Write-AppPxeBootMenuFiles
     Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh
 }
 
@@ -9982,13 +8695,13 @@ function Open-AppPxeBootIsoFolder {
     @{ opened = $true; path = $path }
 }
 
-function Open-AppPxeBootFieldIsoDriversFolder {
+function Open-AppPxeBootDriversFolder {
     Initialize-AppPxeBootStore | Out-Null
-    $path = Get-AppPxeBootFieldIsoDriversOsRoot
+    $path = Get-AppPxeBootDriversOsRoot
     if (-not (Test-Path -LiteralPath $path)) {
         $null = New-Item -Path $path -ItemType Directory -Force
     }
-    Sync-AppPxeBootFieldIsoDriverStore | Out-Null
+    Sync-AppPxeBootDriverStore | Out-Null
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
         Start-Process -FilePath 'explorer.exe' -ArgumentList (Format-AppProcessArgumentList -Arguments @($path))
     } elseif ($IsMacOS) {
@@ -10013,7 +8726,7 @@ function Set-AppPxeBootDefaultWim {
             -Tftpd64Path $existing.tftpd64Path `
             -TftpMode $existing.tftpMode `
             -DefaultBootWim '' | Out-Null
-        Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare -SkipIsoCatalogRegen
+        Write-AppPxeBootMenuFiles
         Write-SidecarLog 'PXE boot: default boot WIM cleared - clients choose from PXE menu'
         return (Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh)
     }
@@ -10022,12 +8735,7 @@ function Set-AppPxeBootDefaultWim {
     if (-not (Test-Path -LiteralPath $dest)) {
         throw "PXE boot: boot WIM not found: $name"
     }
-    if (-not (Test-AppPxeBootWimIsFieldIso -FileName $name)) {
-        Ensure-AppPxeBootWimBootAssets -WimFileName $name -SkipMenuRegen | Out-Null
-    }
-    if (Test-AppPxeBootWimIsFieldIso -FileName $name) {
-        Write-SidecarLog "PXE boot: default boot WIM set to $name (deploy ISO catalog chain - not local wimboot auto-boot)"
-    }
+    Ensure-AppPxeBootWimBootAssets -WimFileName $name -SkipMenuRegen | Out-Null
     $existing = Read-AppPxeBootConfig
     Write-AppPxeBootConfig `
         -HttpPort ([int]$existing.httpPort) `
@@ -10036,7 +8744,7 @@ function Set-AppPxeBootDefaultWim {
         -Tftpd64Path $existing.tftpd64Path `
         -TftpMode $existing.tftpMode `
         -DefaultBootWim $name | Out-Null
-    Write-AppPxeBootMenuFiles -SkipFieldIsoPrepare -SkipIsoCatalogRegen
+    Write-AppPxeBootMenuFiles
     Write-SidecarLog "PXE boot: default boot WIM set to $name"
     Get-AppPxeBootWimLibraryResponse -SkipStatusRefresh
 }
@@ -10061,7 +8769,6 @@ function Set-AppPxeBootPluginConfig {
         [int]$HttpPort,
         [string]$InterfaceId,
         [string]$DeployMenuUrl,
-        [string]$IsoCatalogSource,
         [string]$Tftpd64Path,
         [string]$TftpMode,
         [string]$TftpBootFile,
@@ -10079,7 +8786,6 @@ function Set-AppPxeBootPluginConfig {
         HttpPort         = $port
         InterfaceId      = $InterfaceId
         DeployMenuUrl    = $DeployMenuUrl
-        IsoCatalogSource = $IsoCatalogSource
         Tftpd64Path      = $Tftpd64Path
         TftpMode         = $(if ($TftpMode) { $TftpMode } else { 'router' })
     }
@@ -10151,7 +8857,6 @@ function Set-AppPxeBootPluginConfig {
         $PSBoundParameters.ContainsKey('DeployOverlayShare')) {
         try {
             Sync-AppPxeBootWimBootAssets | Out-Null
-            Sync-AppPxeBootFieldIsoHttpAssets | Out-Null
             if (-not $SkipMenuRegen) { Write-AppPxeBootMenuFiles }
         } catch {
             Write-SidecarLog "PXE boot: overlay toggle apply error - $($_.Exception.Message)"

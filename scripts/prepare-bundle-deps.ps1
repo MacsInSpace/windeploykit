@@ -65,30 +65,19 @@ $PwshStage = Join-Path $Staged 'powershell'
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
 
-function Remove-AppStagedFieldIsoBuildArtifacts {
+function Test-AppStagedDeployClientTools {
     <#
-    wim-inject/ (an ADK PowerShell tree) is a maintainer-only input for
-    build-fieldiso-wim.sh and never ships. fieldiso/tools/ DOES ship since 2026-08-23:
-    the deploy client injects 7z.exe/7za.dll/7zxa.dll/curl.exe into a stock boot.wim
-    at boot (overlay, not baked) - without them a corporate install can expand only
-    .cab driver packs and cannot push a log line to the panel.
+    .SYNOPSIS
+        The deploy client tools (7z/curl) ship in the bundle at sidecar/pxe/tools.
+        Warn loudly if the staged bundle is missing them - a corporate install
+        without them cannot expand a vendor driver pack or push a log line.
     #>
     param([Parameter(Mandatory)][string]$SidecarDest)
-
-    $wimInject = Join-Path $SidecarDest 'pxe/fieldiso/wim-inject'
-    if (Test-Path -LiteralPath $wimInject) {
-        Remove-Item -LiteralPath $wimInject -Recurse -Force
-        Write-Step 'Excluded sidecar/pxe/fieldiso/wim-inject from staged bundle (FieldIso build artifact only)'
-    }
-
-    $toolsDir = Join-Path $SidecarDest 'pxe/fieldiso/tools'
-    $kept = @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe')
-    if (Test-Path -LiteralPath $toolsDir) {
-        $present = @($kept | Where-Object { Test-Path -LiteralPath (Join-Path $toolsDir $_) })
-        if ($present.Count -lt $kept.Count) {
-            Write-Warning "Deploy client tools missing from sidecar/pxe/fieldiso/tools ($(($kept | Where-Object { $present -notcontains $_ }) -join ', ')) - run pwsh -File ./scripts/fetch-fieldiso-tools.ps1; the bundle will inject what it has."
-        } else {
-            Write-Step 'Kept the deploy client tools (7z.exe, 7za.dll, 7zxa.dll, curl.exe) in the staged bundle'
+    $toolsDir = Join-Path $SidecarDest 'pxe/tools'
+    foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $toolsDir $tool))) {
+            Write-Warning "Deploy client tools missing from sidecar/pxe/tools ($tool) - run scripts/fetch-winpe-tools.ps1 before packaging."
+            return
         }
     }
 }
@@ -455,7 +444,7 @@ if (Test-Path -LiteralPath (Join-Path $vendorMdtDir 'BCD')) {
 }
 
 Copy-Item -LiteralPath $SidecarSrc -Destination $sidecarDest -Recurse -Force
-Remove-AppStagedFieldIsoBuildArtifacts -SidecarDest $sidecarDest
+Test-AppStagedDeployClientTools -SidecarDest $sidecarDest
 Assert-AppStagedEmailSignatureBanners -SidecarSrc $SidecarSrc -SidecarDest $sidecarDest
 
 $fieldTestSrc = Join-Path $RepoRoot 'scripts/test-bootstrap-field.ps1'

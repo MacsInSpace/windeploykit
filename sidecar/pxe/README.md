@@ -42,7 +42,7 @@ pwsh -File ./scripts/fetch-wimboot.ps1
 git add vendor/binaries/pxe-wimboot/ sidecar/pxe/wimboot
 ```
 
-On **Start Imaging Services** (and when Netboot is enabled), WinDeployKit syncs bundled files into the user store when the bundle hash changes, and writes `http/boot.ipxe` + **`http/ISOs/menu.ipxe`** (when ISOs + FieldIso present) from config.
+On **Start Imaging Services** (and when Netboot is enabled), WinDeployKit syncs bundled files into the user store when the bundle hash changes, and writes `http/boot.ipxe` from config.
 
 ## x86_64-sb (Secure Boot)
 
@@ -54,27 +54,15 @@ git add vendor/binaries/pxe-secure-boot-x64/ sidecar/pxe/x86_64-sb/
 Option 67 must be **`x86_64-sb/shimx64.efi`** (not `x86_64-sb/ipxe.efi`). The whole `x86_64-sb/` tree is copied to `tftp/x86_64-sb/`; `autoexec.ipxe` is mirrored there on sync.
 
 **Config defaults** (`config.json`):
-- **`defaultBootWim`** - LiteTouch/TechTools auto wimboot; FieldIso -> ISO catalog or auto ISO when **`defaultBootIso`** set
-- **`defaultBootIso`** - only when FieldIso is default WIM; clear -> manual ISO catalog at PXE
+- **`defaultBootWim`** - the WIM PXE clients auto-boot (wimboot)
 
-Changing defaults in the UI regens **boot menus only** when the ISO catalog is already fresh (`-SkipIsoCatalogRegen`); stale catalogs still get a full `http/ISOs/*` rebuild. Sidecar skips heavy FieldIso wimlib work on default-only toggles (`-SkipFieldIsoPrepare`). See **`docs/plugins/netboot/AGENT_NOTES_PXE_BOOT.md`** -> *Revert `-SkipIsoCatalogRegen`* if PXE misbehaves after a default change.
+Changing defaults in the UI regenerates the boot menus.
 
 **Menu branding:** drop PNG files in store **`http/branding/`** (e.g. `det-branding-1920x1080.png`). Regenerated `boot.ipxe` and `ISOs/menu.ipxe` use `console --picture ${http_base}/branding/...` and the subtitle *It's not WDS. We checked with legal.*
 
-**OOBD drivers:** seed catalog `sidecar/pxe/fieldiso-drivers/models.seed.json` creates store folders under **`http/fieldiso/drivers/Win11x64/`**. aria2 Tracker copies vendor packs (`.cab`/`.exe`/`.7z`) as-is; FieldIso WinPE extracts with bundled **7z.exe** at boot (`run.ps1`).
+**OOBD drivers:** seed catalog `sidecar/pxe/driver-seed/models.seed.json` creates store folders under **`<library>/Drivers/`**. aria2 Tracker copies vendor packs (`.cab`/`.exe`/`.7z`) as-is; the deploy client (startnet.cmd) extracts with the injected **7z.exe** during imaging.
 
-## FieldIso WinPE overlay
 
-`fieldiso-overlay/Windows/System32/Mount-IsoFromUrl.cmd` is patched into FieldIso.wim via wimlib on ensure/download. **Must use blocking `cmd /k`** - `start cmd` exits the batch, winpeshl ends, WinPE reboots before httpdisk runs. Keep in sync with `ipxeboot/contrib/fieldiso/overlay/`.
-
-## Local ISO catalog (FieldIso)
-
-- ISO files: user store **`http/iso/`** (lowercase)
-- Generated catalog: **`http/ISOs/`** - `menu.ipxe`, `catalog.json`, `urls/*.iso.url`
-- Requires **FieldIso.wim** in `http/wim/` (Downloads panel or import)
-- **Do not commit** ISO/WIM binaries
-
-See **`docs/plugins/netboot/AGENT_NOTES_PXE_BOOT.md`** -> *Field lessons* for onsite debugging (URL encoding, BOM, imgfree, HTTP Range).
 
 ## MDT boot assets (LiteTouch)
 

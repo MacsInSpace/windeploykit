@@ -1627,7 +1627,7 @@ export function ContentWorkspace({
                   <option value="auto">Auto (from URL / extension)</option>
                   <option value="iso">ISO -&gt; http/iso</option>
                   <option value="wim">WIM -&gt; http/wim</option>
-                  <option value="driver">Driver pack -&gt; fieldiso/drivers</option>
+                  <option value="driver">Driver pack -&gt; Drivers store</option>
                   <option value="other">Other (Settings download folder)</option>
                 </select>
               </div>

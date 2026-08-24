@@ -323,7 +323,6 @@ export function PxeWorkspace({
   const [servicesStarting, setServicesStarting] = useState(false);
   const [menuRebuildMessage, setMenuRebuildMessage] = useState<string | null>(null);
   const [httpPort, setHttpPort] = useState("8080");
-  const [isoCatalogSource, setIsoCatalogSource] = useState<"local" | "wan">("local");
   const [interfaceId, setInterfaceId] = useState("");
   const [tftpd64Path, setTftpd64Path] = useState("");
   const [tftpMode, setTftpMode] = useState<"router" | "standalone" | "proxy">("router");
@@ -495,7 +494,6 @@ export function PxeWorkspace({
     savedFormRef.current = snapshot;
     setSavedFormVersion((v) => v + 1);
     setHttpPort(snapshot.httpPort);
-    setIsoCatalogSource(resp.config.isoCatalogSource === "wan" ? "wan" : "local");
     setInterfaceId(snapshot.interfaceId);
     setTftpd64Path(snapshot.tftpd64Path);
     setTftpMode(snapshot.tftpMode);
@@ -868,7 +866,6 @@ export function PxeWorkspace({
       try {
         const params: SetPxeBootPluginConfigParams = {
           httpPort: port,
-          isoCatalogSource: overrides?.isoCatalogSource ?? isoCatalogSource,
           interfaceId: overrides?.interfaceId ?? (interfaceId.trim() || undefined),
           tftpd64Path: overrides?.tftpd64Path ?? (tftpd64Path.trim() || undefined),
           tftpMode: overrides?.tftpMode ?? tftpMode,
@@ -895,7 +892,7 @@ export function PxeWorkspace({
         return false;
       }
     },
-    [httpPort, interfaceId, isoCatalogSource, syncConfigFromResponse, tftpd64Path, tftpMode],
+    [httpPort, interfaceId, syncConfigFromResponse, tftpd64Path, tftpMode],
   );
 
   const withMenuRebuild = useCallback(async (run: () => Promise<void>) => {

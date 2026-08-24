@@ -92,11 +92,6 @@ try {
     Write-Host ''
     Write-Host 'Boot WIM heuristics:'
 
-    Test-Case 'FieldIso is recognised and takes no overlay' {
-        if (-not (Test-AppPxeBootWimIsFieldIso -FileName 'FieldIso.wim')) { throw 'FieldIso.wim not recognised' }
-        if (Test-AppPxeBootWimUsesDeployOverlay -FileName 'FieldIso.wim') { throw 'FieldIso should not take the overlay' }
-    }
-
     Test-Case 'MDT LiteTouch WIMs are recognised' {
         foreach ($n in @('LiteTouchPE_x64.wim', 'litetouchpe_x86.wim', 'Site-LiteTouch.wim')) {
             if (-not (Test-AppPxeBootWimIsMdtLiteTouch -FileName $n)) { throw "$n not recognised" }
@@ -111,7 +106,7 @@ try {
         }
     }
 
-    Test-Case 'any non-FieldIso WIM can take the overlay' {
+    Test-Case 'any imported WinPE can take the overlay' {
         foreach ($n in @('LiteTouchPE_x64.wim', 'TechTools.wim', 'Server2025-boot.wim')) {
             if (-not (Test-AppPxeBootWimUsesDeployOverlay -FileName $n)) { throw "$n should be overlay-eligible" }
         }
@@ -161,7 +156,7 @@ try {
         }
     }
 
-    Test-Case 'initrd lines come out for an overlay-eligible WIM and not for FieldIso' {
+    Test-Case 'initrd lines come out for an overlay-eligible WIM' {
         # deploy.cred is only served in throwaway/vault cred modes - blank mode is a
         # legitimate config (Craig runs it), so make the fixture deterministic: drop a
         # cred file in, assert its line, and clean it up if we created it.
@@ -186,7 +181,6 @@ try {
             if ($credLine -notmatch '\|\|\s*$') { throw "optional initrd line is not failure-tolerant: $credLine" }
             $uncLine = @($lines | Where-Object { $_ -match 'deploy\.unc' })[0]
             if ($uncLine -match '\|\|\s*$') { throw "required initrd line must stay fatal: $uncLine" }
-            Assert-Equal 0 @(Get-AppPxeBootWimOverlayInitrdLines -WimFileName 'FieldIso.wim').Count 'FieldIso initrd lines'
         } finally {
             if ($madeCred) { Remove-Item -LiteralPath $credPath -Force -ErrorAction SilentlyContinue }
         }

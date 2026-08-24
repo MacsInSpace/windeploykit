@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
     Bake VirtIO storage drivers (vioscsi + viostor) into a WinPE boot image so it can SEE a
-    Proxmox / QEMU VirtIO disk during imaging. Works on FieldIso.wim or any imported WinPE.
+    Proxmox / QEMU VirtIO disk during imaging. Works on any imported WinPE.
 
 .DESCRIPTION
     WinPE shows "There are no fixed disks to show" on a Proxmox VirtIO disk because the boot
@@ -15,14 +15,14 @@
 
     WINDOWS ONLY: offline driver servicing requires DISM. macOS wimlib can copy files into a WIM
     but cannot register a driver. Run this on a Windows box (Admin): copy the WIM over from the
-    Mac's PXE store (.../pxe-boot/http/wim/FieldIso.wim), bake, copy it back, then Start field PXE.
+    Mac's PXE store (.../pxe-boot/http/wim/<boot>.wim), bake, copy it back, then Start field PXE.
 
     NOTE: this services the BOOT image (so WinPE sees the disk). It is separate from the OOBD
-    pack (scripts/build-virtio-win-fieldiso-pack.ps1), which drivers the DEPLOYED Windows so it
+    pack, which drivers the DEPLOYED Windows so it
     boots afterwards. For a Proxmox lab you generally want both.
 
 .PARAMETER WimPath
-    Path to the WinPE WIM to service (FieldIso.wim or any imported WinPE).
+    Path to the WinPE WIM to service (any imported WinPE).
 
 .PARAMETER VirtioWinIso
     Path to a virtio-win-*.iso. It is mounted read-only and dismounted when done.
@@ -46,7 +46,7 @@
     Skip the automatic <wim>.bak-<timestamp> copy taken before servicing.
 
 .EXAMPLE
-    .\scripts\add-virtio-drivers-to-winpe-wim.ps1 -WimPath C:\pxe\FieldIso.wim -VirtioWinIso C:\iso\virtio-win-0.1.285.iso
+    .\scripts\add-virtio-drivers-to-winpe-wim.ps1 -WimPath C:\pxe\boot.wim -VirtioWinIso C:\iso\virtio-win-0.1.285.iso
 
 .EXAMPLE
     .\scripts\add-virtio-drivers-to-winpe-wim.ps1 -WimPath C:\pxe\LiteTouchPE_x64.wim -VirtioWinRoot E:\ -Drivers vioscsi,viostor,NetKVM

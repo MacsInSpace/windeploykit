@@ -1,10 +1,10 @@
 #requires -Version 7.0
 <#
 .SYNOPSIS
-    Download curl.exe and 7z.exe into sidecar/pxe/fieldiso/tools/ for FieldIso WIM builds.
+    Download curl.exe and 7z.exe into sidecar/pxe/tools/ - the WinPE tools the deploy client injects.
 
 .EXAMPLE
-    pwsh -File ./scripts/fetch-fieldiso-tools.ps1
+    pwsh -File ./scripts/fetch-winpe-tools.ps1
 #>
 [CmdletBinding()]
 param(
@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $ToolsDir) {
-    $ToolsDir = Join-Path $RepoRoot 'sidecar/pxe/fieldiso/tools'
+    $ToolsDir = Join-Path $RepoRoot 'sidecar/pxe/tools'
 }
 $null = New-Item -ItemType Directory -Path $ToolsDir -Force
 
@@ -48,7 +48,7 @@ function Save-Download {
 }
 
 $tempRoot = Get-ScriptTempRoot
-$curlStage = Join-Path $tempRoot ("windeploykit-fieldiso-curl-" + [guid]::NewGuid().ToString('N'))
+$curlStage = Join-Path $tempRoot ("windeploykit-winpe-curl-" + [guid]::NewGuid().ToString('N'))
 $curlZip = Join-Path $curlStage 'curl.zip'
 $null = New-Item -ItemType Directory -Path $curlStage -Force
 
@@ -66,7 +66,7 @@ finally {
     Remove-Item -LiteralPath $curlStage -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$sevenStage = Join-Path $tempRoot ("windeploykit-fieldiso-7z-" + [guid]::NewGuid().ToString('N'))
+$sevenStage = Join-Path $tempRoot ("windeploykit-winpe-7z-" + [guid]::NewGuid().ToString('N'))
 $sevenArchive = Join-Path $sevenStage '7z-extra.7z'
 $null = New-Item -ItemType Directory -Path $sevenStage -Force
 
