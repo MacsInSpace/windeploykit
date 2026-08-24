@@ -37,6 +37,13 @@ rem  boot.wim (WinPE-HTA is an ADK optional component), while cmd and conhost
 rem  always are - so the same "nothing but stock WinPE" rule that shaped the
 rem  client shapes its UI (checked against Server 2025 boot.wim, 2026-08-23).
 call :ui_init
+rem Deploy background: our own viewer paints it behind this console - WinPE 26100
+rem no longer paints System32\winpe.jpg at all (proven 2026-08-24). Optional both
+rem halves; Secure Boot boots pick the exe up from Z:\Tools after the share connects.
+if not defined BGON if exist "%SYS%\wdk-bg.exe" if exist "%SYS%\deploy-bg.bmp" (
+    start "" "%SYS%\wdk-bg.exe" "%SYS%\deploy-bg.bmp"
+    set "BGON=1"
+)
 
 rem --- who we are (no wmic, no PowerShell: SMBIOS strings live in the registry) ---
 set "MAKE="
@@ -134,7 +141,7 @@ rem  iPXE prints "Verification failed: Security Policy Violation" and skips
 rem  them (seen live 2026-08-24). The share has the same four files under
 rem  Z:\Tools, and SMB has no such rule, so pick up whatever is missing here.
 rem  Harmless everywhere else: if initrd delivered them, this copies nothing.
-for %%T in (7z.exe 7za.dll 7zxa.dll curl.exe) do (
+for %%T in (7z.exe 7za.dll 7zxa.dll curl.exe wdk-bg.exe) do (
     if not exist "%SYS%\%%T" if exist "Z:\Tools\%%T" (
         copy /y "Z:\Tools\%%T" "%SYS%\%%T" >nul 2>&1
         if exist "%SYS%\%%T" call :log "Fetched %%T from the share (Secure Boot boot path)"
@@ -142,6 +149,10 @@ for %%T in (7z.exe 7za.dll 7zxa.dll curl.exe) do (
 )
 if not defined CURL if exist "%SYS%\curl.exe" set "CURL=%SYS%\curl.exe"
 if defined LOGHOST if defined CURL call :heartbeat_start
+if not defined BGON if exist "%SYS%\wdk-bg.exe" if exist "%SYS%\deploy-bg.bmp" (
+    start "" "%SYS%\wdk-bg.exe" "%SYS%\deploy-bg.bmp"
+    set "BGON=1"
+)
 
 rem --- which task sequence -------------------------------------------------
 set "TSID="

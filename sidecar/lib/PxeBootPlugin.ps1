@@ -1011,6 +1011,16 @@ function Get-AppPxeBootWimOverlayProfiles {
                 @{ ServedName = '7za.dll';  WinPeName = '7za.dll';  Required = $false }
                 @{ ServedName = '7zxa.dll'; WinPeName = '7zxa.dll'; Required = $false }
                 @{ ServedName = 'curl.exe'; WinPeName = 'curl.exe'; Required = $false }
+                # The deploy background. Server 2025's WinPE no longer paints
+                # System32\winpe.jpg (proven 2026-08-24: a custom jpg BAKED into the
+                # WIM still booted to a black desktop), so the background is drawn by
+                # our own tiny viewer - a fullscreen bottom-most window behind the
+                # console. Pure GDI + BMP so it works on ANY WinPE, and it rides the
+                # overlay like everything else: the WIM is never modified (Craig:
+                # "work with any wim without touching it"). Unsigned PE, so Secure
+                # Boot clients pick it up from Z:\Tools like 7z/curl.
+                @{ ServedName = 'wdk-bg.exe'; WinPeName = 'wdk-bg.exe'; Required = $false }
+                @{ ServedName = 'deploy-bg.bmp'; WinPeName = 'deploy-bg.bmp'; Required = $false }
                 # Optional console-UI customisation: one line of header text, and an
                 # ASCII logo drawn above it. Both absent by default.
                 @{ ServedName = 'deploy.title'; WinPeName = 'deploy.title'; Required = $false }
@@ -1020,19 +1030,6 @@ function Get-AppPxeBootWimOverlayProfiles {
                 @{ ServedName = 'loghost';     WinPeName = 'deploy.loghost'; Required = $false }
             )
             PublishRuntime = { param($Dir, $LanIp) Write-AppPxeBootDeployOverlayFiles -Dir $Dir -LanIp $LanIp }
-            # The WinPE wallpaper is BAKED, not injected: stock boot.wims already carry
-            # \Windows\System32\winpe.jpg (hardlinked to WinSxS), and wimboot's initrd
-            # override does not take on that file - a real boot fetched the custom jpg
-            # and still painted the stock near-black one (proven from the access log +
-            # extracted stock image, 2026-08-24). wimlib update replaces it properly;
-            # the hash marker re-bakes only when the imported background changes.
-            Bakes = @(
-                @{
-                    MarkerName = '.winpe-bg'
-                    WimPath    = '/Windows/System32/winpe.jpg'
-                    Source     = { Get-AppPxeBootWinPeBackgroundPath }
-                }
-            )
         }
         # Example (future): bake a static unattend.xml into a custom install WIM -
         # @{
@@ -3184,7 +3181,7 @@ function Write-AppPxeBootDeployOverlayFiles {
     # Tools the client needs that WinPE lacks, served beside it. Copied once
     # (size+mtime), removed with the toggle so nothing stale is ever injected.
     $toolsSrcDir = Get-AppPxeBootDeployClientToolsDir
-    foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe')) {
+    foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe', 'wdk-bg.exe')) {
         $dst = Join-Path $Dir $tool
         $src = if ($toolsSrcDir) { Join-Path $toolsSrcDir $tool } else { $null }
         if ((Test-AppPxeBootDeployClientInjectEnabled) -and $src -and (Test-Path -LiteralPath $src)) {
@@ -3205,7 +3202,7 @@ function Write-AppPxeBootDeployOverlayFiles {
         if ($shareRoot -and (Test-Path -LiteralPath $shareRoot) -and (Test-AppPxeBootDeployClientInjectEnabled) -and $toolsSrcDir) {
             $shareTools = Join-Path $shareRoot 'Tools'
             if (-not (Test-Path -LiteralPath $shareTools)) { New-Item -ItemType Directory -Path $shareTools -Force | Out-Null }
-            foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe')) {
+            foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe', 'wdk-bg.exe')) {
                 $src = Join-Path $toolsSrcDir $tool
                 if (-not (Test-Path -LiteralPath $src)) { continue }
                 $dst = Join-Path $shareTools $tool
@@ -3230,6 +3227,22 @@ function Write-AppPxeBootDeployOverlayFiles {
         } elseif (Test-Path -LiteralPath $dstFile) {
             Remove-Item -LiteralPath $dstFile -Force -ErrorAction SilentlyContinue
         }
+    }
+
+    # Deploy background: the operator's imported image, converted to BMP for the
+    # wdk-bg viewer (pure GDI = BMP only; no decoder gamble on stripped WinPEs).
+    $bgSrc = Get-AppPxeBootWinPeBackgroundPath
+    $bgBmp = Join-Path $Dir 'deploy-bg.bmp'
+    if (Test-Path -LiteralPath $bgSrc) {
+        $s = Get-Item -LiteralPath $bgSrc
+        $d = Get-Item -LiteralPath $bgBmp -ErrorAction SilentlyContinue
+        if (-not $d -or $d.LastWriteTimeUtc -lt $s.LastWriteTimeUtc) {
+            if (Convert-AppPxeBootImageFile -Source $bgSrc -Destination $bgBmp -Format 'bmp') {
+                Write-SidecarLog 'PXE boot: published the deploy background (deploy-bg.bmp)'
+            }
+        }
+    } elseif (Test-Path -LiteralPath $bgBmp) {
+        Remove-Item -LiteralPath $bgBmp -Force -ErrorAction SilentlyContinue
     }
 
     if ((Test-AppPxeBootDeployClientInjectEnabled) -and -not (Test-Path -LiteralPath (Join-Path $Dir '7z.exe'))) {
@@ -3338,10 +3351,10 @@ function Convert-AppPxeBootImageFile {
     param(
         [Parameter(Mandatory)][string]$Source,
         [Parameter(Mandatory)][string]$Destination,
-        [Parameter(Mandatory)][ValidateSet('jpeg', 'png')][string]$Format
+        [Parameter(Mandatory)][ValidateSet('jpeg', 'png', 'bmp')][string]$Format
     )
     $srcExt = ([IO.Path]::GetExtension($Source)).ToLowerInvariant()
-    $wantExt = if ($Format -eq 'jpeg') { @('.jpg', '.jpeg') } else { @('.png') }
+    $wantExt = switch ($Format) { 'jpeg' { @('.jpg', '.jpeg') } 'png' { @('.png') } 'bmp' { @('.bmp') } }
     $dir = Split-Path -Parent $Destination
     if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
     if ($srcExt -in $wantExt) {
@@ -3358,7 +3371,11 @@ function Convert-AppPxeBootImageFile {
         Add-Type -AssemblyName System.Drawing -ErrorAction Stop
         $img = [System.Drawing.Image]::FromFile($Source)
         try {
-            $fmt = if ($Format -eq 'jpeg') { [System.Drawing.Imaging.ImageFormat]::Jpeg } else { [System.Drawing.Imaging.ImageFormat]::Png }
+            $fmt = switch ($Format) {
+                'jpeg' { [System.Drawing.Imaging.ImageFormat]::Jpeg }
+                'png' { [System.Drawing.Imaging.ImageFormat]::Png }
+                'bmp' { [System.Drawing.Imaging.ImageFormat]::Bmp }
+            }
             $img.Save($Destination, $fmt)
         } finally { $img.Dispose() }
         return (Test-Path -LiteralPath $Destination)
@@ -3375,11 +3392,11 @@ function Set-AppPxeBootBrandingImage {
         already on the machine (sips on macOS, System.Drawing on Windows) because that
         is what WinPE reads.
     .NOTES
-        BAKED into each boot WIM via the overlay bake engine (wimlib update + hash
-        marker): the stock \Windows\System32\winpe.jpg is hardlinked inside the WIM
-        and wimboot's initrd override does not take on it (proven 2026-08-24), so
-        injection can never show a custom background. Baking is the one deliberate
-        WIM modification in the product, chosen explicitly by importing a background.
+        Shown by the overlay's wdk-bg viewer (a fullscreen bottom-most window behind
+        the deploy console) - Server 2025's WinPE no longer paints System32\winpe.jpg
+        at all, proven 2026-08-24 by baking a custom jpg into the WIM and still
+        booting to a black desktop. Published as deploy-bg.bmp beside the client;
+        the boot WIM is never modified.
     #>
     param([Parameter(Mandatory)][string]$SourcePath)
     if (-not (Test-Path -LiteralPath $SourcePath)) { throw "PXE boot: picture not found - $SourcePath" }
@@ -3394,15 +3411,6 @@ function Set-AppPxeBootBrandingImage {
         throw 'PXE boot: could not prepare the WinPE background (jpg conversion failed).'
     }
     Write-SidecarLog "PXE boot: WinPE background set from $([IO.Path]::GetFileName($SourcePath))"
-    # Bake it into every boot WIM now - the hash markers make this a no-op for WIMs
-    # already carrying this exact image, and the next PXE boot shows it without
-    # waiting for a service start.
-    $wimDir = (Get-AppPxeBootLayoutPaths).wimDir
-    foreach ($wim in @(Get-ChildItem -LiteralPath $wimDir -Filter '*.wim' -File -ErrorAction SilentlyContinue)) {
-        try { Sync-AppPxeBootWimOverlays -WimPath $wim.FullName | Out-Null } catch {
-            Write-SidecarLog "PXE boot: background bake failed for $($wim.Name) - $($_.Exception.Message)"
-        }
-    }
     Get-AppPxeBootBrandingStatus
 }
 
@@ -3411,10 +3419,12 @@ function Clear-AppPxeBootBrandingImage {
     $paths = Get-AppPxeBootLayoutPaths
     $p = Get-AppPxeBootWinPeBackgroundPath
     if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
-    # Legacy: pre-bake builds also served an initrd copy - tidy it if present.
-    $served = Join-Path (Join-Path $paths.httpRoot 'deploy') $script:AppPxeBootWinPeBackgroundName
-    if (Test-Path -LiteralPath $served) { Remove-Item -LiteralPath $served -Force -ErrorAction SilentlyContinue }
-    Write-SidecarLog 'PXE boot: WinPE background cleared - WIMs already baked keep the last image until re-imported'
+    # Drop the served copies (current bmp + any legacy jpg).
+    foreach ($servedName in @('deploy-bg.bmp', $script:AppPxeBootWinPeBackgroundName)) {
+        $served = Join-Path (Join-Path $paths.httpRoot 'deploy') $servedName
+        if (Test-Path -LiteralPath $served) { Remove-Item -LiteralPath $served -Force -ErrorAction SilentlyContinue }
+    }
+    Write-SidecarLog 'PXE boot: WinPE background cleared'
     Get-AppPxeBootBrandingStatus
 }
 

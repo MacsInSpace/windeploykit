@@ -150,17 +150,13 @@ try {
     # loops instead: with Bakes gone from the only profile, `$profile.Bakes` under
     # StrictMode threw "The property 'Bakes' cannot be found" and Start Imaging
     # Services died on the spot (Craig, 2026-08-23).
-    Test-Case 'the bake sweep never writes a WIM when no background is imported' {
-        # The sandbox store has no branding file, so the background bake must resolve
-        # to skipped/no-source - and must NEVER touch the WIM.
+    Test-Case 'the bake sweep touches nothing - no profile bakes' {
         $wim = Join-Path ([IO.Path]::GetTempPath()) ("gate-" + [guid]::NewGuid().ToString('N') + ".wim")
         Set-Content -LiteralPath $wim -Value 'not a real wim' -Encoding ASCII
         try {
             $before = (Get-Item -LiteralPath $wim).LastWriteTimeUtc
             $results = @(Sync-AppPxeBootWimOverlays -WimPath $wim)
-            foreach ($res in $results) {
-                if (-not [bool]$res.skipped) { throw "a bake ran with no background imported ($($res | ConvertTo-Json -Compress))" }
-            }
+            Assert-Equal 0 $results.Count 'bake results'
             Assert-Equal $before (Get-Item -LiteralPath $wim).LastWriteTimeUtc 'the WIM must be untouched'
         } finally {
             Remove-Item -LiteralPath $wim -Force -ErrorAction SilentlyContinue
@@ -221,12 +217,7 @@ try {
         if ($names -notcontains 'startnet.cmd') { throw "startnet.cmd is not a runtime overlay entry (have: $($names -join ', '))" }
         $entry = $p.Runtime | Where-Object { $_.WinPeName -eq 'startnet.cmd' } | Select-Object -First 1
         if ([bool]$entry.Required) { throw 'startnet.cmd must not be Required - turning the client off must not suppress the share files' }
-        # The ONLY bake is the WinPE background (initrd cannot override the stock
-        # hardlinked winpe.jpg). The client itself must never be baked.
-        $bakes = @(Get-AppPxeBootWimOverlayProfileField -OverlayProfile $p -Name 'Bakes')
-        foreach ($b in $bakes) {
-            if ([string]$b.WimPath -ne '/Windows/System32/winpe.jpg') { throw "unexpected bake target: $($b.WimPath)" }
-        }
+        if ($null -ne (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $p -Name 'Bakes')) { throw 'the deploy-share profile must bake nothing' }
     }
 
     Test-Case 'the published client is CRLF and runs through the whole chain' {
@@ -289,16 +280,21 @@ try {
         }
     }
 
-    Test-Case 'the WinPE background is baked into boot WIMs (initrd cannot override it)' {
+    Test-Case 'the deploy background is drawn by the overlay viewer, never baked' {
         # Craig, 2026-08-23: boot.wim customisation. WinPE reads System32\winpe.jpg, so it
         # rides in as an initrd like the client - the imported WIM is untouched.
         $p = @(Get-AppPxeBootWimOverlayProfiles) | Where-Object { $_.Id -eq 'deploy-share' }
-        # BAKED, not injected: wimboot's initrd override does not take on the stock
-        # hardlinked winpe.jpg (2026-08-24) - the bake engine replaces it in the WIM.
-        $runtimeHit = @($p.Runtime | Where-Object { $_.WinPeName -eq 'winpe.jpg' })
-        if ($runtimeHit.Count -gt 0) { throw 'winpe.jpg must not be a runtime initrd entry - injection cannot override the stock file' }
-        $bake = @(Get-AppPxeBootWimOverlayProfileField -OverlayProfile $p -Name 'Bakes') | Where-Object { $_.WimPath -eq '/Windows/System32/winpe.jpg' }
-        if (-not $bake) { throw 'winpe.jpg bake entry missing from the deploy-share profile' }
+        # WinPE 26100 does not paint System32\winpe.jpg at all (a custom jpg baked
+        # into the WIM still booted black, 2026-08-24), so the background is drawn
+        # by the wdk-bg viewer riding the overlay - the WIM stays untouched (Craig:
+        # "work with any wim without touching it").
+        foreach ($n in @('wdk-bg.exe', 'deploy-bg.bmp')) {
+            $hit = @($p.Runtime | Where-Object { $_.WinPeName -eq $n })
+            if ($hit.Count -ne 1) { throw "$n must be a runtime overlay entry" }
+            if ([bool]$hit[0].Required) { throw "$n must not be Required - most deploys have no background" }
+        }
+        if (@($p.Runtime | Where-Object { $_.WinPeName -eq 'winpe.jpg' }).Count -gt 0) { throw 'winpe.jpg must not ride the overlay - WinPE never paints it' }
+        if ($null -ne (Get-AppPxeBootWimOverlayProfileField -OverlayProfile $p -Name 'Bakes')) { throw 'the deploy-share profile must bake nothing - WIMs are never modified' }
         $src = Join-Path ([IO.Path]::GetTempPath()) ("bg-" + [guid]::NewGuid().ToString('N') + '.png')
         [IO.File]::WriteAllBytes($src, [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='))
         # The store is the sandbox (APP_TEST_DATA_ROOT) - no live backup dance needed.
