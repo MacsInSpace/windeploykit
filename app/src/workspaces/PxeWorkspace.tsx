@@ -2957,6 +2957,32 @@ export function PxeWorkspace({
                                   </label>
                                 ))}
                               </div>
+                              <label className="text-[11px]" style={{ color: "var(--text2)" }}>
+                                After first-boot setup
+                              </label>
+                              <div className="flex items-center gap-1.5">
+                                <select
+                                  className="input-box h-[24px] text-[11px]"
+                                  value={seq.fields.firstBootAction || "restart"}
+                                  onChange={(e) =>
+                                    setTsEdit((prev) =>
+                                      (prev ?? []).map((s) =>
+                                        s.id === seq.id
+                                          ? { ...s, fields: { ...s.fields, firstBootAction: e.target.value } }
+                                          : s,
+                                      ),
+                                    )
+                                  }
+                                >
+                                  <option value="restart">Restart</option>
+                                  <option value="signout">Sign out</option>
+                                  <option value="shutdown">Shut down</option>
+                                  <option value="none">Nothing</option>
+                                </select>
+                                <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                  Runs once the first-boot steps (and eval conversion) finish. A restart is what makes the eval-to-licensed conversion take effect.
+                                </span>
+                              </div>
                             </div>
                           ) : null}
                           {selected && seq.fields.joinDomain && /education\.vic\.gov\.au$/i.test(seq.fields.joinDomain) ? (

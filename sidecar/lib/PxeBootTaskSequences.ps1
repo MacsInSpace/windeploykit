@@ -920,6 +920,26 @@ function Get-AppPxeBootTsLocalAccountConfig {
     }
 }
 
+function Get-AppPxeBootTsFirstBootAction {
+    <#
+    .SYNOPSIS
+        What the machine does once first-boot setup finishes: restart (default),
+        signout, shutdown, or none.
+    .NOTES
+        Craig, 2026-08-24: "at the end of any setup (first run) we need to reboot"
+        - and the server eval->licensed conversion literally requires it: DISM
+        Set-Edition stages the change and System > About keeps saying Evaluation
+        until the restart (seen on SVR01 the same day). Restart is therefore the
+        default, including for sequences saved before this option existed.
+    #>
+    param($Sequence)
+    $v = ''
+    $fields = Get-AppPxeBootTsProp -Item $Sequence -Name 'fields'
+    if ($fields) { $v = ([string](Get-AppPxeBootTsProp -Item $fields -Name 'firstBootAction')).Trim().ToLowerInvariant() }
+    if ($v -in @('none', 'restart', 'shutdown', 'signout')) { return $v }
+    return 'restart'
+}
+
 function Get-AppPxeBootTsAutoLogonCount {
     <#
     .SYNOPSIS
@@ -1380,11 +1400,12 @@ function Sync-AppPxeBootTaskSequenceStore {
         # index.json row: what the client needs BEFORE it applies anything. A row with
         # no image keeps the old behaviour (the tech picks the WIM at the device).
         $row = [ordered]@{
-            id      = [string]$rec.id
-            name    = [string]$rec.name
-            kind    = [string]$rec.kind
-            file    = "$($rec.id).xml"
-            image   = $null
+            id              = [string]$rec.id
+            name            = [string]$rec.name
+            kind            = [string]$rec.kind
+            file            = "$($rec.id).xml"
+            firstBootAction = (Get-AppPxeBootTsFirstBootAction -Sequence $rec)
+            image           = $null
         }
         if ($rec.Contains('image')) {
             $resolved = $null
@@ -1418,6 +1439,7 @@ function Sync-AppPxeBootTaskSequenceStore {
         [void]$envLines.Add("TS_KIND=$($rec.kind)")
         [void]$envLines.Add("TS_UNATTEND=$($rec.id).xml")
         if ($rec.fields.Contains('win11Bypass') -and [string]$rec.fields['win11Bypass'] -eq '1') { [void]$envLines.Add("TS_WIN11BYPASS=1") }
+        [void]$envLines.Add("TS_FINALE=$(Get-AppPxeBootTsFirstBootAction -Sequence $rec)")
         if ($row.image -and -not [bool]$row.image['missing']) {
             [void]$envLines.Add("TS_IMAGE=$($row.image.sharePath)")
             [void]$envLines.Add("TS_INDEX=$($row.image.index)")

@@ -154,6 +154,16 @@ Test-Case 'Auto sign-in count: 0 emits nothing, 1-5 ride through, out of range i
     Assert-True ((& $mk 'nonsense').autoLogonCount -eq 0) 'junk should read as 0'
 }
 
+Test-Case 'first-boot finale: restart by default, validated values, none allowed' {
+    $mk = { param($v) [ordered]@{ id = 'x'; fields = [ordered]@{ firstBootAction = $v } } }
+    Assert-True ((Get-AppPxeBootTsFirstBootAction -Sequence ([ordered]@{ id = 'x' })) -eq 'restart') 'no field defaults to restart'
+    Assert-True ((Get-AppPxeBootTsFirstBootAction -Sequence (& $mk 'nonsense')) -eq 'restart') 'junk defaults to restart'
+    foreach ($v in 'none', 'restart', 'shutdown', 'signout') {
+        Assert-True ((Get-AppPxeBootTsFirstBootAction -Sequence (& $mk $v)) -eq $v) "value '$v' rides through"
+    }
+    Assert-True ((Get-AppPxeBootTsFirstBootAction -Sequence (& $mk 'SHUTDOWN')) -eq 'shutdown') 'case-insensitive'
+}
+
 Write-Host ''
 Write-Host 'Saving a sequence:'
 Test-Case 'A typed password is stored base64, and re-saving does not double-encode it' {

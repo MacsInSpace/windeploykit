@@ -173,6 +173,7 @@ for /f "usebackq tokens=1,* delims==" %%K in ("Z:\TaskSequences\%TSID%.env") do 
     if /i "%%K"=="TS_AUTOPREP" set "TS_AUTOPREP=%%L"
     if /i "%%K"=="TS_KIND"     set "TS_KIND=%%L"
     if /i "%%K"=="TS_WIN11BYPASS" set "TS_WIN11BYPASS=%%L"
+    if /i "%%K"=="TS_FINALE"   set "TS_FINALE=%%L"
 )
 call :ui_stage 3 ok
 call :log "Task sequence: %TS_NAME% (%TSID%)"
@@ -335,9 +336,15 @@ rem before logon). Keeping them out of the unattend is what stopped Setup reject
 rem answer file at specialize (Craig, 2026-08-23).
 set "SCR=%APPLYDIR%Windows\Setup\Scripts"
 set "SETUPCOMPLETE=%SCR%\SetupComplete.cmd"
+rem What the machine does once first-boot setup finishes. Default restart: the
+rem tweaks want it, and the server eval->licensed conversion literally NEEDS it -
+rem DISM Set-Edition stages the change and About keeps saying Evaluation until the
+rem reboot (Craig, 2026-08-24). An env published before this option has no key.
+if not defined TS_FINALE set "TS_FINALE=restart"
 set "NEEDSC="
 if exist "Z:\TaskSequences\%TSID%.firstboot.cmd" set "NEEDSC=1"
 if /i "%TS_KIND%"=="server" if exist "Z:\TaskSequences\convert-eval.ps1" set "NEEDSC=1"
+if /i not "%TS_FINALE%"=="none" set "NEEDSC=1"
 if defined NEEDSC (
     if not exist "%SCR%" md "%SCR%" >nul 2>&1
     rem SetupComplete.cmd runs each helper from its own folder (%~dp0 = ...\Setup\Scripts).
@@ -351,6 +358,21 @@ if defined NEEDSC (
         copy /y "Z:\TaskSequences\convert-eval.ps1" "%SCR%\Convert-EvalEdition.ps1" >nul
         >>"%SETUPCOMPLETE%" echo if exist "%%~dp0Convert-EvalEdition.ps1" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%%~dp0Convert-EvalEdition.ps1"
         call :log "Eval->licensed conversion staged (Convert-EvalEdition.ps1 -> Setup\Scripts)"
+    )
+    rem Finale LAST - after the steps and the conversion have run. SetupComplete runs
+    rem as SYSTEM before anyone signs in, so restart/shutdown act right there; signout
+    rem waits for the first (auto)logon via RunOnce and signs that session out.
+    if /i "%TS_FINALE%"=="restart" (
+        >>"%SETUPCOMPLETE%" echo shutdown.exe /r /t 10
+        call :log "Finale: restart after first-boot setup"
+    )
+    if /i "%TS_FINALE%"=="shutdown" (
+        >>"%SETUPCOMPLETE%" echo shutdown.exe /s /t 10
+        call :log "Finale: shut down after first-boot setup"
+    )
+    if /i "%TS_FINALE%"=="signout" (
+        >>"%SETUPCOMPLETE%" echo reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" /v WDKFinaleSignOut /t REG_SZ /d "shutdown.exe /l" /f
+        call :log "Finale: sign out after first sign-in"
     )
 )
 
