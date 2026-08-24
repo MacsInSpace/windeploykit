@@ -6722,7 +6722,19 @@ function Resolve-AppPxeBootDnsmasqProcessId {
 }
 
 function Sync-AppPxeBootTftpProcessState {
-    if (-not $script:AppPxeBootState.TftpElevatedPid) { return }
+    if (-not $script:AppPxeBootState.TftpElevatedPid) {
+        # Adopt a daemon another process started. Since the service start moved to a
+        # child pwsh (2026-08-24), the pid lives in THAT process's memory - this one
+        # only sees the pid file. Without adoption the badge said "TFTP not running"
+        # while dnsmasq was up and serving (Craig hit exactly that, same day).
+        $adopted = Resolve-AppPxeBootDnsmasqProcessId `
+            -PidPath (Get-AppPxeBootDnsmasqPidPath) `
+            -ConfPath (Get-AppPxeBootLayoutPaths).dnsmasqConf
+        if ($adopted -le 0) { return }
+        $script:AppPxeBootState.TftpElevatedPid = $adopted
+        $script:AppPxeBootState.TftpElevated = $true
+        Write-SidecarLogVerbose "PXE boot: adopted running dnsmasq (pid $adopted) from the pid file"
+    }
     $proc = Get-Process -Id $script:AppPxeBootState.TftpElevatedPid -ErrorAction SilentlyContinue
     if ($proc -and -not $proc.HasExited) {
         $script:AppPxeBootState.TftpProcess = $proc
