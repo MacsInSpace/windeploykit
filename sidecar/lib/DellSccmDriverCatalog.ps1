@@ -124,7 +124,7 @@ function Invoke-AppDellSccmHttpGetBytes {
 function Get-AppDellSccmCabExtractTool {
     $cabextract = Get-Command cabextract -ErrorAction SilentlyContinue
     if ($cabextract) {
-        return @{ kind = 'cabextract'; command = $cabextract.Source }
+        return @{ kind = 'cabextract'; command = $cabextract.Source; name = 'cabextract' }
     }
 
     foreach ($name in @('7z', '7za')) {
@@ -140,7 +140,7 @@ function Get-AppDellSccmCabExtractTool {
             $expand = Get-Command expand -ErrorAction SilentlyContinue
         }
         if ($expand -and $expand.Source -match '(?i)(\\Windows\\|\\Sysnative\\|\\System32\\|expand\.exe)') {
-            return @{ kind = 'expand'; command = $expand.Source }
+            return @{ kind = 'expand'; command = $expand.Source; name = 'expand' }
         }
     }
 

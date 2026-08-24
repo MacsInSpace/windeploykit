@@ -128,7 +128,7 @@ function Invoke-AppHpSccmHttpGetBytes {
 function Get-AppHpSccmCabExtractTool {
     # Same tool ladder as the Dell lib (cabextract -> 7z -> expand.exe) - CI-side only.
     $cabextract = Get-Command cabextract -ErrorAction SilentlyContinue
-    if ($cabextract) { return @{ kind = 'cabextract'; command = $cabextract.Source } }
+    if ($cabextract) { return @{ kind = 'cabextract'; command = $cabextract.Source; name = 'cabextract' } }
     foreach ($name in @('7z', '7za')) {
         $sevenZip = Get-Command $name -ErrorAction SilentlyContinue
         if ($sevenZip) { return @{ kind = '7z'; command = $sevenZip.Source; name = $name } }
@@ -137,7 +137,7 @@ function Get-AppHpSccmCabExtractTool {
         $expand = Get-Command expand.exe -ErrorAction SilentlyContinue
         if (-not $expand) { $expand = Get-Command expand -ErrorAction SilentlyContinue }
         if ($expand -and $expand.Source -match '(?i)(\\Windows\\|\\Sysnative\\|\\System32\\|expand\.exe)') {
-            return @{ kind = 'expand'; command = $expand.Source }
+            return @{ kind = 'expand'; command = $expand.Source; name = 'expand' }
         }
     }
     return $null
