@@ -97,11 +97,11 @@ function Handle-PrefetchMacOsAdminCredential {
     if ([string]::IsNullOrWhiteSpace($purpose)) { $purpose = 'pxe' }
     if ($purpose -notin @('pxe', 'general')) { $purpose = 'pxe' }
     $started = $false
-    if (Get-Command Start-AppMacOsAdminCredentialPrefetch -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Start-AppMacOsAdminCredentialPrefetch) {
         $state = Start-AppMacOsAdminCredentialPrefetch -Purpose $purpose
         $started = ($null -ne $state)
     }
-    $cache = if (Get-Command Get-AppMacOsAdminCredentialCacheStatus -ErrorAction SilentlyContinue) {
+    $cache = if (Test-AppSidecarCommand Get-AppMacOsAdminCredentialCacheStatus) {
         Get-AppMacOsAdminCredentialCacheStatus
     } else {
         @{ cached = $false }

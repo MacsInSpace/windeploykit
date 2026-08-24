@@ -23,6 +23,36 @@ if (-not (Get-Command Get-AppUserAgent -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot 'AppProductIdentity.ps1')
 }
 
+$script:AppSidecarCommandMisses = @{}
+
+function Test-AppSidecarCommand {
+    <#
+    .SYNOPSIS
+        Does this command exist? Use instead of `Get-Command X -ErrorAction SilentlyContinue`.
+    .NOTES
+        A Get-Command MISS costs 66ms - it falls through to scanning every directory on
+        $PATH for an executable of that name. A hit costs 0.01ms. The sidecar has ~150
+        of these guards and several never resolve on macOS (Get-SmbShare, Get-LocalUser)
+        or at all (Get-AppPxeBootKmsClientKeys), so the task-sequence payload was paying
+        200ms of pure PATH scanning on every panel open (measured 2026-08-24).
+
+        Our own functions answer from the function drive - exact, always current, 0.28ms.
+        Anything else falls back to Get-Command, with misses remembered for 30s so a
+        binary installed mid-session (aria2, caddy) is still picked up.
+    #>
+    param([Parameter(Mandatory)][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
+    if (Test-Path -LiteralPath "function:$Name") { return $true }
+    $miss = $script:AppSidecarCommandMisses[$Name]
+    if ($miss -and ([DateTime]::UtcNow - $miss).TotalSeconds -lt 30) { return $false }
+    if (Get-Command -Name $Name -ErrorAction SilentlyContinue) {
+        $script:AppSidecarCommandMisses.Remove($Name)
+        return $true
+    }
+    $script:AppSidecarCommandMisses[$Name] = [DateTime]::UtcNow
+    return $false
+}
+
 function New-AppDir {
     param([Parameter(Mandatory)][string]$Path)
     if ([string]::IsNullOrWhiteSpace($Path)) {
@@ -147,7 +177,7 @@ function Set-AppImageLibraryRuntimeRoot {
 # Convenience for IPC handlers: pull imageLibraryRoot off the params bag.
 function Set-AppImageLibraryRuntimeRootFromParams {
     param($Params)
-    if (-not (Get-Command Get-AppSidecarParam -ErrorAction SilentlyContinue)) { return }
+    if (-not (Test-AppSidecarCommand Get-AppSidecarParam)) { return }
     $root = Get-AppSidecarParam -Params $Params -Name 'imageLibraryRoot'
     if ($root) { Set-AppImageLibraryRuntimeRoot -Root ([string]$root) }
 }

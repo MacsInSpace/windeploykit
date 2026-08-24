@@ -368,7 +368,7 @@ function Get-AppPxeBootTsDomainCandidates {
     try {
         if ($IsWindows) {
             & $add ([string]$env:USERDNSDOMAIN)
-            if (Get-Command Get-DnsClientGlobalSetting -ErrorAction SilentlyContinue) {
+            if (Test-AppSidecarCommand Get-DnsClientGlobalSetting) {
                 foreach ($s in @((Get-DnsClientGlobalSetting).SuffixSearchList)) { & $add ([string]$s) }
             }
         } else {
@@ -459,7 +459,7 @@ function Get-AppPxeBootTaskSequencePublishContext {
         siteId       = $null
     }
     try {
-        if (Get-Command Get-AppSiteProfile -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Get-AppSiteProfile) {
             $profile = Get-AppSiteProfile
             if ($profile) {
                 $ctx.joinDomain  = [string]$profile.joinDomain
@@ -513,7 +513,7 @@ function Get-AppPxeBootTsProductKeyDefault {
     # TODO(Site Profile): source the catalog from the Site Profile.
     param([Parameter(Mandatory)][string]$Role)
     try {
-        if (Get-Command Get-AppPxeBootKmsClientKeys -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Get-AppPxeBootKmsClientKeys) {
             $catalog = Get-AppPxeBootKmsClientKeys
             foreach ($name in $catalog.Keys) {
                 $isServer = $name -match '(?i)server'
@@ -953,7 +953,7 @@ function Resolve-AppPxeBootTsLocalAccount {
     if ($mode -eq 'vault') {
         $secretName = [string]$Account.vaultSecret
         if ([string]::IsNullOrWhiteSpace($secretName)) { return $null }
-        if (-not (Get-Command Get-AppVaultCredential -ErrorAction SilentlyContinue)) { return $null }
+        if (-not (Test-AppSidecarCommand Get-AppVaultCredential)) { return $null }
         $cred = Get-AppVaultCredential -Name $secretName
         if (-not $cred) {
             Write-SidecarLog "Task sequences: vault credential '$secretName' is missing - local account omitted"
@@ -992,7 +992,7 @@ function Resolve-AppPxeBootTsLocalAccountPassword {
     if ([string]$Account.passwordSource -eq 'vault') {
         $secretName = [string]$Account.vaultSecret
         if ([string]::IsNullOrWhiteSpace($secretName)) { return '' }
-        if (-not (Get-Command Get-AppVaultPlainSecret -ErrorAction SilentlyContinue)) { return '' }
+        if (-not (Test-AppSidecarCommand Get-AppVaultPlainSecret)) { return '' }
         $plain = Get-AppVaultPlainSecret -Name $secretName
         if ([string]::IsNullOrEmpty($plain)) {
             Write-SidecarLog "Task sequences: vault secret '$secretName' is missing or empty - local account omitted"
@@ -1277,11 +1277,11 @@ $intl$oobeShell	</settings>
     if ($joining -and $joinCredId -like 'vault:*') {
         $secretName = $joinCredId.Substring(6).Trim()
         $cred = $null
-        if ($secretName -and (Get-Command Get-AppVaultCredential -ErrorAction SilentlyContinue)) {
+        if ($secretName -and (Test-AppSidecarCommand Get-AppVaultCredential)) {
             $cred = Get-AppVaultCredential -Name $secretName
         }
         $vaultUser = if ($cred) { [string]$cred.UserName } else { '' }
-        $vaultPass = if ($cred -and (Get-Command Get-AppVaultPlainSecret -ErrorAction SilentlyContinue)) {
+        $vaultPass = if ($cred -and (Test-AppSidecarCommand Get-AppVaultPlainSecret)) {
             Get-AppVaultPlainSecret -Name $secretName
         } else { '' }
         if (-not [string]::IsNullOrWhiteSpace($vaultUser) -and -not [string]::IsNullOrWhiteSpace($vaultPass) -and $vaultUser.Trim() -ne '') {
@@ -1342,7 +1342,7 @@ function Sync-AppPxeBootTaskSequenceStore {
     $httpPort = 0
     $lanIp = ''
     try {
-        if (Get-Command Get-AppPxeBootInstallImageCatalog -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Get-AppPxeBootInstallImageCatalog) {
             $catalog = @(Get-AppPxeBootInstallImageCatalog)
             $cfg = Read-AppPxeBootConfig
             $httpPort = [int]$cfg.httpPort
@@ -1443,7 +1443,7 @@ function Sync-AppPxeBootTaskSequenceStore {
     # convert-eval.ps1 - the server eval->licensed script the deploy client copies into
     # C:\Windows\Setup\Scripts on a server deploy (it no-ops on a non-evaluation image).
     # Written here, once, so it rides the same Deploy$ share as the sequences.
-    if (Get-Command Get-AppServerEvalConversionPayload -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppServerEvalConversionPayload) {
         try {
             $convFile = Join-Path $dir 'convert-eval.ps1'
             $convBody = ((Get-AppServerEvalConversionPayload) -replace "`r`n", "`n") -replace "`n", "`r`n"
@@ -1510,7 +1510,7 @@ function Get-AppPxeBootTaskSequencesPayload {
     $joinDomainSuggestions = @(Get-AppPxeBootTsDomainSuggestions)
     $joinDomainOptions = @()  # TODO(Site Profile): seeded from the Site Profile join domains
     try {
-        $sp = if (Get-Command Get-AppSiteProfile -ErrorAction SilentlyContinue) { Get-AppSiteProfile } else { $null }
+        $sp = if (Test-AppSidecarCommand Get-AppSiteProfile) { Get-AppSiteProfile } else { $null }
         foreach ($d in @($sp.joinDomains)) {
             if (-not [string]::IsNullOrWhiteSpace([string]$d) -and $joinDomainOptions -notcontains [string]$d) {
                 $joinDomainOptions += [string]$d
@@ -1522,7 +1522,7 @@ function Get-AppPxeBootTaskSequencesPayload {
     # labelled by their first RDN (e.g. "Computers Administration").
     $machineOuOptions = @()
     try {
-        $sp2 = if (Get-Command Get-AppSiteProfile -ErrorAction SilentlyContinue) { Get-AppSiteProfile } else { $null }
+        $sp2 = if (Test-AppSidecarCommand Get-AppSiteProfile) { Get-AppSiteProfile } else { $null }
         foreach ($dnRaw in @($sp2.machineOus)) {
             $dn = [string]$dnRaw
             if ([string]::IsNullOrWhiteSpace($dn)) { continue }
@@ -1548,7 +1548,7 @@ function Get-AppPxeBootTaskSequencesPayload {
     # the configured domains ({{SITE}} kept as a token so sequences stay portable).
     $kmsKeyOptions = @()
     try {
-        if (Get-Command Get-AppPxeBootKmsClientKeys -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Get-AppPxeBootKmsClientKeys) {
             $catalog = Get-AppPxeBootKmsClientKeys
             foreach ($name in $catalog.Keys) {
                 $kmsKeyOptions += @{ label = [string]$name; key = [string]$catalog[$name] }
@@ -1568,7 +1568,7 @@ function Get-AppPxeBootTaskSequencesPayload {
     # Store credentials the UI can offer for the join-credential selector.
     $credentialOptions = @()
     try {
-        if (Get-Command Get-AppInfraSshCredentials -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Get-AppInfraSshCredentials) {
             foreach ($c in @(Get-AppInfraSshCredentials)) {
                 if (-not [bool]$c.configured) { continue }
                 $credentialOptions += @{
@@ -1584,7 +1584,7 @@ function Get-AppPxeBootTaskSequencesPayload {
     # The panel asks ListPxeBootInstallImages with refresh when it wants the unread ones.
     $installImages = @()
     try {
-        if (Get-Command Get-AppPxeBootInstallImageCatalog -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Get-AppPxeBootInstallImageCatalog) {
             $installImages = @(Get-AppPxeBootInstallImageCatalog)
         }
     } catch {

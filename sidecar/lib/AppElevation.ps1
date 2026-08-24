@@ -297,7 +297,7 @@ function Start-AppMacOsAdminCredentialPrefetch {
     )
     if (-not ($IsMacOS -or $IsDarwin)) { return $null }
     if ((Get-AppMacOsAdminCredentialCacheStatus).cached) { return $null }
-    if (-not $script:AppMacOsAdminVaultCredentialRejected -and (Get-Command Resolve-AppMacOsAdminCredentialFromVaultOrPrompt -ErrorAction SilentlyContinue)) {
+    if (-not $script:AppMacOsAdminVaultCredentialRejected -and (Test-AppSidecarCommand Resolve-AppMacOsAdminCredentialFromVaultOrPrompt)) {
         if (Resolve-AppMacOsAdminCredentialFromVaultOrPrompt) {
             # The saved credential may skip the dialog only once sudo has accepted it. A stale
             # one (password changed since it was saved) used to win here unconditionally and
@@ -467,7 +467,7 @@ function Invoke-AppMacOsAdminShellCommand {
                 $secure = $script:AppMacOsAdminCredentialCache.SecurePassword
                 $source = 'prefetch'
             }
-            if (-not $secure -and -not $script:AppMacOsAdminVaultCredentialRejected -and (Get-Command Get-AppLocalMachineCredentialSecure -ErrorAction SilentlyContinue)) {
+            if (-not $secure -and -not $script:AppMacOsAdminVaultCredentialRejected -and (Test-AppSidecarCommand Get-AppLocalMachineCredentialSecure)) {
                 $fromVault = Get-AppLocalMachineCredentialSecure
                 if ($fromVault -and $fromVault.SecurePassword) {
                     $secure = $fromVault.SecurePassword

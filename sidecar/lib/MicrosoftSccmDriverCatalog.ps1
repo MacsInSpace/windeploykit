@@ -29,7 +29,7 @@ function Get-AppMicrosoftSccmCatalogLastError {
 function Get-AppMicrosoftSccmCatalogCachePath {
     # Same folder whether or not Aria2Plugin.ps1 is loaded: <data root>/plugins/aria2/.
     # (Until 2026-08-22 the standalone branch used a second, slug-named folder.)
-    if (-not (Get-Command Get-AppAria2StoreRoot -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppAria2StoreRoot)) {
         return Join-Path (Get-AppPluginDir -Plugin 'aria2') 'microsoft-sccm-catalog.json'
     }
     Join-Path (Get-AppAria2StoreRoot) 'microsoft-sccm-catalog.json'
@@ -198,7 +198,7 @@ function Resolve-AppMicrosoftSccmDriverUrlForWmiPatterns {
 }
 
 function Read-AppMicrosoftSccmBundledCatalog {
-    if (-not (Get-Command Resolve-AppAria2PackagingFile -ErrorAction SilentlyContinue)) { return $null }
+    if (-not (Test-AppSidecarCommand Resolve-AppAria2PackagingFile)) { return $null }
     $path = Resolve-AppAria2PackagingFile -FileName 'microsoft-sccm-catalog.json'
     if (-not $path) { return $null }
     try {

@@ -80,7 +80,7 @@ function Get-AppLocalMachineCredentialLoginName {
     if ($meta -and $meta.loginName) {
         return [string]$meta.loginName
     }
-    if (Get-Command Get-AppMacOsAdminUserName -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppMacOsAdminUserName) {
         return Get-AppMacOsAdminUserName
     }
     return [string]$env:USER
@@ -115,7 +115,7 @@ function Get-AppLocalMachineCredentialStatus {
     $configured = Test-AppLocalMachineCredentialConfigured
     $meta = Read-AppLocalMachineCredentialMeta
     $sessionCached = $false
-    if (Get-Command Get-AppMacOsAdminCredentialCacheStatus -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppMacOsAdminCredentialCacheStatus) {
         $sessionCached = [bool](Get-AppMacOsAdminCredentialCacheStatus).cached
     }
     $platformMeta = if ($IsMacOS -or $IsDarwin) { 'macos' } elseif ($IsWindows -or ($env:OS -eq 'Windows_NT')) { 'windows' } else { 'unknown' }
@@ -163,7 +163,7 @@ function Save-AppLocalMachineCredential {
     }
 
     Import-AppLocalMachineCredentialToMacOsAdminCache | Out-Null
-        if (Get-Command Reset-AppMacOsAdminVaultCredentialRejection -ErrorAction SilentlyContinue) { Reset-AppMacOsAdminVaultCredentialRejection }
+        if (Test-AppSidecarCommand Reset-AppMacOsAdminVaultCredentialRejection) { Reset-AppMacOsAdminVaultCredentialRejection }
 Write-SidecarLog "Local machine credential saved for login=$loginTrim"
     Get-AppLocalMachineCredentialStatus
 }
@@ -176,7 +176,7 @@ function Clear-AppLocalMachineCredentialPassword {
     }
     $login = Get-AppLocalMachineCredentialLoginName
     Write-AppLocalMachineCredentialMeta -LoginName $login -ClearPassword
-    if (Get-Command Clear-AppMacOsAdminCredentialCache -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Clear-AppMacOsAdminCredentialCache) {
         Clear-AppMacOsAdminCredentialCache
     }
     Write-SidecarLog 'Local machine credential password cleared'
@@ -184,7 +184,7 @@ function Clear-AppLocalMachineCredentialPassword {
 }
 
 function Import-AppLocalMachineCredentialToMacOsAdminCache {
-    if (-not (Get-Command Set-AppMacOsAdminCredentialCache -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Set-AppMacOsAdminCredentialCache)) {
         return $false
     }
     $fromVault = Get-AppLocalMachineCredentialSecure
@@ -195,7 +195,7 @@ function Import-AppLocalMachineCredentialToMacOsAdminCache {
 }
 
 function Resolve-AppMacOsAdminCredentialFromVaultOrPrompt {
-    if (Get-Command Get-AppMacOsAdminCredentialCacheStatus -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppMacOsAdminCredentialCacheStatus) {
         if ((Get-AppMacOsAdminCredentialCacheStatus).cached) {
             return $true
         }

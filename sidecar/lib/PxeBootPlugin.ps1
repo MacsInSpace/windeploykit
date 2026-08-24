@@ -47,7 +47,7 @@ $script:AppPxeBootWindowsSmbAclRoot = $null
 $script:AppPxeBootWindowsSmbAclUser = $null
 
 function Get-AppPxeBootStoreRoot {
-    if (-not (Get-Command Get-AppPluginDir -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppPluginDir)) {
         . (Join-Path $PSScriptRoot 'AppPaths.ps1')
     }
     Get-AppPluginDir -Plugin 'pxe-boot'
@@ -1315,7 +1315,7 @@ function Get-AppPxeBootWimlibImagexPath {
     $bundled = Get-AppPxeBootBundledWimlibImagexPath
     if ($bundled) { return $bundled }
     foreach ($name in @('wimlib-imagex', 'wimlib-imagex.exe')) {
-        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        $cmd = Test-AppSidecarCommand $name
         if ($cmd) { return $cmd.Source }
     }
     if ($IsMacOS) {
@@ -1920,7 +1920,7 @@ function Sync-AppPxeBootFieldIsoDriverStore {
     $index = Write-AppPxeBootFieldIsoDriversIndex
     # aliases.json for the deploy client (model names / machine types / seed
     # wmiPatterns -> installed pack folders); no-ops unless the installed set changed.
-    if (Get-Command Write-AppPxeBootDriverAliasMap -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Write-AppPxeBootDriverAliasMap) {
         try { Write-AppPxeBootDriverAliasMap } catch {
             Write-SidecarLogVerbose "PXE boot: alias map write failed - $($_.Exception.Message)"
         }
@@ -2554,7 +2554,7 @@ function Write-AppPxeBootMenuFiles {
 
     # Task-sequence unattends ride the same regen cadence (save / start / import) so
     # Z:\TaskSequences always matches the panel. Guarded: lib loads after this one.
-    if (Get-Command Sync-AppPxeBootTaskSequenceStore -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Sync-AppPxeBootTaskSequenceStore) {
         try { Sync-AppPxeBootTaskSequenceStore | Out-Null } catch {
             Write-SidecarLogVerbose "PXE boot: task-sequence sync skipped - $($_.Exception.Message)"
         }
@@ -3275,7 +3275,7 @@ function Ensure-AppPxeBootP7zipTools {
         return @{ ok = $true; skipped = $true; reason = 'not_macos' }
     }
     foreach ($candidate in @('7zz', '7z', '7za')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
+        $found = Test-AppSidecarCommand $candidate
         if ($found) {
             return @{ ok = $true; skipped = $true; reason = 'system_7z'; path = [string]$found.Source }
         }
@@ -3669,10 +3669,10 @@ function Get-AppPxeBootDeployOverlayCredentialPair {
         $cred = $null
         if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
             try {
-                $root = if (Get-Command Get-AppImageLibraryRoot -ErrorAction SilentlyContinue) {
+                $root = if (Test-AppSidecarCommand Get-AppImageLibraryRoot) {
                     Get-AppImageLibraryRoot -NoCreate
                 } else { $null }
-                if (-not $root -and (Get-Command Get-AppImageLibraryRoot -ErrorAction SilentlyContinue)) {
+                if (-not $root -and (Test-AppSidecarCommand Get-AppImageLibraryRoot)) {
                     $root = Get-AppImageLibraryRoot
                 }
                 if ($root) {
@@ -3707,13 +3707,13 @@ function Get-AppPxeBootDeployOverlayCredentialPair {
     if ($mode -match '^vault:(.+)$') {
         $id = $Matches[1]
         try {
-            if (-not (Get-Command Test-AppInfraSshCredentialExists -ErrorAction SilentlyContinue)) { return $null }
+            if (-not (Test-AppSidecarCommand Test-AppInfraSshCredentialExists)) { return $null }
             if (-not (Test-AppInfraSshCredentialExists -Id $id)) {
                 Write-SidecarLog "PXE boot: vault credential '$id' not configured for deploy overlay"
                 return $null
             }
-            if (-not (Get-Command Get-AppInfraSshCredentialLoginNameById -ErrorAction SilentlyContinue)) { return $null }
-            if (-not (Get-Command Get-AppInfraSshPlainPassword -ErrorAction SilentlyContinue)) { return $null }
+            if (-not (Test-AppSidecarCommand Get-AppInfraSshCredentialLoginNameById)) { return $null }
+            if (-not (Test-AppSidecarCommand Get-AppInfraSshPlainPassword)) { return $null }
             $user = Get-AppInfraSshCredentialLoginNameById -Id $id
             $pass = Get-AppInfraSshPlainPassword -Id $id
             if (-not [string]::IsNullOrWhiteSpace($user) -and -not [string]::IsNullOrWhiteSpace($pass)) {
@@ -5339,7 +5339,7 @@ function Get-AppPxeBootMacOsTftpRootTraverseShellMac {
         Elevated shell prelude: grant traverse (search) on ~/Library -> .../pxe-boot so root dnsmasq
         can read the canonical TFTP tree under Application Support. No copy or /private/tmp mirror.
     #>
-    if (-not (Get-Command ConvertTo-AppUnixShellSingleQuotedString -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand ConvertTo-AppUnixShellSingleQuotedString)) {
         return ''
     }
     $dirs = @(Get-AppPxeBootMacOsTftpTraverseDirs)
@@ -6322,7 +6322,7 @@ function Get-AppPxeBootElevatedPort69ClearShellMac {
     $confPath = (Get-AppPxeBootLayoutPaths).dnsmasqConf
     $storeRoot = Get-AppPxeBootStoreRoot
     $pidPath = Get-AppPxeBootDnsmasqPidPath
-    if (-not (Get-Command ConvertTo-AppUnixShellSingleQuotedString -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand ConvertTo-AppUnixShellSingleQuotedString)) {
         return @()
     }
 
@@ -6352,7 +6352,7 @@ function Get-AppPxeBootElevatedDnsmasqStartShellMac {
         [Parameter(Mandatory)][string]$Dnsmasq,
         [Parameter(Mandatory)][string]$ConfPath
     )
-    if (-not (Get-Command ConvertTo-AppUnixShellSingleQuotedString -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand ConvertTo-AppUnixShellSingleQuotedString)) {
         throw 'PXE boot: shell quoting helper not available.'
     }
     $pidPath = Get-AppPxeBootDnsmasqPidPath
@@ -6413,7 +6413,7 @@ function Clear-AppPxeBootPort69Mac {
     if ($procIds.Count -gt 0) {
         Write-SidecarLog "PXE boot: killing dnsmasq on port 69 (pids: $($procIds -join ', '))"
         $killShell = (Get-AppPxeBootElevatedPort69ClearShellMac) -join '; '
-        if ($killShell -and (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue)) {
+        if ($killShell -and (Test-AppSidecarCommand Invoke-AppMacOsAdminShellCommand)) {
             try {
                 Invoke-AppMacOsAdminShellCommand -ShellCommand $killShell -AllowFailure | Out-Null
             } catch {
@@ -6577,7 +6577,7 @@ function Stop-AppPxeBootBrewDnsmasqIfRunning {
         $list = (& brew services list 2>$null | Out-String)
         if ($list -notmatch 'dnsmasq\s+started') { return }
         Write-SidecarLog 'PXE boot: stopping brew dnsmasq background service'
-        if (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Invoke-AppMacOsAdminShellCommand) {
             Invoke-AppMacOsAdminShellCommand -ShellCommand 'brew services stop dnsmasq 2>/dev/null || true' -AllowFailure | Out-Null
         }
     } catch { }
@@ -6621,7 +6621,7 @@ function Clear-AppPxeBootLogTail {
         $result.cleared = $true
     } catch {
         $direct = $_.Exception.Message
-        if (($IsMacOS -or $IsDarwin) -and (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue)) {
+        if (($IsMacOS -or $IsDarwin) -and (Test-AppSidecarCommand Invoke-AppMacOsAdminShellCommand)) {
             try {
                 $logQ = ConvertTo-AppUnixShellSingleQuotedString -Value $logPath
                 $null = Invoke-AppMacOsAdminShellCommand -ShellCommand ": > $logQ" -PromptMessage 'Clearing the PXE activity log needs your macOS administrator password (the log is owned by root).'
@@ -6734,7 +6734,7 @@ function Start-AppPxeBootTftpServerElevatedMac {
         [Parameter(Mandatory)][string]$ConfPath,
         [switch]$IncludePortClear
     )
-    if (-not (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Invoke-AppMacOsAdminShellCommand)) {
         throw 'PXE boot: administrator elevation helper not available.'
     }
     $pidPath = Get-AppPxeBootDnsmasqPidPath
@@ -8156,12 +8156,12 @@ function Get-AppPxeBootStatus {
         }
         tftpElevated        = [bool]$script:AppPxeBootState.TftpElevated
         dnsmasqConfPath     = (Get-AppPxeBootLayoutPaths).dnsmasqConf
-        macOsAdminCredentialCached = if ($platform -eq 'macos' -and (Get-Command Get-AppMacOsAdminCredentialCacheStatus -ErrorAction SilentlyContinue)) {
+        macOsAdminCredentialCached = if ($platform -eq 'macos' -and (Test-AppSidecarCommand Get-AppMacOsAdminCredentialCacheStatus)) {
             [bool](Get-AppMacOsAdminCredentialCacheStatus).cached
         } else {
             $false
         }
-        localMachineCredentialConfigured = if (Get-Command Test-AppLocalMachineCredentialConfigured -ErrorAction SilentlyContinue) {
+        localMachineCredentialConfigured = if (Test-AppSidecarCommand Test-AppLocalMachineCredentialConfigured) {
             [bool](Test-AppLocalMachineCredentialConfigured)
         } else {
             $false
@@ -8221,7 +8221,7 @@ function Test-AppPxeBootMacOsUserExists {
 function Test-AppPxeBootWindowsUserExists {
     param([Parameter(Mandatory)][string]$Name)
     if (-not ($IsWindows -or ($env:OS -eq 'Windows_NT'))) { return $false }
-    if (Get-Command Get-LocalUser -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-LocalUser) {
         try { return [bool](Get-LocalUser -Name $Name -ErrorAction SilentlyContinue) } catch { }
     }
     try {
@@ -8301,7 +8301,7 @@ function Ensure-AppPxeBootWindowsSmbThrowawayCredential {
 
     if (-not $userExists) {
         try {
-            if (Get-Command New-LocalUser -ErrorAction SilentlyContinue) {
+            if (Test-AppSidecarCommand New-LocalUser) {
                 $sec = ConvertTo-SecureString $pass -AsPlainText -Force
                 New-LocalUser -Name $user -Password $sec `
                     -FullName "$(Get-AppProductDisplayName) imaging throwaway SMB" `
@@ -8323,7 +8323,7 @@ function Ensure-AppPxeBootWindowsSmbThrowawayCredential {
 
     $passwordSynced = $false
     try {
-        if (Get-Command Set-LocalUser -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Set-LocalUser) {
             $sec = ConvertTo-SecureString $pass -AsPlainText -Force
             Set-LocalUser -Name $user -Password $sec -ErrorAction Stop | Out-Null
             $passwordSynced = $true
@@ -8342,7 +8342,7 @@ function Ensure-AppPxeBootWindowsSmbThrowawayCredential {
         Write-AppPxeBootSmbThrowawayCred -User $user -Pass $pass
     }
 
-    if (Get-Command Enable-LocalUser -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Enable-LocalUser) {
         try { Enable-LocalUser -Name $user -ErrorAction SilentlyContinue | Out-Null } catch { }
     }
 
@@ -8385,13 +8385,13 @@ function Ensure-AppPxeBootMacOsImageLibraryShare {
         WinPE authenticates with as WORKGROUP\<user>. One elevation.
     #>
     param([Parameter(Mandatory)][string]$Root)
-    if (-not (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Invoke-AppMacOsAdminShellCommand)) {
         throw 'macOS admin elevation helper unavailable.'
     }
     # TCC guard: a share rooted under ~/Downloads, ~/Desktop or ~/Documents is
     # created but smbd is denied read access, so it never serves. Refuse loudly here
     # (the panel surfaces matching guidance via Get-AppPxeBootImageLibraryShareStatus).
-    $tccBase = if (Get-Command Get-AppMacOsTccProtectedBase -ErrorAction SilentlyContinue) {
+    $tccBase = if (Test-AppSidecarCommand Get-AppMacOsTccProtectedBase) {
         Get-AppMacOsTccProtectedBase -Path $Root
     } else { $null }
     if ($tccBase) {
@@ -8554,7 +8554,7 @@ function Get-AppPxeBootImageLibraryShareStatusUncached {
     }
     try {
         if ($platform -eq 'windows') {
-            if (Get-Command Get-SmbShare -ErrorAction SilentlyContinue) {
+            if (Test-AppSidecarCommand Get-SmbShare) {
                 $share = Get-SmbShare -Name $name -ErrorAction SilentlyContinue
                 if ($share) { $status.active = $true; $status.path = [string]$share.Path }
             }
@@ -8570,7 +8570,7 @@ function Get-AppPxeBootImageLibraryShareStatusUncached {
             # ~/Downloads, ~/Desktop, ~/Documents are TCC-protected: smbd is denied
             # read access, so a share rooted there is created but never served. Surface
             # this loudly instead of letting WinPE fail with "network name not found".
-            $tccBase = if (Get-Command Get-AppMacOsTccProtectedBase -ErrorAction SilentlyContinue) {
+            $tccBase = if (Test-AppSidecarCommand Get-AppMacOsTccProtectedBase) {
                 Get-AppMacOsTccProtectedBase -Path $root
             } else { $null }
             # Auto-created on Start Imaging Services via /usr/sbin/sharing + a hidden
@@ -8658,7 +8658,7 @@ function Remove-AppPxeBootImageLibraryShare {
     $platform = Get-AppPxeBootImageLibraryPlatform
     try {
         if ($platform -eq 'windows') {
-            if ((Get-Command Get-SmbShare -ErrorAction SilentlyContinue) -and
+            if ((Test-AppSidecarCommand Get-SmbShare) -and
                 (Get-SmbShare -Name $name -ErrorAction SilentlyContinue)) {
                 Remove-SmbShare -Name $name -Force -ErrorAction Stop | Out-Null
                 Write-SidecarLog "PXE boot: removed SMB share $name"
@@ -8669,18 +8669,18 @@ function Remove-AppPxeBootImageLibraryShare {
             # session or resolvable from the local-admin vault. We never pop a dialog just
             # to unshare; if neither source exists the share is left for the next Start /
             # explicit toggle to reconcile.
-            $cached = if (Get-Command Get-AppMacOsAdminCredentialCacheStatus -ErrorAction SilentlyContinue) {
+            $cached = if (Test-AppSidecarCommand Get-AppMacOsAdminCredentialCacheStatus) {
                 [bool](Get-AppMacOsAdminCredentialCacheStatus).cached
             } else { $false }
             $vaultAvailable = $false
-            if (-not $cached -and (Get-Command Get-AppLocalMachineCredentialSecure -ErrorAction SilentlyContinue)) {
+            if (-not $cached -and (Test-AppSidecarCommand Get-AppLocalMachineCredentialSecure)) {
                 try { $vaultAvailable = [bool](Get-AppLocalMachineCredentialSecure) } catch { $vaultAvailable = $false }
             }
             if (-not $cached -and -not $vaultAvailable) {
                 Write-SidecarLog "PXE boot: leaving $name shared (no cached/vault admin password - won't prompt just to unshare)"
                 return
             }
-            if (Get-Command Invoke-AppMacOsAdminShellCommand -ErrorAction SilentlyContinue) {
+            if (Test-AppSidecarCommand Invoke-AppMacOsAdminShellCommand) {
                 $nameEsc = $name -replace "'", "'\''"
                 $rm = "/usr/sbin/sharing -r '$nameEsc' >/dev/null 2>&1 || true; echo SM_SMB_REMOVED"
                 $out = Invoke-AppMacOsAdminShellCommand -ShellCommand $rm -AllowFailure
@@ -8716,7 +8716,7 @@ function Start-AppPxeBootServices {
         # auto-create. Prefetch once up front so any prompt (vault-less session only)
         # happens at the start rather than mid-sequence at SMB-ensure time.
         $needsAdmin = $startTftp -or (($startHttp -or $startTftp) -and $cfg.smbShareEnabled -and -not $Minimal)
-        if ($IsMacOS -and $needsAdmin -and (Get-Command Start-AppMacOsAdminCredentialPrefetch -ErrorAction SilentlyContinue)) {
+        if ($IsMacOS -and $needsAdmin -and (Test-AppSidecarCommand Start-AppMacOsAdminCredentialPrefetch)) {
             $adminPrefetch = Start-AppMacOsAdminCredentialPrefetch -Purpose 'pxe'
         }
 
@@ -8760,7 +8760,7 @@ function Start-AppPxeBootServices {
     }
     if ($startTftp) {
         try {
-            if ($adminPrefetch -and (Get-Command Complete-AppMacOsAdminCredentialPrefetch -ErrorAction SilentlyContinue)) {
+            if ($adminPrefetch -and (Test-AppSidecarCommand Complete-AppMacOsAdminCredentialPrefetch)) {
                 Complete-AppMacOsAdminCredentialPrefetch -PrefetchState $adminPrefetch
                 $adminPrefetch = $null
             }
@@ -8843,7 +8843,7 @@ function Start-AppPxeBootServices {
     }
     $status
     } finally {
-        if ($adminPrefetch -and (Get-Command Stop-AppMacOsAdminCredentialPrefetch -ErrorAction SilentlyContinue)) {
+        if ($adminPrefetch -and (Test-AppSidecarCommand Stop-AppMacOsAdminCredentialPrefetch)) {
             Stop-AppMacOsAdminCredentialPrefetch -PrefetchState $adminPrefetch | Out-Null
         }
     }

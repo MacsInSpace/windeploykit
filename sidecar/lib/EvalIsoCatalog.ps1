@@ -99,7 +99,7 @@ function Get-AppEvalIsoProducts {
 }
 
 function Get-AppEvalIsoCachePath {
-    $root = if (Get-Command Get-AppAria2StoreRoot -ErrorAction SilentlyContinue) {
+    $root = if (Test-AppSidecarCommand Get-AppAria2StoreRoot) {
         Get-AppAria2StoreRoot
     } else {
         Get-AppPluginDir -Plugin 'aria2'
@@ -636,7 +636,7 @@ function Start-AppEvalIsoDownloadAll {
 function Sync-AppEvalIsoDownloadQueue {
     # Housekeeping tick: start the next queued ISO once no eval download is running.
     if ($script:AppEvalIsoPendingQueue.Count -eq 0) { return }
-    if (-not (Get-Command Test-AppAria2DirectDownloadActive -ErrorAction SilentlyContinue)) { return }
+    if (-not (Test-AppSidecarCommand Test-AppAria2DirectDownloadActive)) { return }
     $catalog = Get-AppEvalIsoCatalog
     foreach ($row in @($catalog.entries)) {
         if (Test-AppAria2DirectDownloadActive -Key ("eval|$([string]$row['id'])")) { return }

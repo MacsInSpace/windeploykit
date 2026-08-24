@@ -203,7 +203,7 @@ function Get-AppSharedSecretVaultStatus {
     if ($state.info) {
         # Live read - the init-time snapshot goes stale after the first write.
         $live = $state.info
-        if (Get-Command Get-LocalVaultInfo -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Get-LocalVaultInfo) {
             try { $live = Get-LocalVaultInfo -StoreRoot ([string]$state.info['storeRoot']) } catch { }
         }
         foreach ($k in @('storeRoot', 'exists', 'scheme', 'keyMatches', 'secretCount', 'createdAt')) {

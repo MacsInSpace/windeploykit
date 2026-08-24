@@ -9,7 +9,7 @@ function Handle-GetAria2PluginConfig {
         Set-AppAria2RuntimeDownloadDir -DownloadDir ([string]$downloadDir)
     }
     Set-AppImageLibraryRuntimeRootFromParams -Params $Params
-    if (Get-Command Get-AppAria2PluginConfigPayloadExtended -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppAria2PluginConfigPayloadExtended) {
         $data = Get-AppAria2PluginConfigPayloadExtended
     } else {
         $data = Get-AppAria2PluginConfigPayload
@@ -25,7 +25,7 @@ function Handle-SetAria2PluginConfig {
     }
     Set-AppImageLibraryRuntimeRootFromParams -Params $Params
     $routes = Get-AppSidecarParam -Params $Params -Name 'extensionRoutes'
-    if (Get-Command Set-AppAria2PluginConfigExtended -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Set-AppAria2PluginConfigExtended) {
         $data = Set-AppAria2PluginConfigExtended -ExtensionRoutes $routes
     } else {
         $data = Set-AppAria2PluginConfig
@@ -35,7 +35,7 @@ function Handle-SetAria2PluginConfig {
 
 function Handle-GetAria2TrackerCatalog {
     param([int]$Id, $Params)
-    if (-not (Get-Command Get-AppAria2TrackerCatalogPayload -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppAria2TrackerCatalogPayload)) {
         throw 'GetAria2TrackerCatalog: PXE integration not loaded.'
     }
     $data = Get-AppAria2TrackerCatalogPayload
@@ -92,6 +92,7 @@ function Handle-StartAria2Daemon {
     }
     Set-AppImageLibraryRuntimeRootFromParams -Params $Params
     $data = Start-AppAria2Daemon
+    $script:AppSidecarStartedAria2 = $true
     Write-SidecarResponse -Id $Id -Data $data
 }
 
@@ -123,13 +124,13 @@ function Handle-AddAria2Download {
     $fileNameHint = Get-AppSidecarParam -Params $Params -Name 'fileNameHint'
     $torrentId = Get-AppSidecarParam -Params $Params -Name 'torrentId'
 
-    if ($torrentId -and (Get-Command Add-AppAria2BundledTorrentDownload -ErrorAction SilentlyContinue)) {
+    if ($torrentId -and (Test-AppSidecarCommand Add-AppAria2BundledTorrentDownload)) {
         $data = Add-AppAria2BundledTorrentDownload -TorrentId ([string]$torrentId)
         Write-SidecarResponse -Id $Id -Data $data
         return
     }
 
-    if (Get-Command Add-AppAria2ManagedDownload -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Add-AppAria2ManagedDownload) {
         if ($kindNorm -eq 'torrent') {
             $b64 = Get-AppSidecarParam -Params $Params -Name 'torrentBase64'
             $data = Add-AppAria2ManagedDownload `

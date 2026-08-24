@@ -92,7 +92,7 @@ $script:SidecarDispatchPumpDepth = 0
 
 function Invoke-SidecarDispatchPump {
     if ($script:SidecarDispatchPumpDepth -gt 0) { return }
-    $dispatch = Get-Command Invoke-SidecarDispatchOnce -ErrorAction SilentlyContinue
+    $dispatch = Test-AppSidecarCommand Invoke-SidecarDispatchOnce
     if (-not $dispatch) { return }
     $script:SidecarDispatchPumpDepth++
     try {
@@ -193,6 +193,40 @@ function Protect-AppSidecarLogText {
     return $s
 }
 
+$script:AppSidecarLogWriter = $null
+$script:AppSidecarLogFilePath = $null
+$script:AppSidecarLogFileTried = $false
+
+function Get-AppSidecarLogFilePath {
+    <#
+    .SYNOPSIS
+        Where the sidecar log is kept on disk, or $null if it cannot be opened.
+    .NOTES
+        Until 2026-08-24 the log went to stderr only, so "it took 16 seconds" could
+        not be answered after the fact - the timings had already scrolled past in a
+        terminal nobody was watching. One rolling file, rotated at 4 MB, one backup.
+    #>
+    if ($script:AppSidecarLogFileTried) { return $script:AppSidecarLogFilePath }
+    $script:AppSidecarLogFileTried = $true
+    try {
+        if (-not (Test-AppSidecarCommand Get-AppDataRoot)) { return $null }
+        $dir = Join-Path (Get-AppDataRoot) 'logs'
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $path = Join-Path $dir 'sidecar.log'
+        $existing = Get-Item -LiteralPath $path -ErrorAction SilentlyContinue
+        if ($existing -and $existing.Length -gt 4MB) {
+            Move-Item -LiteralPath $path -Destination "$path.1" -Force -ErrorAction SilentlyContinue
+        }
+        $script:AppSidecarLogWriter = [System.IO.StreamWriter]::new($path, $true)
+        $script:AppSidecarLogWriter.AutoFlush = $true
+        $script:AppSidecarLogFilePath = $path
+    } catch {
+        $script:AppSidecarLogWriter = $null
+        $script:AppSidecarLogFilePath = $null
+    }
+    return $script:AppSidecarLogFilePath
+}
+
 function Write-SidecarLog {
     param(
         [string]$Message,
@@ -203,6 +237,11 @@ function Write-SidecarLog {
     [Console]::Error.WriteLine("[$ts] $safe")
     # Avoid Flush on every line - a full stderr pipe can block bootstrap on Windows.
     if ($Flush) { [Console]::Error.Flush() }
+    # Same line to disk. Redacted identically - Protect-AppSidecarLogText already ran.
+    if ($null -eq $script:AppSidecarLogWriter) { [void](Get-AppSidecarLogFilePath) }
+    if ($script:AppSidecarLogWriter) {
+        try { $script:AppSidecarLogWriter.WriteLine("[$ts] $safe") } catch { $script:AppSidecarLogWriter = $null }
+    }
 }
 
 function Get-AppSidecarHostOsLabel {
@@ -329,6 +368,39 @@ function Write-SidecarLogVerbose {
     Write-SidecarLog -Message $Message -Flush:$Flush
 }
 
+$script:AppSidecarWarmupSteps = [System.Collections.Generic.Queue[hashtable]]::new()
+
+function Add-AppSidecarWarmupStep {
+    <#
+    .SYNOPSIS
+        Queue a one-off that would otherwise be billed to whichever panel asks first.
+    .NOTES
+        The dispatch loop is single-threaded, so the first call into a subsystem pays
+        for building its caches - the layout probe (2.2s) and the driver catalog (2.1s)
+        landed on the first click and made a panel look broken. These run while the
+        loop is idle instead, one step per pass and only with an empty queue, so the
+        work is the same work - just already done by the time anyone asks.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][scriptblock]$Action
+    )
+    $script:AppSidecarWarmupSteps.Enqueue(@{ name = $Name; action = $Action })
+}
+
+function Invoke-AppSidecarWarmupStep {
+    # $true when a step ran (so the caller skips its idle sleep and comes straight back).
+    if ($script:AppSidecarWarmupSteps.Count -eq 0) { return $false }
+    $step = $script:AppSidecarWarmupSteps.Dequeue()
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    try { & $step.action | Out-Null } catch {
+        Write-SidecarLogVerbose "warm-up: $($step.name) failed - $($_.Exception.Message)"
+    }
+    $sw.Stop()
+    Write-SidecarLog "warm-up: $($step.name) +$($sw.ElapsedMilliseconds)ms ($($script:AppSidecarWarmupSteps.Count) left)"
+    return $true
+}
+
 function Test-AppSidecarIpcPollCommand {
     param([Parameter(Mandatory)][string]$Cmd)
     # UI live polls - skip IPC begin/ok lines even when Debug is ON (errors and SLOW still log).
@@ -355,11 +427,11 @@ function Write-SidecarIpcComplete {
         [ValidateSet('ok', 'error')]
         [string]$Outcome = 'ok'
     )
-    # Two thresholds: SLOW at 10s, and a quieter "took a while" at 3s. Both are logged
-    # even with Debug OFF - a panel that made someone wait is exactly what you want in
-    # the log, and until 2026-08-23 it was silent unless verbose logging happened to be
-    # on (Craig waited 17s for the drivers tab and the log said nothing).
-    $slow = if ($ElapsedMs -ge 10000) { ' SLOW' } elseif ($ElapsedMs -ge 3000) { ' slow' } else { '' }
+    # Thresholds set to what a person actually notices, not what a machine considers
+    # slow: SLOW at 3s, "took a while" at 1s (Craig, 2026-08-24: "More than 1 or 2
+    # seconds and the user thinks there is a problem"). Both are logged even with Debug
+    # OFF - a panel that made someone wait is exactly what you want in the log.
+    $slow = if ($ElapsedMs -ge 3000) { ' SLOW' } elseif ($ElapsedMs -ge 1000) { ' slow' } else { '' }
     if ($Outcome -eq 'ok' -and (Test-AppSidecarIpcPollCommand -Cmd $Cmd) -and -not $slow) { return }
     if (-not (Test-AppSidecarVerboseLogging) -and $Outcome -ne 'error' -and -not $slow) { return }
     Write-SidecarLog "IPC: $Cmd ($Id) $Outcome +${ElapsedMs}ms$slow" -Flush

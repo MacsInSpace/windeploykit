@@ -156,6 +156,8 @@ function Handle-StartPxeBootServices {
         -HttpOnly:([bool]$httpOnly) `
         -TftpOnly:([bool]$tftpOnly) `
         -Minimal:([bool]$minimal)
+    # This process owns them now, so it is allowed to stop them on the way out.
+    $script:AppSidecarStartedPxeServices = $true
     Write-SidecarResponse -Id $Id -Data $data
 }
 

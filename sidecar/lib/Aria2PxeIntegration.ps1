@@ -119,7 +119,7 @@ function Test-AppAria2PxeIntegrationEnabled {
 function Get-AppAria2PxeIncomingRoot {
     # Staging lives under the user-chosen ISO & driver root (off the system
     # drive), not the PXE store: <image library>/.incoming/<guid>/.
-    if (-not (Get-Command Get-AppImageLibraryPaths -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppImageLibraryPaths)) {
         return $null
     }
     $incoming = (Get-AppImageLibraryPaths).incomingDir
@@ -135,7 +135,7 @@ function Resolve-AppAria2DriverModelEntry {
         [string]$Vendor,
         [string]$Folder
     )
-    if (-not (Get-Command Read-AppPxeBootFieldIsoDriversSeed -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Read-AppPxeBootFieldIsoDriversSeed)) {
         return $null
     }
     $seed = Read-AppPxeBootFieldIsoDriversSeed
@@ -164,7 +164,7 @@ function Resolve-AppAria2DriverModelEntry {
                         if ($candidate -match [regex]::Escape([string]$pat)) { $matched = $true; break }
                     }
                     if ($matched) { break }
-                    if (Get-Command Get-AppAcerSccmPatternVariants -ErrorAction SilentlyContinue) {
+                    if (Test-AppSidecarCommand Get-AppAcerSccmPatternVariants) {
                         foreach ($variant in @(Get-AppAcerSccmPatternVariants -Pattern $candidate)) {
                             foreach ($pat in @(Get-AppPxeBootFieldIsoDriverSeedArrayProp -Model $model -Name 'wmiPatterns')) {
                                 if ([string]$pat -eq $variant) { $matched = $true; break }
@@ -459,7 +459,7 @@ function Invoke-AppAria2PromoteJobFiles {
             }
             $destFile = Join-Path $destDir $srcFile.Name
             Move-Item -LiteralPath $srcFile.FullName -Destination $destFile -Force
-            if (Get-Command Sync-AppPxeBootFieldIsoDriverStore -ErrorAction SilentlyContinue) {
+            if (Test-AppSidecarCommand Sync-AppPxeBootFieldIsoDriverStore) {
                 Sync-AppPxeBootFieldIsoDriverStore | Out-Null
             }
             $result.files += @{ path = $destFile; kind = 'driver' }
@@ -468,7 +468,7 @@ function Invoke-AppAria2PromoteJobFiles {
         'iso' {
             $src = @($files | Where-Object { $_.Extension -match '^\.iso$' } | Sort-Object Length -Descending | Select-Object -First 1)
             if ($src.Count -eq 0) { throw 'aria2: no .iso file in staging folder.' }
-            if (-not (Get-Command Import-AppPxeBootIso -ErrorAction SilentlyContinue)) {
+            if (-not (Test-AppSidecarCommand Import-AppPxeBootIso)) {
                 throw 'aria2: Netboot import unavailable.'
             }
             $imported = Import-AppPxeBootIso -SourcePath $src[0].FullName -ReplaceExisting
@@ -481,7 +481,7 @@ function Invoke-AppAria2PromoteJobFiles {
             # Downloaded WIMs are imageable/SOE images -> <root>/WIMs/ (served at
             # /WIMs/, read by the deploy client). Boot WIMs are imported separately via
             # the Netboot panel and stay in the PXE store.
-            if (-not (Get-Command Import-AppPxeBootImageableWim -ErrorAction SilentlyContinue)) {
+            if (-not (Test-AppSidecarCommand Import-AppPxeBootImageableWim)) {
                 throw 'aria2: imageable WIM import unavailable.'
             }
             $imported = Import-AppPxeBootImageableWim -SourcePath $src[0].FullName -ReplaceExisting
@@ -500,7 +500,7 @@ function Invoke-AppAria2PromoteJobFiles {
 }
 
 function Sync-AppAria2RecoverIncomingDriverStaging {
-    if (-not (Get-Command Get-AppAria2PxeIncomingRoot -ErrorAction SilentlyContinue)) { return 0 }
+    if (-not (Test-AppSidecarCommand Get-AppAria2PxeIncomingRoot)) { return 0 }
     $incoming = Get-AppAria2PxeIncomingRoot
     if (-not $incoming -or -not (Test-Path -LiteralPath $incoming)) { return 0 }
 
@@ -533,7 +533,7 @@ function Sync-AppAria2RecoverIncomingDriverStaging {
         if (((Get-Date) - $archive[0].LastWriteTime).TotalMinutes -lt 2) { continue }
 
         $target = $null
-        if (Get-Command Get-AppAcerSccmModelCodesFromFileName -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Get-AppAcerSccmModelCodesFromFileName) {
             foreach ($code in @(Get-AppAcerSccmModelCodesFromFileName -FileName $archive[0].Name)) {
                 $target = Resolve-AppAria2DriverModelEntry -Alias $code -Vendor 'Acer'
                 if ($target) { break }
@@ -559,7 +559,7 @@ function Sync-AppAria2RecoverIncomingDriverStaging {
 }
 
 function Sync-AppAria2PromoteJobs {
-    if (Get-Command Sync-AppAria2RecoverIncomingDriverStaging -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Sync-AppAria2RecoverIncomingDriverStaging) {
         Sync-AppAria2RecoverIncomingDriverStaging | Out-Null
     }
     if (-not (Test-AppAria2DaemonRunning)) { return @{ promoted = 0; failed = 0 } }
@@ -1638,7 +1638,7 @@ function Get-AppAria2AcerCatalogDriverRows {
         # non-TravelMate remainder rows their friendly names and hashes.
         $XmlModels = $null
     )
-    if (-not (Get-Command Get-AppAcerSccmTravelMateCatalogEntries -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppAcerSccmTravelMateCatalogEntries)) {
         return @()
     }
     $rows = [System.Collections.Generic.List[hashtable]]::new()
@@ -1833,7 +1833,7 @@ function Get-AppAria2LenovoCatalogDriverRows {
         [string[]]$SeedPatterns = @(),
         [Parameter(Mandatory)]$IndexReady
     )
-    if (-not (Get-Command Get-AppLenovoSccmBestSccmEntryForModel -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppLenovoSccmBestSccmEntryForModel)) {
         return @()
     }
     $rows = [System.Collections.Generic.List[hashtable]]::new()
@@ -1897,7 +1897,7 @@ function Get-AppAria2DellCatalogDriverRows {
         [string[]]$SeedPatterns = @(),
         [Parameter(Mandatory)]$IndexReady
     )
-    if (-not (Get-Command Get-AppDellSccmBestPackForModel -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppDellSccmBestPackForModel)) {
         return @()
     }
     $rows = [System.Collections.Generic.List[hashtable]]::new()
@@ -2013,7 +2013,11 @@ function Get-AppAria2HpCatalogDriverRows {
 # take 10-15 seconds to appear (field, 2026-08-22). Memoised briefly instead, and
 # invalidated the moment anything that feeds it changes.
 $script:AppAria2TrackerPayloadCache = $null
-$script:AppAria2TrackerPayloadTtlSeconds = 120
+# 15 minutes, not 2: every input that changes this payload already clears the cache
+# explicitly (a promoted driver download, a vendor catalog refresh), so the TTL is only
+# a backstop. At 120s it expired mid-session and billed the next panel open 2.1s to
+# rebuild 1535 rows nobody had changed (measured 2026-08-24).
+$script:AppAria2TrackerPayloadTtlSeconds = 900
 
 function Clear-AppAria2TrackerCatalogPayloadCache {
     $script:AppAria2TrackerPayloadCache = $null
@@ -2029,7 +2033,7 @@ function Get-AppAria2TrackerCatalogPayload {
     $tracker = Read-AppAria2TrackerManifest
     $torrentRows = @(Get-AppAria2TorrentCatalogRows -Tracker $tracker)
     $oemIsoRows = @(Get-AppAria2OemIsoCatalogRows -Tracker $tracker)
-    if (Get-Command Add-AppAria2TorrentPeerCountsToRows -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Add-AppAria2TorrentPeerCountsToRows) {
         $torrentRows = @(Add-AppAria2TorrentPeerCountsToRows -Rows $torrentRows)
         $oemIsoRows = @(Add-AppAria2TorrentPeerCountsToRows -Rows $oemIsoRows)
     }
@@ -2042,7 +2046,7 @@ function Get-AppAria2TrackerCatalogPayload {
         trackerUrl  = [string](Get-AppAria2JsonProp -Item $tracker -Name 'manifestUrl')
         generatedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     }
-    if (-not (Get-Command Read-AppPxeBootFieldIsoDriversSeed -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Read-AppPxeBootFieldIsoDriversSeed)) {
         $catalogMeta['drivers'] = @()
         $catalogMeta['note'] = 'FieldIso driver seed unavailable.'
         return $catalogMeta
@@ -2064,7 +2068,7 @@ function Get-AppAria2TrackerCatalogPayload {
     # The old source - the FieldIso index - only ever listed seed models, so catalog-row
     # downloads could never show as downloaded (Craig, 2026-08-18).
     $indexReady = @{}
-    if (Get-Command Get-AppPxeBootFieldIsoDriversOsRoot -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppPxeBootFieldIsoDriversOsRoot) {
         try {
             $driversRoot = Get-AppPxeBootFieldIsoDriversOsRoot
             if ($driversRoot -and (Test-Path -LiteralPath $driversRoot)) {
@@ -2089,35 +2093,35 @@ function Get-AppAria2TrackerCatalogPayload {
     $acerSeedFolders = [System.Collections.Generic.List[string]]::new()
     $acerSeedPatterns = [System.Collections.Generic.List[string]]::new()
     $acerCatalog = $null
-    if (Get-Command Get-AppAcerSccmDriverUrlCatalog -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppAcerSccmDriverUrlCatalog) {
         $acerCatalog = Get-AppAcerSccmDriverUrlCatalog -CacheOnly
         if (-not $acerCatalog -and (Get-AppAcerSccmCatalogLastError)) {
             Write-SidecarLogVerbose "aria2: Acer SCCM catalog - $(Get-AppAcerSccmCatalogLastError)"
         }
     }
     $lenovoCatalog = $null
-    if (Get-Command Get-AppLenovoSccmDriverCatalog -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppLenovoSccmDriverCatalog) {
         $lenovoCatalog = Get-AppLenovoSccmDriverCatalog -CacheOnly
         if (-not $lenovoCatalog -and (Get-AppLenovoSccmCatalogLastError)) {
             Write-SidecarLogVerbose "aria2: Lenovo SCCM catalog - $(Get-AppLenovoSccmCatalogLastError)"
         }
     }
     $dellCatalog = $null
-    if (Get-Command Get-AppDellSccmDriverCatalog -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppDellSccmDriverCatalog) {
         $dellCatalog = Get-AppDellSccmDriverCatalog -CacheOnly
         if (-not $dellCatalog -and (Get-AppDellSccmCatalogLastError)) {
             Write-SidecarLogVerbose "aria2: Dell SCCM catalog - $(Get-AppDellSccmCatalogLastError)"
         }
     }
     $hpCatalog = $null
-    if (Get-Command Get-AppHpSccmDriverCatalog -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppHpSccmDriverCatalog) {
         $hpCatalog = Get-AppHpSccmDriverCatalog -CacheOnly
         if (-not $hpCatalog -and (Get-AppHpSccmCatalogLastError)) {
             Write-SidecarLogVerbose "aria2: HP SCCM catalog - $(Get-AppHpSccmCatalogLastError)"
         }
     }
     $microsoftCatalog = $null
-    if (Get-Command Get-AppMicrosoftSccmDriverCatalog -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppMicrosoftSccmDriverCatalog) {
         $microsoftCatalog = Get-AppMicrosoftSccmDriverCatalog -CacheOnly
         if (-not $microsoftCatalog -and (Get-AppMicrosoftSccmCatalogLastError)) {
             Write-SidecarLogVerbose "aria2: Microsoft SCCM catalog - $(Get-AppMicrosoftSccmCatalogLastError)"
@@ -2292,26 +2296,26 @@ function Get-AppAria2TrackerCatalogPayload {
     }
 
     $lenovoFamilySummary = $null
-    if ($lenovoCatalog -and (Get-Command Get-AppLenovoSccmCatalogFamilySummary -ErrorAction SilentlyContinue)) {
+    if ($lenovoCatalog -and (Test-AppSidecarCommand Get-AppLenovoSccmCatalogFamilySummary)) {
         $lenovoFamilySummary = Get-AppLenovoSccmCatalogFamilySummary -Catalog $lenovoCatalog
     }
     $acerCatalogSummary = $null
-    if ($acerCatalog -and (Get-Command Get-AppAcerSccmCatalogSummary -ErrorAction SilentlyContinue)) {
+    if ($acerCatalog -and (Test-AppSidecarCommand Get-AppAcerSccmCatalogSummary)) {
         $acerUrls = @(Get-AppAria2JsonProp -Item $acerCatalog -Name 'urls')
         if ($acerUrls.Count -gt 0) {
             $acerCatalogSummary = Get-AppAcerSccmCatalogSummary -Urls $acerUrls
         }
     }
     $dellCatalogSummary = $null
-    if ($dellCatalog -and (Get-Command Get-AppDellSccmCatalogFamilySummary -ErrorAction SilentlyContinue)) {
+    if ($dellCatalog -and (Test-AppSidecarCommand Get-AppDellSccmCatalogFamilySummary)) {
         $dellCatalogSummary = Get-AppDellSccmCatalogFamilySummary -Catalog $dellCatalog
     }
     $hpCatalogSummary = $null
-    if ($hpCatalog -and (Get-Command Get-AppHpSccmCatalogFamilySummary -ErrorAction SilentlyContinue)) {
+    if ($hpCatalog -and (Test-AppSidecarCommand Get-AppHpSccmCatalogFamilySummary)) {
         $hpCatalogSummary = Get-AppHpSccmCatalogFamilySummary -Catalog $hpCatalog
     }
     $microsoftCatalogSummary = $null
-    if ($microsoftCatalog -and (Get-Command Get-AppMicrosoftSccmCatalogFamilySummary -ErrorAction SilentlyContinue)) {
+    if ($microsoftCatalog -and (Test-AppSidecarCommand Get-AppMicrosoftSccmCatalogFamilySummary)) {
         $microsoftCatalogSummary = Get-AppMicrosoftSccmCatalogFamilySummary -Catalog $microsoftCatalog
     }
 
@@ -2372,7 +2376,7 @@ function Get-AppAria2PluginConfigPayloadExtended {
     $base = Get-AppAria2PluginConfigPayload
     $cfg = Read-AppAria2Config
     $routes = Get-AppAria2NormalizedExtensionRoutes -Cfg $cfg
-    $pxeAvailable = $null -ne (Get-Command Get-AppPxeBootLayoutPaths -ErrorAction SilentlyContinue)
+    $pxeAvailable = $null -ne (Test-AppSidecarCommand Get-AppPxeBootLayoutPaths)
     $base.pxeIntegrationEnabled = Test-AppAria2PxeIntegrationEnabled -Cfg $cfg
     $base.pxeStoreAvailable = [bool]$pxeAvailable
     $base.extensionRoutes = @($routes | ForEach-Object {

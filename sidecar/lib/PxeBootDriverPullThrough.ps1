@@ -29,7 +29,7 @@ function Get-AppPxeBootCatalogDriverRowsCached {
     if ($script:AppPxeBootDriverRowsCache -and ($now - $script:AppPxeBootDriverRowsCache.at).TotalMinutes -lt $MaxAgeMinutes) {
         return @($script:AppPxeBootDriverRowsCache.rows)
     }
-    if (-not (Get-Command Get-AppAria2TrackerCatalogPayload -ErrorAction SilentlyContinue)) { return @() }
+    if (-not (Test-AppSidecarCommand Get-AppAria2TrackerCatalogPayload)) { return @() }
     try {
         $payload = Get-AppAria2TrackerCatalogPayload
         $rows = @(Get-AppAria2JsonProp -Item $payload -Name 'drivers')
@@ -157,7 +157,7 @@ function Sync-AppPxeBootDriverPullThrough {
     $now = (Get-Date).ToUniversalTime()
     if (($now - $script:AppPxeBootPullThroughLastSyncUtc).TotalSeconds -lt 30) { return }
     $script:AppPxeBootPullThroughLastSyncUtc = $now
-    if (-not (Get-Command Get-AppPxeBootImagingClients -ErrorAction SilentlyContinue)) { return }
+    if (-not (Test-AppSidecarCommand Get-AppPxeBootImagingClients)) { return }
     $clients = @(Get-AppPxeBootImagingClients | Where-Object {
             [int]$_.ageSeconds -le 600 -and $_.make -and $_.model
         })
@@ -350,7 +350,7 @@ function Write-AppPxeBootDriverAliasMap {
         [void]$entries.Add(@{ vendor = $vendor; folder = $folder; aliases = @($aliases) })
     }
     # Seed wmiPatterns (wildcards) for the pre-seeded vendor tree.
-    if (Get-Command Read-AppPxeBootFieldIsoDriversSeed -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Read-AppPxeBootFieldIsoDriversSeed) {
         try {
             $seed = Read-AppPxeBootFieldIsoDriversSeed
             if ($seed -and $seed.vendors) {

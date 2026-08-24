@@ -210,7 +210,7 @@ function Sync-AppVendorSccmCatalogRefreshJob {
         Write-SidecarEvent -EventName 'vendor-catalog-refresh' -Data @{ error = 'refresh process ended without a result (killed or crashed)'; automatic = [bool]$job.automatic }
         return
     }
-    if (Get-Command Clear-AppAria2TrackerCatalogPayloadCache -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Clear-AppAria2TrackerCatalogPayloadCache) {
         Clear-AppAria2TrackerCatalogPayloadCache
     }
     Write-SidecarLog "vendor catalogs: background refresh finished$(if ($job.automatic) { ' (automatic)' })"
@@ -356,7 +356,7 @@ function Get-AppVendorSccmCatalogStaleVendors {
     }
     foreach ($vendor in $getters.Keys) {
         $getter = $getters[$vendor]
-        if (-not (Get-Command $getter -ErrorAction SilentlyContinue)) { continue }
+        if (-not (Test-AppSidecarCommand $getter)) { continue }
         try {
             $cat = & $getter -CacheOnly
             if (-not $cat) { [void]$stale.Add($vendor); continue }

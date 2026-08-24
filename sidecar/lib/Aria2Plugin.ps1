@@ -78,7 +78,7 @@ function Get-AppAria2BtTrackerList {
             }
         }
     }
-    if ($trackerAcc.Count -eq 0 -and (Get-Command Read-AppAria2TrackerManifest -ErrorAction SilentlyContinue)) {
+    if ($trackerAcc.Count -eq 0 -and (Test-AppSidecarCommand Read-AppAria2TrackerManifest)) {
         $manifest = Read-AppAria2TrackerManifest
         $urls = Get-AppAria2JsonProp -Item $manifest -Name 'announceUrls'
         if ($urls) {
@@ -419,7 +419,7 @@ function Get-AppAria2BinaryPath {
 
 function Set-AppAria2BinaryExecutable {
     param([Parameter(Mandatory)][string]$Path)
-    if (Get-Command Test-AppIsMacOSPlatform -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Test-AppIsMacOSPlatform) {
         if (-not (Test-AppIsMacOSPlatform)) { return }
     } elseif (-not ($IsMacOS -or ((Get-Variable -Name IsDarwin -Scope Global -ErrorAction SilentlyContinue) -and $IsDarwin))) {
         return
@@ -902,7 +902,7 @@ function Get-AppAria2DownloadsPayload {
         return $empty
     }
     try {
-        if (Get-Command Sync-AppAria2PromoteJobs -ErrorAction SilentlyContinue) {
+        if (Test-AppSidecarCommand Sync-AppAria2PromoteJobs) {
             Sync-AppAria2PromoteJobs | Out-Null
         }
         $globalResp = Invoke-AppAria2Rpc -Method 'aria2.getGlobalStat' -Params @()
@@ -915,7 +915,7 @@ function Get-AppAria2DownloadsPayload {
             $row = ConvertTo-AppAria2DownloadRow -Status $status
             if ($row) {
                 $gid = Get-AppAria2JsonProp -Item $status -Name 'gid'
-                if ($gid -and (Get-Command Merge-AppAria2JobIntoDownloadRow -ErrorAction SilentlyContinue)) {
+                if ($gid -and (Test-AppSidecarCommand Merge-AppAria2JobIntoDownloadRow)) {
                     $row = Merge-AppAria2JobIntoDownloadRow -Row $row -Gid ([string]$gid)
                 }
                 $activeRows += $row
@@ -929,7 +929,7 @@ function Get-AppAria2DownloadsPayload {
             $stResp = Invoke-AppAria2Rpc -Method 'aria2.tellStatus' -Params @($gidStr)
             $row = ConvertTo-AppAria2DownloadRow -Status (Get-AppAria2RpcResult -Response $stResp -Method 'aria2.tellStatus')
             if ($row) {
-                if (Get-Command Merge-AppAria2JobIntoDownloadRow -ErrorAction SilentlyContinue) {
+                if (Test-AppSidecarCommand Merge-AppAria2JobIntoDownloadRow) {
                     $row = Merge-AppAria2JobIntoDownloadRow -Row $row -Gid $gidStr
                 }
                 $waitingRows += $row
@@ -943,7 +943,7 @@ function Get-AppAria2DownloadsPayload {
             $stResp = Invoke-AppAria2Rpc -Method 'aria2.tellStatus' -Params @($gidStr)
             $row = ConvertTo-AppAria2DownloadRow -Status (Get-AppAria2RpcResult -Response $stResp -Method 'aria2.tellStatus')
             if ($row) {
-                if (Get-Command Merge-AppAria2JobIntoDownloadRow -ErrorAction SilentlyContinue) {
+                if (Test-AppSidecarCommand Merge-AppAria2JobIntoDownloadRow) {
                     $row = Merge-AppAria2JobIntoDownloadRow -Row $row -Gid $gidStr
                 }
                 $stoppedRows += $row
@@ -1038,7 +1038,7 @@ function Open-AppAria2DownloadFolder {
     # the macOS TCC divert). The raw aria2 downloadDir only holds unrouted 'other'
     # downloads and previously sent techs to ~/Downloads (Craig, 2026-08-18).
     $dir = $null
-    if (Get-Command Get-AppImageLibraryRoot -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Get-AppImageLibraryRoot) {
         try { $dir = Get-AppImageLibraryRoot } catch { $dir = $null }
     }
     if ([string]::IsNullOrWhiteSpace([string]$dir)) { $dir = Get-AppAria2EffectiveDownloadDir }

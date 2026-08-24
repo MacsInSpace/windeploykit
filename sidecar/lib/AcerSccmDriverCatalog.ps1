@@ -33,7 +33,7 @@ function Get-AppAcerSccmCatalogLastError {
 function Get-AppAcerSccmCatalogCachePath {
     # Same folder whether or not Aria2Plugin.ps1 is loaded: <data root>/plugins/aria2/.
     # (Until 2026-08-22 the standalone branch used a second, slug-named folder.)
-    if (-not (Get-Command Get-AppAria2StoreRoot -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppAria2StoreRoot)) {
         return Join-Path (Get-AppPluginDir -Plugin 'aria2') 'acer-sccm-catalog.json'
     }
     Join-Path (Get-AppAria2StoreRoot) 'acer-sccm-catalog.json'
@@ -111,7 +111,7 @@ function Invoke-AppAcerSccmHttpGet {
         $params['SkipCertificateCheck'] = $true
     }
     $params['Headers'] = @{ 'User-Agent' = (Get-AppUserAgent) }
-    if (Get-Command Invoke-AppHttpWebRequest -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Invoke-AppHttpWebRequest) {
         $resp = Invoke-AppHttpWebRequest -RequestParams $params
     } else {
         $resp = Invoke-WebRequest @params
@@ -476,7 +476,7 @@ function Get-AppAcerSccmCatalogSummary {
 }
 
 function Read-AppAcerSccmBundledCatalog {
-    if (-not (Get-Command Resolve-AppAria2PackagingFile -ErrorAction SilentlyContinue)) { return $null }
+    if (-not (Test-AppSidecarCommand Resolve-AppAria2PackagingFile)) { return $null }
     $path = Resolve-AppAria2PackagingFile -FileName 'acer-sccm-catalog.json'
     if (-not $path) { return $null }
     try {

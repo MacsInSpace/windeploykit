@@ -23,7 +23,7 @@ function Get-AppDellSccmCatalogLastError {
 function Get-AppDellSccmCatalogCachePath {
     # Same folder whether or not Aria2Plugin.ps1 is loaded: <data root>/plugins/aria2/.
     # (Until 2026-08-22 the standalone branch used a second, slug-named folder.)
-    if (-not (Get-Command Get-AppAria2StoreRoot -ErrorAction SilentlyContinue)) {
+    if (-not (Test-AppSidecarCommand Get-AppAria2StoreRoot)) {
         return Join-Path (Get-AppPluginDir -Plugin 'aria2') 'dell-sccm-catalog.json'
     }
     Join-Path (Get-AppAria2StoreRoot) 'dell-sccm-catalog.json'
@@ -117,7 +117,7 @@ function Get-AppDellSccmCabExtractTool {
     }
 
     foreach ($name in @('7z', '7za')) {
-        $sevenZip = Get-Command $name -ErrorAction SilentlyContinue
+        $sevenZip = Test-AppSidecarCommand $name
         if ($sevenZip) {
             return @{ kind = '7z'; command = $sevenZip.Source; name = $name }
         }
@@ -473,7 +473,7 @@ function Resolve-AppDellSccmDriverUrlForWmiPatterns {
 }
 
 function Read-AppDellSccmBundledCatalog {
-    if (-not (Get-Command Resolve-AppAria2PackagingFile -ErrorAction SilentlyContinue)) { return $null }
+    if (-not (Test-AppSidecarCommand Resolve-AppAria2PackagingFile)) { return $null }
     $path = Resolve-AppAria2PackagingFile -FileName 'dell-sccm-catalog.json'
     if (-not $path) { return $null }
     try {

@@ -27,6 +27,11 @@ $ProjectRoot = $script:AppSidecarProjectRoot
 $env:PSModulePath = "$($script:SidecarRoot)/modules" + [IO.Path]::PathSeparator + $env:PSModulePath
 
 # --- Shared state -----------------------------------------------------------
+# Set when THIS process starts a shared service, so shutdown only stops its own.
+# StrictMode: these must exist before the finally block reads them.
+$script:AppSidecarStartedPxeServices = $false
+$script:AppSidecarStartedAria2 = $false
+
 $script:AppState = @{
     IsReady       = $false
     Lifecycle     = 'booting'
@@ -95,7 +100,7 @@ function Handle-ApplyRuntimeConfig {
         $cfg[$name] = [bool](Get-AppSidecarParam -Params $Params -Name $name)
     }
     $script:AppState['RuntimeConfig'] = $cfg
-    if (Get-Command Set-AppHttpTlsPolicy -ErrorAction SilentlyContinue) {
+    if (Test-AppSidecarCommand Set-AppHttpTlsPolicy) {
         Set-AppHttpTlsPolicy -SkipCertificateCheck ([bool]$cfg['skipHttpCertificateCheck'])
     }
     Write-SidecarResponse -Id $Id -Data @{ applied = $true }
@@ -103,8 +108,8 @@ function Handle-ApplyRuntimeConfig {
 
 function Handle-PrepareAppExit {
     param([int]$Id, $Params)
-    try { if (Get-Command Stop-AppPxeBootServices -ErrorAction SilentlyContinue) { Stop-AppPxeBootServices | Out-Null } } catch { }
-    try { if (Get-Command Stop-AppAria2Daemon -ErrorAction SilentlyContinue) { Stop-AppAria2Daemon | Out-Null } } catch { }
+    try { if (Test-AppSidecarCommand Stop-AppPxeBootServices) { Stop-AppPxeBootServices | Out-Null } } catch { }
+    try { if (Test-AppSidecarCommand Stop-AppAria2Daemon) { Stop-AppAria2Daemon | Out-Null } } catch { }
     Write-SidecarResponse -Id $Id -Data @{ stopped = $true }
 }
 
@@ -117,7 +122,7 @@ function Invoke-SidecarCommand {
     $outcome = 'ok'
     try {
         $handler = "Handle-$Cmd"
-        if (-not (Get-Command $handler -ErrorAction SilentlyContinue)) {
+        if (-not (Test-AppSidecarCommand $handler)) {
             Write-SidecarLog "IPC: unknown command $Cmd ($Id)"
             Write-SidecarError -Id $Id -Message "Unknown command: $Cmd" -Code 'UNKNOWN'
             return
@@ -173,7 +178,7 @@ function Invoke-SidecarDispatchOnce {
     try {
         # Background housekeeping the panels depend on for progress events.
         foreach ($job in @('Sync-AppAria2DirectDownloadJobs', 'Sync-AppVendorSccmCatalogRefreshJob', 'Start-AppVendorSccmCatalogAutoRefreshIfDue', 'Sync-AppPxeBootDriverPullThrough', 'Sync-AppEvalIsoCatalogRefreshJob', 'Start-AppEvalIsoCatalogRefreshIfDue', 'Sync-AppEvalIsoDownloadQueue', 'Sync-AppPxeBootInstallWimMounts', 'Sync-AppPxeBootDeployClientPublish')) {
-            if (Get-Command $job -ErrorAction SilentlyContinue) {
+            if (Test-AppSidecarCommand $job) {
                 try { & $job | Out-Null } catch { }
             }
         }
@@ -227,16 +232,43 @@ try {
     Write-SidecarLog "WinDeployKit sidecar ready (pwsh $($PSVersionTable.PSVersion), pid $PID)." -Flush
     Write-SidecarEvent -EventName 'ready' -Data @{ lifecycle = 'ready' }
 
+    # Build the caches the first panel would otherwise wait for. Measured cold costs
+    # (macOS, 2026-08-24): layout probe 2.2s, driver catalog 2.1s, PXE status 0.6s -
+    # nearly 5s that used to land on whichever tab was clicked first. Ordered cheapest
+    # first so an early click waits behind as little as possible.
+    if (Get-Command Add-AppSidecarWarmupStep -ErrorAction SilentlyContinue) {
+        Add-AppSidecarWarmupStep -Name 'pxe layout' -Action {
+            if (Get-Command Test-AppPxeBootLayout -ErrorAction SilentlyContinue) { Test-AppPxeBootLayout }
+        }
+        Add-AppSidecarWarmupStep -Name 'pxe status' -Action {
+            if (Get-Command Get-AppPxeBootStatus -ErrorAction SilentlyContinue) { Get-AppPxeBootStatus -SkipCatalogSync }
+        }
+        Add-AppSidecarWarmupStep -Name 'driver catalog' -Action {
+            if (Get-Command Get-AppAria2TrackerCatalogPayload -ErrorAction SilentlyContinue) { Get-AppAria2TrackerCatalogPayload }
+        }
+    }
+
     while ($true) {
         $handled = Invoke-SidecarDispatchOnce
         if ([WinDeployKitSidecar.SidecarHost]::StdinComplete -ne 0 -and -not $handled) { break }
-        if (-not $handled) { [System.Threading.Thread]::Sleep(40) }
+        if (-not $handled) {
+            # Idle: spend it on the warm-up queue rather than sleeping through it.
+            if (-not (Invoke-AppSidecarWarmupStep)) { [System.Threading.Thread]::Sleep(40) }
+        }
     }
 } catch {
     Write-SidecarLog "Sidecar fatal: $($_.Exception.Message)"
     try { Write-SidecarEvent -EventName 'error' -Data @{ message = $_.Exception.Message; phase = 'fatal' } } catch { }
 } finally {
-    try { if (Get-Command Stop-AppPxeBootServices -ErrorAction SilentlyContinue) { Stop-AppPxeBootServices | Out-Null } } catch { }
-    try { if (Get-Command Stop-AppAria2Daemon -ErrorAction SilentlyContinue) { Stop-AppAria2Daemon | Out-Null } } catch { }
+    # Only tear down what THIS process started. dnsmasq and Caddy are found by port,
+    # not by parent, so a second sidecar - a test harness, a second window - used to
+    # stop the running app's imaging services on its way out (caught 2026-08-24 doing
+    # exactly that to a live PXE server).
+    if ($script:AppSidecarStartedPxeServices) {
+        try { if (Get-Command Stop-AppPxeBootServices -ErrorAction SilentlyContinue) { Stop-AppPxeBootServices | Out-Null } } catch { }
+    }
+    if ($script:AppSidecarStartedAria2) {
+        try { if (Get-Command Stop-AppAria2Daemon -ErrorAction SilentlyContinue) { Stop-AppAria2Daemon | Out-Null } } catch { }
+    }
     Write-SidecarLog 'WinDeployKit sidecar stopped.'
 }
