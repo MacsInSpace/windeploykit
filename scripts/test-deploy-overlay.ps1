@@ -41,15 +41,15 @@ function Assert-Equal {
     if ("$Expected" -ne "$Actual") { throw "$What - expected '$Expected', got '$Actual'" }
 }
 
-# Read-AppPxeBootConfig reads a real path; point it at a scratch store for the run.
+# Hermetic: the WHOLE data root is a scratch dir for this run. The old approach
+# (write test values into the live config / live branding, restore in a finally)
+# raced real service starts - a gate run at 19:33 on 2026-08-24 had the operator's
+# winpe.jpg backed up at the exact moment a live publish looked for it, and a real
+# boot's menu lost its background line.
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ("wdk-overlay-gate-" + [guid]::NewGuid().ToString('N'))
 $null = New-Item -Path $sandbox -ItemType Directory -Force
+$env:APP_TEST_DATA_ROOT = $sandbox
 $configPath = Get-AppPxeBootConfigPath
-$backup = $null
-if (Test-Path -LiteralPath $configPath) {
-    $backup = Join-Path $sandbox 'config.original.json'
-    Copy-Item -LiteralPath $configPath -Destination $backup -Force
-}
 function Set-TestConfig {
     param([hashtable]$Body)
     ($Body | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $configPath -Encoding UTF8
@@ -164,13 +164,13 @@ try {
     Test-Case 'initrd lines come out for an overlay-eligible WIM' {
         # Make the fixture deterministic regardless of what the live store holds:
         # drop a cred file in, assert its line, clean up if we created it.
+        # The store is the sandbox - build the served dir the way a publish would:
+        # the Required deploy.unc must exist for the profile to emit at all, and a
+        # cred file lets the optional-line assertion run.
         $dir = Get-AppPxeBootWimOverlayServedDir -OverlayProfile (Get-AppPxeBootWimOverlayProfiles | Select-Object -First 1)
-        $credPath = Join-Path $dir 'deploy.cred'
-        $madeCred = $false
-        if (-not (Test-Path -LiteralPath $credPath)) {
-            Set-Content -LiteralPath $credPath -Value "gateuser`r`ngatepass`r`n" -Encoding ASCII -NoNewline
-            $madeCred = $true
-        }
+        $null = New-Item -Path $dir -ItemType Directory -Force
+        Set-Content -LiteralPath (Join-Path $dir 'deploy.unc') -Value '\\10.20.30.40\Deploy$' -Encoding ASCII -NoNewline
+        Set-Content -LiteralPath (Join-Path $dir 'deploy.cred') -Value "gateuser`r`ngatepass`r`n" -Encoding ASCII -NoNewline
         try {
             $lines = @(Get-AppPxeBootWimOverlayInitrdLines -WimFileName 'LiteTouchPE_x64.wim')
             if ($lines.Count -lt 1) { throw 'expected initrd lines for a custom WinPE' }
@@ -186,7 +186,7 @@ try {
             $uncLine = @($lines | Where-Object { $_ -match 'deploy\.unc' })[0]
             if ($uncLine -match '\|\|\s*$') { throw "required initrd line must stay fatal: $uncLine" }
         } finally {
-            if ($madeCred) { Remove-Item -LiteralPath $credPath -Force -ErrorAction SilentlyContinue }
+            # sandbox - removed with it
         }
     }
 
@@ -287,14 +287,7 @@ try {
         if ([bool]$entry.Required) { throw 'winpe.jpg must not be Required - most deploys have no background' }
         $src = Join-Path ([IO.Path]::GetTempPath()) ("bg-" + [guid]::NewGuid().ToString('N') + '.png')
         [IO.File]::WriteAllBytes($src, [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='))
-        # Back up whatever the operator already had - this gate must not leave its own
-        # 1x1 test image behind on a real host (it did once, 2026-08-23).
-        $livePath = Get-AppPxeBootWinPeBackgroundPath
-        $backup = $null
-        if (Test-Path -LiteralPath $livePath) {
-            $backup = Join-Path ([IO.Path]::GetTempPath()) ("bgsave-" + [guid]::NewGuid().ToString('N') + '.jpg')
-            Copy-Item -LiteralPath $livePath -Destination $backup -Force
-        }
+        # The store is the sandbox (APP_TEST_DATA_ROOT) - no live backup dance needed.
         try {
             $null = Set-AppPxeBootBrandingImage -SourcePath $src
             $after = Get-AppPxeBootBrandingStatus
@@ -303,10 +296,6 @@ try {
         } finally {
             Remove-Item -LiteralPath $src -Force -ErrorAction SilentlyContinue
             $null = Clear-AppPxeBootBrandingImage
-            if ($backup) {
-                Copy-Item -LiteralPath $backup -Destination $livePath -Force
-                Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-            }
         }
     }
 
@@ -337,8 +326,7 @@ try {
     }
 }
 finally {
-    if ($backup) { Move-Item -LiteralPath $backup -Destination $configPath -Force }
-    elseif (Test-Path -LiteralPath $configPath) { Remove-Item -LiteralPath $configPath -Force }
+    Remove-Item Env:APP_TEST_DATA_ROOT -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $sandbox -Recurse -Force -ErrorAction SilentlyContinue
 }
 

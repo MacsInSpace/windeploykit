@@ -65,6 +65,12 @@ function New-AppDir {
 }
 
 function Get-AppDataRoot {
+    # Test isolation: gates point this at a scratch dir so they can exercise config,
+    # branding and overlay publishing without touching the live store. A gate that
+    # mutated the real store raced live service starts - the operator's WinPE
+    # background vanished from a real boot's menu while a gate had it backed up
+    # (2026-08-24). Never set outside tests.
+    if ($env:APP_TEST_DATA_ROOT) { return $env:APP_TEST_DATA_ROOT }
     if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
         $base = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HOME 'AppData/Local' }
         return (Join-Path $base (Get-AppProductSlug))
