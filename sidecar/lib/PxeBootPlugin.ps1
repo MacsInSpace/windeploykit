@@ -4608,6 +4608,7 @@ function Write-AppPxeBootCaddyfile {
         [int]$ImagingLogIngestPort = 0
     )
     $rootNorm = ($HttpRoot -replace '\\', '/')
+    $accessLogNorm = ((Join-Path (Get-AppPxeBootStoreRoot) 'http-access.log') -replace '\\', '/')
     $listenSite = if ($BindAddress -eq '0.0.0.0') { "http://:$Port" } else { "http://${BindAddress}:$Port" }
 
     # Image-library routes: ISOs, driver packs, and imageable WIMs live under the
@@ -4678,6 +4679,17 @@ function Write-AppPxeBootCaddyfile {
         '    handle {'
         "        root * `"$rootNorm`""
         '        file_server'
+        '    }'
+        # Access log: one line per fetch, so "what did that client actually download"
+        # is answerable from the server side - reading a WinPE console by eye was the
+        # only record of a failed boot chain until 2026-08-24. The boot-chain VM test
+        # asserts against this file too. Caddy rolls it at 10MB, keeps 2.
+        '    log {'
+        "        output file `"$accessLogNorm`" {"
+        '            roll_size 10MiB'
+        '            roll_keep 2'
+        '        }'
+        '        format console'
         '    }'
         '}'
         ''
