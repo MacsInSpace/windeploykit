@@ -372,6 +372,8 @@ export function PxeWorkspace({
       const s = await sidecar.invoke<PxeBootBrandingStatus>("GetPxeBootBrandingStatus");
       setBranding(s);
       setDeployTitle(s.deployTitle ?? "");
+      setUiAccent(s.uiAccent ? `#${s.uiAccent}` : "");
+      setUiPanel(s.uiPanel ? `#${s.uiPanel}` : "");
     } catch {
       /* panel still works without it */
     }
@@ -385,6 +387,22 @@ export function PxeWorkspace({
     try {
       setBranding(await sidecar.invoke<PxeBootBrandingStatus>("SetPxeBootBrandingImage", { sourcePath: picked }));
       toast.success(PLUGIN_TITLE, "Background set - it applies on the next boot.");
+    } catch (e) {
+      toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+  // wdk-ui panel colours; "" = built-in scheme. Kept as #RRGGBB for the pickers.
+  const [uiAccent, setUiAccent] = useState("");
+  const [uiPanel, setUiPanel] = useState("");
+  const saveUiColors = useCallback(async (accent: string, panel: string) => {
+    try {
+      const s = await sidecar.invoke<PxeBootBrandingStatus>("SetPxeBootDeployUiColors", {
+        accent: accent.replace(/^#/, ""),
+        panel: panel.replace(/^#/, ""),
+      });
+      setBranding(s);
+      setUiAccent(s.uiAccent ? `#${s.uiAccent}` : "");
+      setUiPanel(s.uiPanel ? `#${s.uiPanel}` : "");
     } catch (e) {
       toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
     }
@@ -2336,6 +2354,42 @@ export function PxeWorkspace({
                       if ((branding?.deployTitle ?? "") !== deployTitle) void saveDeployTitle(deployTitle);
                     }}
                   />
+                </div>
+                <div
+                  className="mb-3 flex flex-wrap items-center gap-2 rounded-sm border px-2 py-1.5 text-[12px]"
+                  style={{ borderColor: "var(--border)" }}
+                >
+                  <span className="mono text-[10px] uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                    Panel colours
+                  </span>
+                  <label className="flex items-center gap-1" style={{ color: "var(--text2)" }} title="Highlight for the running stage and title rule">
+                    Accent
+                    <input
+                      type="color"
+                      value={uiAccent || "#4FC3F7"}
+                      onChange={(e) => setUiAccent(e.target.value)}
+                      onBlur={() => void saveUiColors(uiAccent, uiPanel)}
+                      style={{ width: 34, height: 22, padding: 0, border: "1px solid var(--border)", background: "transparent" }}
+                    />
+                  </label>
+                  <label className="flex items-center gap-1" style={{ color: "var(--text2)" }} title="Background of the status panel window">
+                    Panel
+                    <input
+                      type="color"
+                      value={uiPanel || "#101626"}
+                      onChange={(e) => setUiPanel(e.target.value)}
+                      onBlur={() => void saveUiColors(uiAccent, uiPanel)}
+                      style={{ width: 34, height: 22, padding: 0, border: "1px solid var(--border)", background: "transparent" }}
+                    />
+                  </label>
+                  <span style={{ color: "var(--text3)" }}>
+                    {branding?.uiAccent || branding?.uiPanel ? "Custom" : "Built-in scheme"}
+                  </span>
+                  {branding?.uiAccent || branding?.uiPanel ? (
+                    <button className="btn ml-auto" type="button" onClick={() => void saveUiColors("", "")}>
+                      Reset
+                    </button>
+                  ) : null}
                 </div>
                 {wims.length === 0 ? (
                   <p className="text-[12px]" style={{ color: "var(--text2)" }}>

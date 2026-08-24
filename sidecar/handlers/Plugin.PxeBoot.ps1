@@ -472,6 +472,15 @@ function Handle-SetPxeBootDeployUiTitle {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-SetPxeBootDeployUiColors {
+    param([int]$Id, $Params)
+    $accent = [string](Get-AppSidecarParam -Params $Params -Name 'accent')
+    $panel = [string](Get-AppSidecarParam -Params $Params -Name 'panel')
+    $data = Set-AppPxeBootDeployUiColors -Accent $accent -Panel $panel
+    try { Write-AppPxeBootWimOverlayRuntimeAssets -LanIp (Get-AppPxeBootLanIp) | Out-Null } catch { }
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
 function Handle-GetPxeBootBrandingStatus {
     param([int]$Id, $Params)
     Write-SidecarResponse -Id $Id -Data (Get-AppPxeBootBrandingStatus)

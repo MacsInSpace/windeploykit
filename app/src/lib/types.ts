@@ -84,6 +84,7 @@ export type SidecarCommand =
   | "ClearPxeBootBrandingImage"
   | "GetPxeBootBrandingStatus"
   | "SetPxeBootDeployUiTitle"
+  | "SetPxeBootDeployUiColors"
   | "ListVaultSecrets"
   | "RemoveVaultSecret"
   | "SetVaultSecret"
@@ -669,6 +670,9 @@ export interface PxeBootBrandingStatus {
   deployTitle?: string;
   /** True when an ASCII logo file has been dropped in the branding folder. */
   logoPresent?: boolean;
+  /** wdk-ui panel colours (RRGGBB, no #); blank = the panel's built-in scheme. */
+  uiAccent?: string;
+  uiPanel?: string;
 }
 
 export interface PxeBootTaskSequencesPayload {
