@@ -271,7 +271,7 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
             passwordSource = if ($mode -eq 'vault') { 'vault' } else { 'manual' }
             vaultSecret    = ([string](Get-AppPxeBootTsProp -Item $accountIn -Name 'vaultSecret')).Trim()
             password       = $stored
-            autoLogon      = [bool](Get-AppPxeBootTsProp -Item $accountIn -Name 'autoLogon')
+            autoLogonCount = [int](Get-AppPxeBootTsAutoLogonCount -Account $accountIn)
         }
     }
     # Which install.wim (and which index inside it) this sequence deploys. Empty =
@@ -879,7 +879,7 @@ function Get-AppPxeBootTsLocalAccountConfig {
     .SYNOPSIS
         A sequence's local account, with defaults filled in. Shape:
         enabled, name, displayName, description, group, passwordSource
-        ('vault'|'manual'), vaultSecret, password (base64 at rest), autoLogon.
+        ('vault'|'manual'), vaultSecret, password (base64 at rest), autoLogonCount.
     #>
     param($Sequence)
     $raw = Get-AppPxeBootTsProp -Item $Sequence -Name 'localAccount'
@@ -905,8 +905,33 @@ function Get-AppPxeBootTsLocalAccountConfig {
         passwordSource = [string](& $get 'passwordSource' 'manual')
         vaultSecret    = [string](& $get 'vaultSecret' '')
         password       = [string](& $get 'password' '')
-        autoLogon      = [bool](& $get 'autoLogon' $false)
+        autoLogonCount = [int](Get-AppPxeBootTsAutoLogonCount -Account $raw)
     }
+}
+
+function Get-AppPxeBootTsAutoLogonCount {
+    <#
+    .SYNOPSIS
+        How many times Windows signs in automatically after imaging, 0-5. 0 = never.
+    .NOTES
+        Was a checkbox that meant "twice". Craig asked for the number itself
+        (2026-08-24: "just as a drop down... 0-5. 0 (not enabled)") because how many
+        reboots a first-boot script needs is the thing that actually varies. A saved
+        sequence from before this reads its old checkbox as 2, which is what the
+        checkbox wrote.
+    #>
+    param($Account)
+    if (-not $Account) { return 0 }
+    $raw = Get-AppPxeBootTsProp -Item $Account -Name 'autoLogonCount'
+    if ($null -eq $raw -or ($raw -is [string] -and [string]::IsNullOrWhiteSpace([string]$raw))) {
+        if ([bool](Get-AppPxeBootTsProp -Item $Account -Name 'autoLogon')) { return 2 }
+        return 0
+    }
+    $n = 0
+    if (-not [int]::TryParse([string]$raw, [ref]$n)) { return 0 }
+    if ($n -lt 0) { return 0 }
+    if ($n -gt 5) { return 5 }
+    return $n
 }
 
 function Resolve-AppPxeBootTsLocalAccount {
@@ -1032,7 +1057,8 @@ $groupLines					</DomainAccountList>
         $name = if (-not [string]::IsNullOrWhiteSpace($LocalUser)) { $LocalUser } else { [string]$LocalAccount.name }
         $encoded = ConvertTo-AppPxeBootTsUnattendPassword -Password $LocalPassword -ElementName 'Password'
         $autoLogon = ''
-        if ([bool]$LocalAccount.autoLogon) {
+        $logonCount = [int](Get-AppPxeBootTsAutoLogonCount -Account $LocalAccount)
+        if ($logonCount -gt 0) {
             $autoLogon = @"
 			<AutoLogon>
 				<Password>
@@ -1040,7 +1066,7 @@ $groupLines					</DomainAccountList>
 					<PlainText>false</PlainText>
 				</Password>
 				<Username>$(ConvertTo-AppPxeBootTsXmlEscaped $name)</Username>
-				<LogonCount>2</LogonCount>
+				<LogonCount>$logonCount</LogonCount>
 				<Enabled>true</Enabled>
 			</AutoLogon>
 "@

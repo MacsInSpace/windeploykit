@@ -540,7 +540,8 @@ export interface PxeBootTaskSequenceLocalAccount {
   password?: string;
   /** Send a newly typed password here; the sidecar encodes it at rest. */
   passwordPlain?: string;
-  autoLogon?: boolean;
+  /** Automatic sign-ins after imaging: 0 = never, up to 5. Was a boolean meaning 2. */
+  autoLogonCount?: number;
 }
 
 /** One entry in the first-boot settings library. */

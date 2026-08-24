@@ -2996,7 +2996,7 @@ export function PxeWorkspace({
                                 mode: "none",
                                 passwordSource: "manual",
                                 vaultSecret: "",
-                                autoLogon: false,
+                                autoLogonCount: 0,
                               };
                               const mode =
                                 account.mode ??
@@ -3054,12 +3054,21 @@ export function PxeWorkspace({
                                         </select>
                                       </div>
                                       <label className="flex items-center gap-1.5 text-[11px]">
-                                        <input
-                                          type="checkbox"
-                                          checked={Boolean(account.autoLogon)}
-                                          onChange={(e) => patchAccount({ autoLogon: e.target.checked })}
-                                        />
-                                        Auto sign-in as this user after imaging (survives one reboot)
+                                        Auto sign-in after reboot number
+                                        <select
+                                          className="input-box h-[24px] text-[11px]"
+                                          value={account.autoLogonCount ?? 0}
+                                          onChange={(e) =>
+                                            patchAccount({ autoLogonCount: Number(e.target.value) })
+                                          }
+                                        >
+                                          <option value={0}>0 (not enabled)</option>
+                                          <option value={1}>1</option>
+                                          <option value={2}>2</option>
+                                          <option value={3}>3</option>
+                                          <option value={4}>4</option>
+                                          <option value={5}>5</option>
+                                        </select>
                                       </label>
                                       <p className="text-[10px]" style={{ color: "var(--text3)" }}>
                                         Stored obfuscated, and written to the unattend with Windows&apos; own base64 scheme - not encryption. Fine where LAPS rotates the account.
@@ -3106,12 +3115,21 @@ export function PxeWorkspace({
                                         </select>
                                       </div>
                                       <label className="flex items-center gap-1.5 text-[11px]">
-                                        <input
-                                          type="checkbox"
-                                          checked={Boolean(account.autoLogon)}
-                                          onChange={(e) => patchAccount({ autoLogon: e.target.checked })}
-                                        />
-                                        Auto sign-in as this user after imaging (survives one reboot)
+                                        Auto sign-in after reboot number
+                                        <select
+                                          className="input-box h-[24px] text-[11px]"
+                                          value={account.autoLogonCount ?? 0}
+                                          onChange={(e) =>
+                                            patchAccount({ autoLogonCount: Number(e.target.value) })
+                                          }
+                                        >
+                                          <option value={0}>0 (not enabled)</option>
+                                          <option value={1}>1</option>
+                                          <option value={2}>2</option>
+                                          <option value={3}>3</option>
+                                          <option value={4}>4</option>
+                                          <option value={5}>5</option>
+                                        </select>
                                       </label>
                                       <p className="text-[10px]" style={{ color: "var(--text3)" }}>
                                         The user name and password both come from the selected vault credential, read only when the sequence is published - never stored in the sequence.

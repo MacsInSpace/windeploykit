@@ -62,7 +62,7 @@ Test-Case 'Defaults are filled in for a sequence with no account block' {
     Assert-True (-not $cfg.enabled) 'should be disabled by default'
     Assert-True ($cfg.name -eq 'localadmin') "name was '$($cfg.name)'"
     Assert-True ($cfg.group -eq 'Administrators') "group was '$($cfg.group)'"
-    Assert-True (-not $cfg.autoLogon) 'autologon should default off'
+    Assert-True ($cfg.autoLogonCount -eq 0) "autologon should default to 0, was '$($cfg.autoLogonCount)'"
 }
 Test-Case 'A manual password is stored base64 and resolves back' {
     $stored = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes('P@ssw0rd!'))
@@ -100,7 +100,9 @@ Test-Case 'A configured account is emitted with an obfuscated password' {
 Test-Case 'AutoLogon is emitted once, and only when asked for' {
     $withLogon = Get-AccountXml -Account $configured -Password 'Hunter2!'
     Assert-True ($withLogon -match '<AutoLogon>') 'autologon missing when requested'
-    Assert-True ($withLogon -match '<LogonCount>2</LogonCount>') 'autologon should be LogonCount 2 (survives the setup reboot)'
+    # The fixture still uses the old boolean, so this also proves a sequence saved
+    # before the 0-5 dropdown keeps signing in twice.
+    Assert-True ($withLogon -match '<LogonCount>2</LogonCount>') 'a legacy autoLogon=true should still be LogonCount 2'
     $noLogon = Get-AppPxeBootTsLocalAccountConfig -Sequence ([ordered]@{
             localAccount = [ordered]@{ enabled = $true; name = 'deployadmin'; passwordSource = 'manual'; password = 'x'; autoLogon = $false }
         })
@@ -133,6 +135,23 @@ Test-Case 'Groups alone (no local account, no token) still produce a valid block
     Assert-Xml $xml
     Assert-True ($xml -match 'DomainAccounts') 'expected the domain accounts block'
     Assert-True ($xml -notmatch 'LocalAccounts') 'no local account should be invented'
+}
+
+Test-Case 'Auto sign-in count: 0 emits nothing, 1-5 ride through, out of range is clamped' {
+    $mk = {
+        param($count)
+        Get-AppPxeBootTsLocalAccountConfig -Sequence ([ordered]@{
+                localAccount = [ordered]@{ enabled = $true; name = 'deployadmin'; passwordSource = 'manual'; password = 'x'; autoLogonCount = $count }
+            })
+    }
+    Assert-True ((Get-AccountXml -Account (& $mk 0) -Password 'Hunter2!') -notmatch '<AutoLogon>') '0 should emit no AutoLogon block'
+    foreach ($n in 1, 2, 3, 4, 5) {
+        $xml = Get-AccountXml -Account (& $mk $n) -Password 'Hunter2!'
+        Assert-True ($xml -match "<LogonCount>$n</LogonCount>") "count $n did not reach the unattend"
+    }
+    # A hand-edited sequence file should not be able to ask for 99 sign-ins.
+    Assert-True ((Get-AccountXml -Account (& $mk 9) -Password 'Hunter2!') -match '<LogonCount>5</LogonCount>') 'out of range should clamp to 5'
+    Assert-True ((& $mk 'nonsense').autoLogonCount -eq 0) 'junk should read as 0'
 }
 
 Write-Host ''

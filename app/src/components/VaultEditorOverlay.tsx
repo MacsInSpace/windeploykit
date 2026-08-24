@@ -39,6 +39,10 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
   const [secret, setSecret] = useState("");
   const [replaceKey, setReplaceKey] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  // Which field is stopping the save, and why. A disabled button that will not say
+  // what is missing is the same as no button at all (Craig, 2026-08-24: pressed Add,
+  // "there was no feedback or confirmation").
+  const [problem, setProblem] = useState<{ field: "label" | "userName" | "secret" | "vault"; text: string } | null>(null);
 
   const apply = useCallback(
     (data: VaultSecretsResponse | undefined) => {
@@ -62,11 +66,28 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
     setLabel(suggestedName ?? "");
     setReplaceKey("");
     setConfirmDelete(null);
+    setProblem(null);
     void load();
   }, [open, suggestedName, load]);
 
   const save = useCallback(async () => {
-    if (!label.trim() || !userName.trim() || !secret) return;
+    if (!vaultReady) {
+      setProblem({ field: "vault", text: `The secret vault is not available${vaultError ? ` - ${vaultError}` : "."}` });
+      return;
+    }
+    if (!label.trim()) {
+      setProblem({ field: "label", text: "A label is needed - it is what the menus show." });
+      return;
+    }
+    if (!userName.trim()) {
+      setProblem({ field: "userName", text: "A user name is needed: a credential is both halves." });
+      return;
+    }
+    if (!secret) {
+      setProblem({ field: "secret", text: "A password is needed." });
+      return;
+    }
+    setProblem(null);
     setBusy(true);
     try {
       apply(
@@ -80,8 +101,14 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
         }),
       );
       toast.success("Vault", `${label.trim()} saved.`);
-      // Never keep the typed password around once it is in the vault.
+      // Clear the whole form on an add: leaving what you typed sitting there reads as
+      // "nothing happened". On a replace, keep the details and drop only the password.
       setSecret("");
+      if (!replaceKey) {
+        setLabel("");
+        setFullName("");
+        setUserName("");
+      }
       setReplaceKey("");
       onChange?.();
     } catch (e) {
@@ -89,7 +116,11 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
     } finally {
       setBusy(false);
     }
-  }, [label, fullName, userName, secret, replaceKey, apply, onChange]);
+  }, [label, fullName, userName, secret, replaceKey, vaultReady, vaultError, apply, onChange]);
+
+  /** Amber outline on the field that stopped the last save. */
+  const outline = (field: "label" | "userName" | "secret") =>
+    problem?.field === field ? { borderColor: "var(--amber)" } : undefined;
 
   const remove = useCallback(
     async (target: string) => {
@@ -221,8 +252,12 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
             <input
               className="input-box h-[26px] text-[11px]"
               placeholder="Label - what you will see in the menus, e.g. Local admin (imaging)"
+              style={outline("label")}
               value={label}
-              onChange={(e) => setLabel(e.target.value)}
+              onChange={(e) => {
+                setLabel(e.target.value);
+                if (problem?.field === "label") setProblem(null);
+              }}
             />
             <input
               className="input-box h-[26px] text-[11px]"
@@ -233,22 +268,30 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
             <input
               className="input-box mono h-[26px] text-[11px]"
               placeholder="Username - no spaces; domain optional, e.g. CORP\\deployadmin"
+              style={outline("userName")}
               value={userName}
               spellCheck={false}
-              onChange={(e) => setUserName(e.target.value.replace(/\s+/g, ""))}
+              onChange={(e) => {
+                setUserName(e.target.value.replace(/\s+/g, ""));
+                if (problem?.field === "userName") setProblem(null);
+              }}
             />
             <input
               type="password"
               className="input-box h-[26px] text-[11px]"
               placeholder={replaceKey ? "New password (replaces the stored one)" : "Password"}
+              style={outline("secret")}
               value={secret}
-              onChange={(e) => setSecret(e.target.value)}
+              onChange={(e) => {
+                setSecret(e.target.value);
+                if (problem?.field === "secret") setProblem(null);
+              }}
             />
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 className="btn btn-primary px-2 py-0.5 text-[11px]"
-                disabled={busy || !vaultReady || !label.trim() || !userName.trim() || !secret}
+                disabled={busy}
                 onClick={() => void save()}
               >
                 {replaceKey ? "Replace" : "Add"}
@@ -268,8 +311,15 @@ export function VaultEditorOverlay({ open, onClose, onChange, onPick, suggestedN
                   Cancel
                 </button>
               ) : null}
-              <span className="text-[10px]" style={{ color: "var(--text3)" }}>
-                {replaceKey ? `Replacing ${replaceKey}` : "Stored as a credential - both halves, which is what a join or a local account needs."}
+              <span
+                className="text-[10px]"
+                style={{ color: problem ? "var(--amber)" : "var(--text3)" }}
+              >
+                {problem
+                  ? problem.text
+                  : replaceKey
+                    ? `Replacing ${replaceKey}`
+                    : "Stored as a credential - both halves, which is what a join or a local account needs."}
               </span>
             </div>
           </div>

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { useToasts } from "../state/toastStore";
+
 interface ModalProps {
   open: boolean;
   title: string;
@@ -15,6 +17,13 @@ interface ModalProps {
   zIndex?: number;
   children: ReactNode;
   footer?: ReactNode;
+  /**
+   * Repeat toasts raised while this dialog is open as a line along its bottom edge.
+   * The shell shows toasts in the status bar, which the backdrop covers - so without
+   * this a dialog swallows its own "saved" and, worse, its own errors (Craig,
+   * 2026-08-24: pressed Add, "there was no feedback or confirmation"). On by default.
+   */
+  showToasts?: boolean;
 }
 
 export function Modal({
@@ -29,12 +38,20 @@ export function Modal({
   zIndex = 150,
   children,
   footer,
+  showToasts = true,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   // Click fires on mouseup, and a press/release across different elements dispatches it
   // on their common ancestor (the backdrop). Only close when the press STARTED on the
   // backdrop, so drag-selecting text in a field can't dismiss the dialog.
   const backdropMouseDown = useRef(false);
+
+  // Only toasts raised since this dialog opened - never a stale line from behind it.
+  const toasts = useToasts();
+  const sinceId = useRef(0);
+  if (!open) sinceId.current = toasts.length ? toasts[toasts.length - 1].id : 0;
+  const own = showToasts ? toasts.filter((x) => x.id > sinceId.current) : [];
+  const latest = own.length ? own[own.length - 1] : null;
 
   const requestClose = useCallback(() => {
     if (lock && allowBusyCancel) {
@@ -127,6 +144,29 @@ export function Modal({
           </button>
         </div>
         <div className="modal-body min-h-0 flex-1 overflow-auto">{children}</div>
+        {latest && (
+          <div
+            className="flex items-center gap-2 px-3 py-1.5 text-[11px]"
+            style={{
+              borderTop: "1px solid var(--border)",
+              background: "var(--surface2)",
+              color:
+                latest.variant === "error"
+                  ? "var(--red)"
+                  : latest.variant === "warn"
+                    ? "var(--amber)"
+                    : latest.variant === "success"
+                      ? "var(--green)"
+                      : "var(--text2)",
+            }}
+            role="status"
+          >
+            <span className="truncate">
+              {latest.title}
+              {latest.body ? ` - ${latest.body}` : ""}
+            </span>
+          </div>
+        )}
         {footer && (
           <div
             className="modal-footer flex items-center justify-end gap-2"
