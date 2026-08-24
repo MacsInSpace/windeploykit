@@ -26,9 +26,12 @@ This plugin runs on both platforms, but the TFTP host flow is intentionally diff
 Build in **ipxeboot** using `snponly-embed.ipxe` in this folder (TFTP `boot.ipxe` first, then HTTP; no WAN fallback while local-HTTP-only):
 
 ```bash
-cd /path/to/ipxeboot
-make bin-x86_64-efi/snponly.efi EMBED=../windeploykit/sidecar/pxe/snponly-embed.ipxe
-cp src/bin-x86_64-efi/snponly.efi /path/to/windeploykit/sidecar/pxe/snponly.efi
+cd /path/to/ipxeboot/src
+# macOS native (brew binutils/gcc/x86_64-elf-gcc; see ipxeboot/contrib/macos/README.md):
+make CROSS_COMPILE=x86_64-elf- HOST_CC=/opt/homebrew/opt/gcc/bin/gcc-16 \
+    "HOST_CFLAGS+=-isystem ../contrib/macos/include" \
+    EMBED=/path/to/windeploykit/sidecar/pxe/snponly-embed.ipxe bin-x86_64-efi/snponly.efi
+cp bin-x86_64-efi/snponly.efi /path/to/windeploykit/sidecar/pxe/snponly.efi
 ```
 
 Legacy builds used HTTP-only chain - clients skip the local menu when HTTP is off or unreachable.
