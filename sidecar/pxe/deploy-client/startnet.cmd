@@ -123,6 +123,21 @@ if not defined ZOK (
     goto :shell
 )
 
+rem --- self-heal tools from the share --------------------------------------
+rem  Secure Boot clients cannot take unsigned PE files (7z, curl) as initrd -
+rem  iPXE prints "Verification failed: Security Policy Violation" and skips
+rem  them (seen live 2026-08-24). The share has the same four files under
+rem  Z:\Tools, and SMB has no such rule, so pick up whatever is missing here.
+rem  Harmless everywhere else: if initrd delivered them, this copies nothing.
+for %%T in (7z.exe 7za.dll 7zxa.dll curl.exe) do (
+    if not exist "%SYS%\%%T" if exist "Z:\Tools\%%T" (
+        copy /y "Z:\Tools\%%T" "%SYS%\%%T" >nul 2>&1
+        if exist "%SYS%\%%T" call :log "Fetched %%T from the share (Secure Boot boot path)"
+    )
+)
+if not defined CURL if exist "%SYS%\curl.exe" set "CURL=%SYS%\curl.exe"
+if defined LOGHOST if defined CURL call :heartbeat_start
+
 rem --- which task sequence -------------------------------------------------
 set "TSID="
 if exist "%SYS%\deploy.tsid" set /p TSID=<"%SYS%\deploy.tsid"
@@ -343,6 +358,10 @@ wpeutil reboot
 goto :eof
 
 :heartbeat_start
+rem Idempotent: the self-heal path calls this again after fetching curl from the
+rem share (Secure Boot boots), and two loops would double-post every 30s. HBFLAG
+rem is only ever defined by a previous run of this routine.
+if defined HBFLAG goto :eof
 rem A background cmd that POSTs a heartbeat every 30s so the Netboot panel keeps
 rem this device "active" through a 10-minute DISM apply that prints nothing. It
 rem is a file of its own because the payload's escaped quotes do not survive a

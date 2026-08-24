@@ -1209,7 +1209,14 @@ function Get-AppPxeBootWimOverlayInitrdLines {
         foreach ($entry in $runtime) {
             $served = Join-Path $dir $entry.ServedName
             if (Test-Path -LiteralPath $served) {
-                $profileLines += ('initrd -n {0} ${{http_base}}/{1}/{2} {0}' -f $entry.WinPeName, $servedSubdir, $entry.ServedName)
+                # `||` on optional files: iPXE aborts the whole boot on a failed initrd,
+                # and an optional file can legitimately fail two ways - deleted after
+                # the menu was written (cred mode switched to blank mid-session), or a
+                # Secure Boot client refusing an unsigned PE tool ("Verification
+                # failed: Security Policy Violation"). Both killed a live boot on
+                # 2026-08-24; startnet.cmd already degrades when a file is absent.
+                $suffix = if ($entry.Required) { '' } else { ' ||' }
+                $profileLines += ('initrd -n {0} ${{http_base}}/{1}/{2} {0}{3}' -f $entry.WinPeName, $servedSubdir, $entry.ServedName, $suffix)
             } elseif ($entry.Required) {
                 $ok = $false
                 break
@@ -3787,6 +3794,28 @@ function Write-AppPxeBootDeployOverlayFiles {
         } elseif (Test-Path -LiteralPath $dst) {
             Remove-Item -LiteralPath $dst -Force -ErrorAction SilentlyContinue
         }
+    }
+    # Same four tools into <library>/Tools on the Deploy$ share. A Secure Boot client
+    # cannot take unsigned PE files as initrd ("Security Policy Violation"), so
+    # startnet.cmd copies them from Z:\Tools after the share connects instead.
+    try {
+        $shareRoot = Get-AppImageLibraryRoot
+        if ($shareRoot -and (Test-Path -LiteralPath $shareRoot) -and (Test-AppPxeBootDeployClientInjectEnabled) -and $toolsSrcDir) {
+            $shareTools = Join-Path $shareRoot 'Tools'
+            if (-not (Test-Path -LiteralPath $shareTools)) { New-Item -ItemType Directory -Path $shareTools -Force | Out-Null }
+            foreach ($tool in @('7z.exe', '7za.dll', '7zxa.dll', 'curl.exe')) {
+                $src = Join-Path $toolsSrcDir $tool
+                if (-not (Test-Path -LiteralPath $src)) { continue }
+                $dst = Join-Path $shareTools $tool
+                $s = Get-Item -LiteralPath $src
+                $d = Get-Item -LiteralPath $dst -ErrorAction SilentlyContinue
+                if (-not $d -or $d.Length -ne $s.Length -or $d.LastWriteTimeUtc -lt $s.LastWriteTimeUtc) {
+                    Copy-Item -LiteralPath $src -Destination $dst -Force
+                }
+            }
+        }
+    } catch {
+        Write-SidecarLogVerbose "PXE boot: share tools publish failed - $($_.Exception.Message)"
     }
     # Console-UI customisation: header line and optional ASCII logo.
     foreach ($pair in @(

@@ -162,12 +162,34 @@ try {
     }
 
     Test-Case 'initrd lines come out for an overlay-eligible WIM and not for FieldIso' {
-        $lines = @(Get-AppPxeBootWimOverlayInitrdLines -WimFileName 'LiteTouchPE_x64.wim')
-        if ($lines.Count -lt 1) { throw 'expected initrd lines for a custom WinPE' }
-        foreach ($n in @('deploy.unc', 'deploy.cred', 'deploy.loghost')) {
-            if (($lines -join ' ') -notmatch [regex]::Escape($n)) { throw "initrd line for '$n' missing" }
+        # deploy.cred is only served in throwaway/vault cred modes - blank mode is a
+        # legitimate config (Craig runs it), so make the fixture deterministic: drop a
+        # cred file in, assert its line, and clean it up if we created it.
+        $dir = Get-AppPxeBootWimOverlayServedDir -OverlayProfile (Get-AppPxeBootWimOverlayProfiles | Select-Object -First 1)
+        $credPath = Join-Path $dir 'deploy.cred'
+        $madeCred = $false
+        if (-not (Test-Path -LiteralPath $credPath)) {
+            Set-Content -LiteralPath $credPath -Value "gateuser`r`ngatepass`r`n" -Encoding ASCII -NoNewline
+            $madeCred = $true
         }
-        Assert-Equal 0 @(Get-AppPxeBootWimOverlayInitrdLines -WimFileName 'FieldIso.wim').Count 'FieldIso initrd lines'
+        try {
+            $lines = @(Get-AppPxeBootWimOverlayInitrdLines -WimFileName 'LiteTouchPE_x64.wim')
+            if ($lines.Count -lt 1) { throw 'expected initrd lines for a custom WinPE' }
+            foreach ($n in @('deploy.unc', 'deploy.cred', 'deploy.loghost')) {
+                if (($lines -join ' ') -notmatch [regex]::Escape($n)) { throw "initrd line for '$n' missing" }
+            }
+            # Optional files carry iPXE's `||` so a 404 (cred deleted after the menu
+            # was written) or a Secure Boot signature refusal on an unsigned PE tool
+            # cannot abort the boot (both killed a live VM boot, 2026-08-24). The one
+            # Required file stays fatal - a boot without deploy.unc cannot deploy.
+            $credLine = @($lines | Where-Object { $_ -match 'deploy\.cred' })[0]
+            if ($credLine -notmatch '\|\|\s*$') { throw "optional initrd line is not failure-tolerant: $credLine" }
+            $uncLine = @($lines | Where-Object { $_ -match 'deploy\.unc' })[0]
+            if ($uncLine -match '\|\|\s*$') { throw "required initrd line must stay fatal: $uncLine" }
+            Assert-Equal 0 @(Get-AppPxeBootWimOverlayInitrdLines -WimFileName 'FieldIso.wim').Count 'FieldIso initrd lines'
+        } finally {
+            if ($madeCred) { Remove-Item -LiteralPath $credPath -Force -ErrorAction SilentlyContinue }
+        }
     }
 
     Test-Case 'every optional profile key reads safely, present or not' {
