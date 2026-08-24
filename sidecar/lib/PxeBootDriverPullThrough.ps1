@@ -17,6 +17,17 @@
 #     folders that never equal Win32 Model; Lenovo under 4-char machine types).
 #     Installed packs only, so the file stays small and every entry is actionable.
 
+# Standalone-load shim: scripts dot-source lib subsets in any order, and this lib
+# calls Test-AppSidecarCommand (the fast Get-Command). Full version in AppPaths.ps1;
+# this fallback is plain Get-Command, correct just slower. Same pattern as the
+# Write-SidecarLog no-op shims.
+if (-not (Get-Command Test-AppSidecarCommand -ErrorAction SilentlyContinue)) {
+    function Test-AppSidecarCommand {
+        param([Parameter(Mandatory)][string]$Name)
+        [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+    }
+}
+
 $script:AppPxeBootDriverRowsCache = $null
 $script:AppPxeBootPullThroughLastSyncUtc = [DateTime]::MinValue
 $script:AppPxeBootAliasMapSignature = $null

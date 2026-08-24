@@ -3,6 +3,17 @@
 
 # Canonical data-root resolvers (no-op when the sidecar already dot-sourced AppPaths.ps1;
 # needed when dev/test scripts dot-source this lib standalone).
+# Standalone-load shim: scripts dot-source lib subsets in any order, and this lib
+# calls Test-AppSidecarCommand (the fast Get-Command). Full version in AppPaths.ps1;
+# this fallback is plain Get-Command, correct just slower. Same pattern as the
+# Write-SidecarLog no-op shims.
+if (-not (Get-Command Test-AppSidecarCommand -ErrorAction SilentlyContinue)) {
+    function Test-AppSidecarCommand {
+        param([Parameter(Mandatory)][string]$Name)
+        [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+    }
+}
+
 if (-not (Get-Command Get-AppDataRoot -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot 'AppPaths.ps1')
 }

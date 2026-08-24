@@ -10,6 +10,17 @@
 
 # Product identity helpers (no-op when the host already dot-sourced AppProductIdentity.ps1;
 # needed when this lib is loaded standalone by scripts or child runspaces).
+# Standalone-load shim: scripts dot-source lib subsets in any order, and this lib
+# calls Test-AppSidecarCommand (the fast Get-Command). Full version in AppPaths.ps1;
+# this fallback is plain Get-Command, correct just slower. Same pattern as the
+# Write-SidecarLog no-op shims.
+if (-not (Get-Command Test-AppSidecarCommand -ErrorAction SilentlyContinue)) {
+    function Test-AppSidecarCommand {
+        param([Parameter(Mandatory)][string]$Name)
+        [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+    }
+}
+
 if (-not (Get-Command Get-AppUserAgent -ErrorAction SilentlyContinue)) {
     . (Join-Path $PSScriptRoot 'AppProductIdentity.ps1')
 }
@@ -92,7 +103,7 @@ $script:SidecarDispatchPumpDepth = 0
 
 function Invoke-SidecarDispatchPump {
     if ($script:SidecarDispatchPumpDepth -gt 0) { return }
-    $dispatch = Test-AppSidecarCommand Invoke-SidecarDispatchOnce
+    $dispatch = Get-Command Invoke-SidecarDispatchOnce -ErrorAction SilentlyContinue
     if (-not $dispatch) { return }
     $script:SidecarDispatchPumpDepth++
     try {

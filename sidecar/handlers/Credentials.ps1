@@ -14,6 +14,17 @@
 #
 # Functions only -- no top-level code. Dispatch resolves Handle-$Cmd by name.
 
+# Standalone-load shim: scripts dot-source lib subsets in any order, and this lib
+# calls Test-AppSidecarCommand (the fast Get-Command). Full version in AppPaths.ps1;
+# this fallback is plain Get-Command, correct just slower. Same pattern as the
+# Write-SidecarLog no-op shims.
+if (-not (Get-Command Test-AppSidecarCommand -ErrorAction SilentlyContinue)) {
+    function Test-AppSidecarCommand {
+        param([Parameter(Mandatory)][string]$Name)
+        [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+    }
+}
+
 function Handle-ListInfraSshCredentials {
     param([int]$Id, $Params)
     $siteId = [string](Get-AppSidecarParam -Params $Params -Name 'siteId')

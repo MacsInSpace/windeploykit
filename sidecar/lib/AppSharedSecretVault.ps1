@@ -22,6 +22,17 @@
 # never see a sibling product's registration change. Register-LocalVault is
 # idempotent and self-heals a dead registration left by an uninstalled product.
 
+# Standalone-load shim: scripts dot-source lib subsets in any order, and this lib
+# calls Test-AppSidecarCommand (the fast Get-Command). Full version in AppPaths.ps1;
+# this fallback is plain Get-Command, correct just slower. Same pattern as the
+# Write-SidecarLog no-op shims.
+if (-not (Get-Command Test-AppSidecarCommand -ErrorAction SilentlyContinue)) {
+    function Test-AppSidecarCommand {
+        param([Parameter(Mandatory)][string]$Name)
+        [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+    }
+}
+
 $script:AppSharedSecretVaultName = 'shared'
 $script:AppSharedSecretVaultState = @{ ready = $false; error = $null; info = $null }
 

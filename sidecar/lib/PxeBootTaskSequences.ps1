@@ -21,6 +21,17 @@
 # from the original hand-built files is omitted: it only runs under setup.exe,
 # never for DISM-applied images. EULA-hiding removed per Craig (2026-08-19).
 
+# Standalone-load shim: scripts dot-source lib subsets in any order, and this lib
+# calls Test-AppSidecarCommand (the fast Get-Command). Full version in AppPaths.ps1;
+# this fallback is plain Get-Command, correct just slower. Same pattern as the
+# Write-SidecarLog no-op shims.
+if (-not (Get-Command Test-AppSidecarCommand -ErrorAction SilentlyContinue)) {
+    function Test-AppSidecarCommand {
+        param([Parameter(Mandatory)][string]$Name)
+        [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+    }
+}
+
 $script:AppPxeBootTaskSequenceMaxCount = 8
 
 function Get-AppPxeBootTaskSequencesPath {

@@ -3,6 +3,17 @@
 
 # Laptop/workstation field PXE only - no deploy.example.com chains in menus or snponly fallback.
 # Set $false to re-enable WAN catalog items and deploy_base fallbacks.
+# Standalone-load shim: scripts dot-source lib subsets in any order, and this lib
+# calls Test-AppSidecarCommand (the fast Get-Command). Full version in AppPaths.ps1;
+# this fallback is plain Get-Command, correct just slower. Same pattern as the
+# Write-SidecarLog no-op shims.
+if (-not (Get-Command Test-AppSidecarCommand -ErrorAction SilentlyContinue)) {
+    function Test-AppSidecarCommand {
+        param([Parameter(Mandatory)][string]$Name)
+        [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+    }
+}
+
 $script:AppPxeBootLocalHttpOnly = $true
 $script:AppPxeBootDefaultTftpBootFile = 'x86_64-sb/shimx64.efi'
 
@@ -1315,7 +1326,7 @@ function Get-AppPxeBootWimlibImagexPath {
     $bundled = Get-AppPxeBootBundledWimlibImagexPath
     if ($bundled) { return $bundled }
     foreach ($name in @('wimlib-imagex', 'wimlib-imagex.exe')) {
-        $cmd = Test-AppSidecarCommand $name
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
         if ($cmd) { return $cmd.Source }
     }
     if ($IsMacOS) {
@@ -3275,7 +3286,7 @@ function Ensure-AppPxeBootP7zipTools {
         return @{ ok = $true; skipped = $true; reason = 'not_macos' }
     }
     foreach ($candidate in @('7zz', '7z', '7za')) {
-        $found = Test-AppSidecarCommand $candidate
+        $found = Get-Command $candidate -ErrorAction SilentlyContinue
         if ($found) {
             return @{ ok = $true; skipped = $true; reason = 'system_7z'; path = [string]$found.Source }
         }
@@ -9767,12 +9778,15 @@ function Import-AppPxeBootWimFromIso {
 }
 
 function Import-AppPxeBootIso {
-    Clear-AppPxeBootMemo -Key 'wim-layout'
     param(
         [Parameter(Mandatory)][string]$SourcePath,
         [string]$TargetFileName,
         [switch]$ReplaceExisting
     )
+    # param() must be the FIRST statement in the body - anything above it turns it
+    # into a plain call and the function dies with "called as if it were a method"
+    # (broke ISO import in the field, 2026-08-24).
+    Clear-AppPxeBootMemo -Key 'wim-layout'
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
         throw 'PXE boot: source ISO file not found.'
     }
@@ -9821,8 +9835,11 @@ function Import-AppPxeBootIso {
 }
 
 function Remove-AppPxeBootIso {
-    Clear-AppPxeBootMemo -Key 'wim-layout'
     param([Parameter(Mandatory)][string]$FileName)
+    # param() must be the FIRST statement in the body - anything above it turns it
+    # into a plain call and the function dies with "called as if it were a method"
+    # (broke ISO import in the field, 2026-08-24).
+    Clear-AppPxeBootMemo -Key 'wim-layout'
     $name = Get-AppPxeBootSafeIsoFileName -FileName $FileName
     $dest = Join-Path (Get-AppPxeBootLayoutPaths).isoDir $name
     if (-not (Test-Path -LiteralPath $dest)) {

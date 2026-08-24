@@ -17,6 +17,17 @@
 # cache is still written (warn-inside-window house style) - the caller surfaces the
 # warning; genuine rot shows up as staleness, not silent absence.
 
+# Standalone-load shim: scripts dot-source lib subsets in any order, and this lib
+# calls Test-AppSidecarCommand (the fast Get-Command). Full version in AppPaths.ps1;
+# this fallback is plain Get-Command, correct just slower. Same pattern as the
+# Write-SidecarLog no-op shims.
+if (-not (Get-Command Test-AppSidecarCommand -ErrorAction SilentlyContinue)) {
+    function Test-AppSidecarCommand {
+        param([Parameter(Mandatory)][string]$Name)
+        [bool](Get-Command -Name $Name -ErrorAction SilentlyContinue)
+    }
+}
+
 $script:AppVendorSccmCatalogFloors = @{
     dell      = 200   # models
     hp        = 80    # models
