@@ -425,6 +425,15 @@ function Get-AppAria2BinaryPath {
     if ($cmd -and $cmd.Source -and (Test-Path -LiteralPath $cmd.Source -PathType Leaf)) {
         return $cmd.Source
     }
+    # A Finder-launched app has no /opt/homebrew/bin or /usr/local/bin on PATH, so
+    # Get-Command misses a Homebrew aria2 exactly in the packaged case - the same
+    # reason the dnsmasq and wimlib resolvers list these paths (2026-08-26). Until a
+    # static aria2c exists this is the only way the packaged macOS app gets one.
+    if ($IsMacOS -or ((Get-Variable -Name IsDarwin -Scope Global -ErrorAction SilentlyContinue) -and $IsDarwin)) {
+        foreach ($candidate in @('/opt/homebrew/bin/aria2c', '/usr/local/bin/aria2c')) {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
     return $null
 }
 

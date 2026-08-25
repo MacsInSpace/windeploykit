@@ -52,7 +52,6 @@
       "../../vendor/binaries/pxe-macos/VERSION.dnsmasq": "vendor/binaries/pxe-macos/VERSION.dnsmasq",
       "../../vendor/binaries/pxe-macos/VERSION.wimlib": "vendor/binaries/pxe-macos/VERSION.wimlib",
       "../../vendor/binaries/dialog-macos/windeploykit-dialog-universal": "vendor/binaries/dialog-macos/windeploykit-dialog-universal",
-      "../../vendor/aria2-tools/aria2-1.37.0_mac_arm64.tar.gz": "vendor/aria2-tools/aria2-1.37.0_mac_arm64.tar.gz",
       "../../packaging/pxe-caddy.json": "packaging/pxe-caddy.json",
       "../../packaging/aria2-tools.json": "packaging/aria2-tools.json",
       "../../packaging/p7zip-tools.json": "packaging/p7zip-tools.json",

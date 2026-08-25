@@ -634,17 +634,13 @@ this; if you write a new entry point, do it there too.
 - `wim-inject/` (615 MB) is gitignored: ADK-derived WinPE system files, EULA-scoped.
 - `vendor/binaries/pxe-mdt-boot/` and `sidecar/pxe/mdt-boot-x64/` are Microsoft
   boot binaries - gitignored, never redistribute.
-- **Secure Boot cannot work yet - the arch trees are not in this repo.**
-  `vendor/binaries/pxe-secure-boot-x64/` is README-only and `sidecar/pxe/x86_64-sb/`
-  does not exist, so `Sync-AppPxeBootBundledArchTftpTrees` has nothing to stage
-  while the default Option 67 (`x86_64-sb/shimx64.efi`) points at that path.
-  The staging code is correct and ported; the **binaries** are missing. USM's
-  2026-08-21 reply: copy all nine trees byte-identical from USM branch
-  `craig/netboot-imagedeployer-110` commit `640f5bb` (`sidecar/pxe/<arch>/`,
-  ~21 MB, 38 files, plus that commit's `.gitattributes` binary rules). **Never**
-  take the root-level `snponly.efi` from upstream - USM's is byte-patched and the
-  upstream root copy is a symlink to the unpatched one. Waiting on Craig's nod
-  for the 21 MB. Don't read "arch staging ported" as "Secure Boot works".
+- **The nine arch trees are in this repo now** (`sidecar/pxe/<arch>/`, tracked,
+  incl. `x86_64-sb/shimx64.efi` and `arm64-sb/shimaa64.efi`) - the 2026-08-22 text
+  that said otherwise was stale by the 2026-08-26 audit. `Sync-AppPxeBootBundledArchTftpTrees`
+  stages all nine on every Start / Update. **Never** take the root-level
+  `snponly.efi` from upstream - ours is byte-patched and the upstream root copy is
+  a symlink to the unpatched one. "Staged" is still not "Secure Boot verified on
+  hardware" - that boot is item 1 of the section 9 to-do list.
 - The Secure Boot iPXE chain builds from a **sibling repo**,
   `/Volumes/Data/projects/ipxeboot`. Undeclared build dependency; formalise it.
 - The bundled `snponly.efi` carries a **byte-patched embed** (an upstream WAN
@@ -1424,3 +1420,53 @@ so the label itself warns. Not done: Start regenerates everything, so that verb 
 action in MDT/ADUC wording. The confirm carries the warning instead, and only appears when
 a device is actually mid-image. If the longer label is wanted anyway it is the one string
 in `PxeWorkspace.tsx` ("Restart Services").
+
+### Bundle audit and the 0.6.0 build (2026-08-26)
+
+Craig: "make sure all assets will be included (except the isos ofc) and run a build
+and release (MacOS universal please)". The audit (an Explore agent over
+`tauri.conf.json`, the staging scripts, `sidecar.rs` and every project-root read in
+`sidecar/**`) found the packaged app shipped **`sidecar/` and nothing else**:
+
+- `scripts/prepare-bundle-deps.ps1` and `scripts/package-macos.sh` are ports from
+  another product that cannot run here (missing `scripts/lib/BuildDownload.ps1`,
+  `load-local-env.sh`, PSOpenAD, Posh-SSH, eduHub, email banners...), and nothing
+  called them anyway - `beforeBuildCommand` is `npm run build`. Both now carry an
+  INERT header. What ships is `bundle.resources` in `tauri.conf.json`, full stop.
+- Fatal at first launch, all fixed by the resources map: no `vendor/psmodules`
+  (vault threw), no `packaging/pxe-caddy.json` (HTTP could never start - the asset
+  feed is empty), no dnsmasq / wimlib / password dialog, no SCCM catalogs.
+- `Aria2Plugin.ps1` could never install aria2 on macOS (manifest has no URL; the
+  `vendor/aria2-tools/` archive was unread) - it now has p7zip's bundled-archive
+  fallback, **but the archive is not bundled**: notarisation unpacked it and
+  rejected the unsigned `aria2c`, and that `aria2c` is a Homebrew bottle linked to
+  `/opt/homebrew/opt/*` dylibs - it runs only where Homebrew's aria2 already is.
+  macOS aria2 needs a static build before the fallback means anything; until then
+  `Get-AppAria2BinaryPath` finds Homebrew's on PATH. `VendorSccmCatalogRefresh.ps1` dot-sourced `lib/NpsLogViewer.ps1` (a
+  USM file we never had) as its first statement under `Stop`, so **every**
+  background catalog refresh had been exiting 1 - line removed.
+- The three vendored universal Mach-O binaries are Developer ID signed in place
+  and committed (notarisation refuses unsigned executables in the bundle).
+- Version was 0.1.0 / 0.5.3 / 0.1.0 across the three files; now 0.6.0 in four
+  (Cargo.lock too). `tauri:build:universal` script added; DMG target added.
+
+Still open from the audit, none blocking the build:
+- `sidecar/pxe/mdt-boot-x64/` (gitignored Microsoft boot files) is on Craig's Mac
+  and rides into every build made here via `../../sidecar/`. Policy call.
+- A Windows build needs `vendor/binaries/pxe-windows/`, the Windows aria2 zips and
+  `packaging/pxe-tftpd64.json` - a `tauri.windows.conf.json`, not the base map.
+- `.gitignore` still names `sidecar/pxe/fieldiso/...` (gone; tools live in
+  `sidecar/pxe/tools/`); `packaging/pxe-fieldiso.json` and
+  `packaging/pxe-optional-assets.json` (read at `PxeBootPlugin.ps1` ~4203, never
+  existed) are orphans. `AGENT_NOTES` "aria2 ships in vendor/aria2-tools/" was
+  true only once the fallback above existed.
+- `LoadLocalMachineCredentialToSession` is a dead union entry (section 3 table).
+
+- Module robustness item (for the SecretManagement.LocalVault repo, not here):
+  `LocalVault.Core.ps1` runs `& ioreg` by bare name; under a PATH without
+  `/usr/sbin` the machine key cannot be derived. launchd's default PATH has it,
+  so the packaged app works; `/usr/sbin/ioreg` would remove the dependency.
+
+Details of the build itself: `docs/AGENT_NOTES_MACOS_BUILD.md`, "WinDeployKit
+specifics".
+
