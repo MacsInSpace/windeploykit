@@ -8575,7 +8575,23 @@ function Sync-AppPxeBootDeployClientPublish {
     $dir = Join-Path (Get-AppPxeBootLayoutPaths).httpRoot 'deploy'
     $dst = Join-Path $dir 'startnet.cmd'
     if (-not (Test-Path -LiteralPath $dst)) { return }
-    if ((Get-Item -LiteralPath $src).LastWriteTimeUtc -le (Get-Item -LiteralPath $dst).LastWriteTimeUtc) { return }
+    $stale = (Get-Item -LiteralPath $src).LastWriteTimeUtc -gt (Get-Item -LiteralPath $dst).LastWriteTimeUtc
+    if (-not $stale) {
+        # The published deploy.unc/loghost embed the LAN IP of publish time. A
+        # laptop that moves networks (work <-> home, Craig 2026-08-25: booted
+        # at home, client tried the work share) serves a working menu but a
+        # dead share/loghost until these are rewritten - so an IP mismatch
+        # republishes exactly like a newer source does.
+        $uncFile = Join-Path $dir 'deploy.unc'
+        if (Test-Path -LiteralPath $uncFile) {
+            try {
+                $ip = [string](Get-AppPxeBootLanIp)
+                $unc = [string](Get-Content -LiteralPath $uncFile -TotalCount 1 -ErrorAction Stop)
+                if ($ip -and $unc -and -not $unc.Contains($ip)) { $stale = $true }
+            } catch { }
+        }
+    }
+    if (-not $stale) { return }
     try {
         Write-AppPxeBootDeployOverlayFiles -Dir $dir -LanIp (Get-AppPxeBootLanIp)
     } catch {
