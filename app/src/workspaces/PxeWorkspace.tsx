@@ -431,8 +431,12 @@ export function PxeWorkspace({
   }, []);
   const clearWinpeBackground = useCallback(async () => {
     try {
-      setBranding(await sidecar.invoke<PxeBootBrandingStatus>("ClearPxeBootBrandingImage"));
-      toast.success(PLUGIN_TITLE, "Background cleared.");
+      const s = await sidecar.invoke<PxeBootBrandingStatus>("ClearPxeBootBrandingImage");
+      setBranding(s);
+      toast.success(
+        PLUGIN_TITLE,
+        s.winpeBackground?.present ? "Background reset to the default - it applies on the next boot." : "Background cleared.",
+      );
     } catch (e) {
       toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
     }
@@ -2506,16 +2510,18 @@ export function PxeWorkspace({
                     Background
                   </span>
                   <span style={{ color: "var(--text2)" }}>
-                    {branding?.winpeBackground?.present
-                      ? `Set (${Math.max(1, Math.round((branding.winpeBackground.sizeBytes ?? 0) / 1024))} KB)`
-                      : "None"}
+                    {branding?.winpeBackground?.custom
+                      ? `Custom (${Math.max(1, Math.round((branding.winpeBackground.sizeBytes ?? 0) / 1024))} KB)`
+                      : branding?.winpeBackground?.present
+                        ? "Default (ships with the app)"
+                        : "None"}
                   </span>
                   <button className="btn ml-auto" type="button" onClick={() => void pickWinpeBackground()}>
                     {branding?.winpeBackground?.present ? "Replace..." : "Set background..."}
                   </button>
-                  {branding?.winpeBackground?.present ? (
+                  {branding?.winpeBackground?.custom ? (
                     <button className="btn" type="button" onClick={() => void clearWinpeBackground()}>
-                      Clear
+                      Use default
                     </button>
                   ) : null}
                 </div>

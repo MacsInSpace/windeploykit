@@ -13,6 +13,7 @@ WinDeployKit invokes the following as **separate processes**; it does not link t
 | [Tftpd64](https://pjo2.github.io/tftpd64/) | GPLv2 | Downloaded at runtime (Windows) |
 | [Microsoft.PowerShell.SecretManagement](https://github.com/PowerShell/SecretManagement) | MIT | Vendored unmodified (`vendor/psmodules/`), pinned in `vendor/psmodules.lock.json` |
 | [SecretManagement.LocalVault](https://github.com/MacsInSpace/SecretManagement.LocalVault) | MIT | Vendored unmodified from the tagged release (`vendor/psmodules/`), pinned by tag, commit and SHA-256 in `vendor/psmodules.lock.json` |
+| Default WinPE background (`sidecar/pxe/deploy-client/default-bg.jpg`, pebbles on stone) | Licence and source to be recorded by the maintainer before public release | Bundled, scaled to 1920 px; shown behind the deploy client only until the operator imports their own picture in Boot Images |
 
 The two PowerShell modules are vendored rather than installed at runtime because
 PSGallery is not reachable in every deployment environment. They are redistributed

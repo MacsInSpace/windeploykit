@@ -3260,18 +3260,30 @@ function Write-AppPxeBootDeployOverlayFiles {
 
     # Deploy background: the operator's imported image, converted to BMP for the
     # wdk-bg viewer (pure GDI = BMP only; no decoder gamble on stripped WinPEs).
-    $bgSrc = Get-AppPxeBootWinPeBackgroundPath
+    # Imported picture if there is one, else the bundled default. Regenerated when the
+    # source file, its mtime or the size policy changes (stamp in the store root - NOT
+    # under http/, where a local path would be served to the LAN). The stamp is what
+    # lets "Use default" and a changed default both take effect without a Clear having
+    # to know about the served copy.
+    $bg = Get-AppPxeBootWinPeBackgroundSource
+    $bgSrc = [string]$bg.path
     $bgBmp = Join-Path $Dir 'deploy-bg.bmp'
-    if (Test-Path -LiteralPath $bgSrc) {
+    $bgStampFile = Join-Path (Get-AppPxeBootStoreRoot) 'deploy-bg.stamp'
+    if ($bgSrc -and (Test-Path -LiteralPath $bgSrc)) {
         $s = Get-Item -LiteralPath $bgSrc
-        $d = Get-Item -LiteralPath $bgBmp -ErrorAction SilentlyContinue
-        if (-not $d -or $d.LastWriteTimeUtc -lt $s.LastWriteTimeUtc) {
-            if (Convert-AppPxeBootImageFile -Source $bgSrc -Destination $bgBmp -Format 'bmp') {
-                Write-SidecarLog 'PXE boot: published the deploy background (deploy-bg.bmp)'
+        $want = '{0}|{1}|{2}' -f $bg.source, $s.LastWriteTimeUtc.Ticks, $script:AppPxeBootDeployBackgroundMaxWidth
+        $have = if (Test-Path -LiteralPath $bgStampFile) { [string](Get-Content -LiteralPath $bgStampFile -Raw -ErrorAction SilentlyContinue) } else { '' }
+        if (-not (Test-Path -LiteralPath $bgBmp) -or $have.Trim() -ne $want) {
+            if (Convert-AppPxeBootImageFile -Source $bgSrc -Destination $bgBmp -Format 'bmp' -MaxWidth $script:AppPxeBootDeployBackgroundMaxWidth) {
+                [System.IO.File]::WriteAllText($bgStampFile, $want, (New-Object System.Text.UTF8Encoding $false))
+                $bmpItem = Get-Item -LiteralPath $bgBmp -ErrorAction SilentlyContinue
+                $bmpKb = if ($bmpItem) { [int]($bmpItem.Length / 1024) } else { 0 }
+                Write-SidecarLog "PXE boot: published the deploy background (deploy-bg.bmp, $($bg.source), $bmpKb KB)"
             }
         }
-    } elseif (Test-Path -LiteralPath $bgBmp) {
-        Remove-Item -LiteralPath $bgBmp -Force -ErrorAction SilentlyContinue
+    } else {
+        if (Test-Path -LiteralPath $bgBmp) { Remove-Item -LiteralPath $bgBmp -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $bgStampFile) { Remove-Item -LiteralPath $bgStampFile -Force -ErrorAction SilentlyContinue }
     }
 
     if ((Test-AppPxeBootDeployClientInjectEnabled) -and -not (Test-Path -LiteralPath (Join-Path $Dir '7z.exe'))) {
@@ -3327,6 +3339,9 @@ function Get-AppPxeBootWanIsoCatalogUrl {
 }
 
 $script:AppPxeBootWinPeBackgroundName = 'winpe.jpg'
+# Served deploy-bg.bmp is bounded to this width: wdk-bg StretchBlts it to the screen, so
+# anything past 1080p is initrd bytes for nothing (Craig's 4772-px import made a 40 MB BMP).
+$script:AppPxeBootDeployBackgroundMaxWidth = 1920
 
 function Get-AppPxeBootDeployUiTitlePath {
     Join-Path (Get-AppPxeBootLayoutPaths).brandingDir 'deploy.title'
@@ -3408,6 +3423,38 @@ function Get-AppPxeBootWinPeBackgroundPath {
     Join-Path (Get-AppPxeBootLayoutPaths).brandingDir $script:AppPxeBootWinPeBackgroundName
 }
 
+function Get-AppPxeBootBundledDefaultBackgroundPath {
+    <#
+    .SYNOPSIS
+        The background that ships with the product - used whenever nothing has been
+        imported. Craig's pebbles-on-stone picture (2026-08-26: "package that WIM
+        background as the default BG but allow changing it. It fits so well"), scaled
+        to 1920 px so the served BMP is ~6.5 MB per boot instead of the 40 MB the
+        4772-px original made.
+    #>
+    $candidates = @()
+    if ($SidecarRoot) { $candidates += (Join-Path $SidecarRoot 'pxe/deploy-client/default-bg.jpg') }
+    $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
+    if ($root) { $candidates += (Join-Path $root 'sidecar/pxe/deploy-client/default-bg.jpg') }
+    foreach ($path in $candidates) {
+        if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
+    }
+    return $null
+}
+
+function Get-AppPxeBootWinPeBackgroundSource {
+    <#
+    .SYNOPSIS
+        The picture that will be served as deploy-bg.bmp: the imported one when there is
+        one, else the bundled default. @{ path; source } with source custom|default|none.
+    #>
+    $custom = Get-AppPxeBootWinPeBackgroundPath
+    if (Test-Path -LiteralPath $custom) { return @{ path = $custom; source = 'custom' } }
+    $default = Get-AppPxeBootBundledDefaultBackgroundPath
+    if ($default) { return @{ path = $default; source = 'default' } }
+    return @{ path = $null; source = 'none' }
+}
+
 function Convert-AppPxeBootImageFile {
     <#
     .SYNOPSIS
@@ -3419,18 +3466,24 @@ function Convert-AppPxeBootImageFile {
     param(
         [Parameter(Mandatory)][string]$Source,
         [Parameter(Mandatory)][string]$Destination,
-        [Parameter(Mandatory)][ValidateSet('jpeg', 'png', 'bmp')][string]$Format
+        [Parameter(Mandatory)][ValidateSet('jpeg', 'png', 'bmp')][string]$Format,
+        # > 0: bound the longer side to this many pixels (sips -Z / a resampled Bitmap).
+        # The same-format copy shortcut is skipped when a bound is asked for.
+        [int]$MaxWidth = 0
     )
     $srcExt = ([IO.Path]::GetExtension($Source)).ToLowerInvariant()
     $wantExt = switch ($Format) { 'jpeg' { @('.jpg', '.jpeg') } 'png' { @('.png') } 'bmp' { @('.bmp') } }
     $dir = Split-Path -Parent $Destination
     if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
-    if ($srcExt -in $wantExt) {
+    if ($srcExt -in $wantExt -and $MaxWidth -le 0) {
         Copy-Item -LiteralPath $Source -Destination $Destination -Force
         return $true
     }
     if ($IsMacOS -or $IsDarwin) {
-        & sips -s format $Format $Source --out $Destination 2>&1 | Out-Null
+        $sipsArgs = @()
+        if ($MaxWidth -gt 0) { $sipsArgs += @('-Z', [string]$MaxWidth) }
+        $sipsArgs += @('-s', 'format', $Format, $Source, '--out', $Destination)
+        & sips @sipsArgs 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $Destination)) { return $true }
         Write-SidecarLog "PXE boot: could not convert $([IO.Path]::GetFileName($Source)) to $Format (sips)"
         return $false
@@ -3444,7 +3497,23 @@ function Convert-AppPxeBootImageFile {
                 'png' { [System.Drawing.Imaging.ImageFormat]::Png }
                 'bmp' { [System.Drawing.Imaging.ImageFormat]::Bmp }
             }
-            $img.Save($Destination, $fmt)
+            $longest = [Math]::Max([int]$img.Width, [int]$img.Height)
+            if ($MaxWidth -gt 0 -and $longest -gt $MaxWidth) {
+                $scale = $MaxWidth / [double]$longest
+                $w = [Math]::Max(1, [int][Math]::Round($img.Width * $scale))
+                $h = [Math]::Max(1, [int][Math]::Round($img.Height * $scale))
+                $scaled = New-Object System.Drawing.Bitmap $w, $h
+                try {
+                    $g = [System.Drawing.Graphics]::FromImage($scaled)
+                    try {
+                        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                        $g.DrawImage($img, 0, 0, $w, $h)
+                    } finally { $g.Dispose() }
+                    $scaled.Save($Destination, $fmt)
+                } finally { $scaled.Dispose() }
+            } else {
+                $img.Save($Destination, $fmt)
+            }
         } finally { $img.Dispose() }
         return (Test-Path -LiteralPath $Destination)
     } catch {
@@ -3492,14 +3561,19 @@ function Clear-AppPxeBootBrandingImage {
         $served = Join-Path (Join-Path $paths.httpRoot 'deploy') $servedName
         if (Test-Path -LiteralPath $served) { Remove-Item -LiteralPath $served -Force -ErrorAction SilentlyContinue }
     }
-    Write-SidecarLog 'PXE boot: WinPE background cleared'
+    if (Get-AppPxeBootBundledDefaultBackgroundPath) {
+        Write-SidecarLog 'PXE boot: WinPE background reset to the bundled default'
+    } else {
+        Write-SidecarLog 'PXE boot: WinPE background cleared'
+    }
     Get-AppPxeBootBrandingStatus
 }
 
 function Get-AppPxeBootBrandingStatus {
-    # What the Boot Images panel shows for the boot WIM background.
-    $winpe = Get-AppPxeBootWinPeBackgroundPath
-    $item = if (Test-Path -LiteralPath $winpe) { Get-Item -LiteralPath $winpe } else { $null }
+    # What the Boot Images panel shows for the boot WIM background: the picture that
+    # will actually be served (imported, else the bundled default).
+    $bg = Get-AppPxeBootWinPeBackgroundSource
+    $item = if ($bg.path -and (Test-Path -LiteralPath $bg.path)) { Get-Item -LiteralPath $bg.path } else { $null }
     $titlePath = Get-AppPxeBootDeployUiTitlePath
     $title = ''
     if (Test-Path -LiteralPath $titlePath) {
@@ -3518,6 +3592,8 @@ function Get-AppPxeBootBrandingStatus {
     @{
         winpeBackground = @{
             present   = [bool]$item
+            source    = [string]$bg.source
+            custom    = ($bg.source -eq 'custom')
             fileName  = if ($item) { [string]$item.Name } else { $null }
             sizeBytes = if ($item) { [long]$item.Length } else { 0 }
             updatedAt = if ($item) { $item.LastWriteTimeUtc.ToString('o') } else { $null }

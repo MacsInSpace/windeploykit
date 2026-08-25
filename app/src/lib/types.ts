@@ -664,7 +664,11 @@ export interface PxeBootTaskSequenceImage {
 /** Boot WIM customisation: the WinPE background injected at boot (WIM untouched). */
 export interface PxeBootBrandingStatus {
   winpeBackground: {
+    /** A picture will be served - imported or the bundled default. */
     present: boolean;
+    /** Where it comes from; "default" is the picture that ships with the product. */
+    source?: "custom" | "default" | "none";
+    custom?: boolean;
     fileName?: string | null;
     sizeBytes?: number;
     updatedAt?: string | null;
