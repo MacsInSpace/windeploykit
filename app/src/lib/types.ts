@@ -85,6 +85,7 @@ export type SidecarCommand =
   | "GetPxeBootBrandingStatus"
   | "SetPxeBootDeployUiTitle"
   | "SetPxeBootDeployUiColors"
+  | "GetPxeBootHttpAccessTail"
   | "ListVaultSecrets"
   | "RemoveVaultSecret"
   | "SetVaultSecret"
@@ -673,6 +674,21 @@ export interface PxeBootBrandingStatus {
   /** wdk-ui panel colours (RRGGBB, no #); blank = the panel's built-in scheme. */
   uiAccent?: string;
   uiPanel?: string;
+}
+
+/** One row of Caddy's HTTP access log - what a booting client fetched. */
+export interface PxeBootHttpFetchRow {
+  time: string;
+  ip: string;
+  method: string;
+  uri: string;
+  status: number;
+  size: number;
+}
+
+export interface PxeBootHttpAccessResponse {
+  available: boolean;
+  rows: PxeBootHttpFetchRow[];
 }
 
 export interface PxeBootTaskSequencesPayload {

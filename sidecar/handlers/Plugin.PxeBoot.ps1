@@ -481,6 +481,11 @@ function Handle-SetPxeBootDeployUiColors {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-GetPxeBootHttpAccessTail {
+    param([int]$Id, $Params)
+    Write-SidecarResponse -Id $Id -Data (Get-AppPxeBootHttpAccessTail)
+}
+
 function Handle-GetPxeBootBrandingStatus {
     param([int]$Id, $Params)
     Write-SidecarResponse -Id $Id -Data (Get-AppPxeBootBrandingStatus)

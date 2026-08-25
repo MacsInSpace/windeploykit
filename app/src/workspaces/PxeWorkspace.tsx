@@ -23,6 +23,7 @@ import {
 import { revalidate as revalidateQueryKey } from "../lib/queryCache";
 import { useCachedQuery } from "../lib/useCachedQuery";
 import type {
+  PxeBootHttpAccessResponse,
   ImportPxeBootWimResult,
   ListPxeBootIsoWimsResult,
   PxeBootImagingClient,
@@ -269,9 +270,9 @@ function serviceDotState(running: boolean): SessionState {
 }
 
 /** Which blocks this mount renders - one MDT node each. */
-export type PxeSection = "host" | "pxeLog" | "imagingClients" | "bootImages" | "taskSequences";
+export type PxeSection = "host" | "pxeLog" | "imagingClients" | "httpFetches" | "bootImages" | "taskSequences";
 
-const ALL_SECTIONS: PxeSection[] = ["host", "pxeLog", "imagingClients", "bootImages", "taskSequences"];
+const ALL_SECTIONS: PxeSection[] = ["host", "pxeLog", "imagingClients", "httpFetches", "bootImages", "taskSequences"];
 
 export function PxeWorkspace({
   sections = ALL_SECTIONS,
@@ -346,6 +347,9 @@ export function PxeWorkspace({
   const [logTail, setLogTail] = useState<PxeBootLogTailResponse | null>(null);
   const [logLoading, setLogLoading] = useState(false);
   const [imagingExpanded, setImagingExpanded] = useState(true);
+  // Caddy's HTTP access log - infrastructure diagnostics, collapsed by default.
+  const [httpFetchExpanded, setHttpFetchExpanded] = useState(false);
+  const [httpFetches, setHttpFetches] = useState<PxeBootHttpAccessResponse | null>(null);
   const [imagingClients, setImagingClients] = useState<PxeBootImagingClient[] | null>(null);
   const [imagingSelected, setImagingSelected] = useState<string | null>(null);
   const [imagingLog, setImagingLog] = useState<PxeBootImagingClientLogResponse | null>(null);
@@ -676,6 +680,27 @@ export function PxeWorkspace({
       window.clearInterval(timer);
     };
   }, [imagingExpanded]);
+
+  // The HTTP access tail only while its section is open (file tail, 5s cadence).
+  useEffect(() => {
+    if (!httpFetchExpanded) return;
+    let active = true;
+    const tick = () => {
+      if (document.hidden) return;
+      void sidecar
+        .invoke<PxeBootHttpAccessResponse>("GetPxeBootHttpAccessTail")
+        .then((resp) => {
+          if (active) setHttpFetches(resp);
+        })
+        .catch(() => undefined);
+    };
+    tick();
+    const timer = window.setInterval(tick, 5_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [httpFetchExpanded]);
 
   // Live-tail the selected client's imaging log while visible (3s cadence, like the TFTP log).
   useEffect(() => {
@@ -2284,6 +2309,66 @@ export function PxeWorkspace({
                         </pre>
                       </div>
                     ) : null}
+                  </div>
+                ) : null}
+              </section>
+              )}
+
+              {show("httpFetches") && (
+              <section className="rounded-sm border p-3" style={{ borderColor: "var(--border)", background: "var(--surface2)" }}>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 text-left"
+                  aria-expanded={httpFetchExpanded}
+                  onClick={() => setHttpFetchExpanded((open) => !open)}
+                >
+                  <h3 className="mono text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                    HTTP fetches
+                  </h3>
+                  <span className="mono ml-auto flex shrink-0 items-center gap-2 text-[10px]" style={{ color: "var(--text3)" }}>
+                    {httpFetchExpanded ? (
+                      <SessionDot label="live" state={serviceDotState(true)} message="updating every 5s" />
+                    ) : (
+                      "server access log"
+                    )}
+                  </span>
+                </button>
+                {httpFetchExpanded ? (
+                  <div className="mt-3">
+                    <p className="mb-2 text-[11px]" style={{ color: "var(--text3)" }}>
+                      What booting clients fetched from this host (Caddy access log) - boot files, overlay, WIMs and log pushes, newest first.
+                    </p>
+                    {!httpFetches || !httpFetches.available || httpFetches.rows.length === 0 ? (
+                      <p className="px-1 py-4 text-center text-[12px]" style={{ color: "var(--text3)" }}>
+                        {httpFetches && !httpFetches.available
+                          ? "No access log yet - it appears once imaging services have served a request."
+                          : "No requests in the log tail yet."}
+                      </p>
+                    ) : (
+                      <div className="max-h-[280px] overflow-auto rounded border" style={{ borderColor: "var(--border)", background: "#05080d" }}>
+                        <table className="mono w-full text-[11px]" style={{ borderCollapse: "collapse" }}>
+                          <tbody>
+                            {httpFetches.rows.map((r, i) => (
+                              <tr key={`${r.time}-${i}`} style={{ borderBottom: "1px solid var(--border)" }}>
+                                <td className="px-2 py-1 whitespace-nowrap" style={{ color: "var(--text3)" }}>{r.time}</td>
+                                <td className="px-2 py-1 whitespace-nowrap" style={{ color: "var(--text2)" }}>{r.ip}</td>
+                                <td className="px-2 py-1 whitespace-nowrap" style={{ color: "var(--text3)" }}>{r.method}</td>
+                                <td className="max-w-[380px] truncate px-2 py-1" style={{ color: "var(--text1)" }} title={r.uri}>{r.uri}</td>
+                                <td
+                                  className="px-2 py-1 text-right whitespace-nowrap"
+                                  style={{ color: r.status < 400 ? "var(--green)" : r.status < 500 ? "var(--amber)" : "var(--red)" }}
+                                >
+                                  {r.status}
+                                </td>
+                                <td className="px-2 py-1 text-right whitespace-nowrap" style={{ color: "var(--text3)" }}>
+                                  {r.size >= 1048576 ? `${(r.size / 1048576).toFixed(1)} MB` : r.size >= 1024 ? `${Math.round(r.size / 1024)} KB` : `${r.size} B`}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </section>

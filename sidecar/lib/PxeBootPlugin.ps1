@@ -8562,6 +8562,63 @@ function Sync-AppPxeBootIngestRoute {
     }
 }
 
+function Get-AppPxeBootHttpAccessTail {
+    <#
+    .SYNOPSIS
+        The tail of Caddy's HTTP access log as rows for the Monitoring panel -
+        the server-side record of what booting clients actually fetched
+        (wimboot, boot.wim, overlay files, imaging-log POSTs). Sits under the
+        Imaging clients section: device history first, plumbing second.
+    #>
+    param([int]$MaxRows = 150)
+    $path = Join-Path (Split-Path -Parent (Get-AppPxeBootLayoutPaths).httpRoot) 'http-access.log'
+    if (-not (Test-Path -LiteralPath $path)) { return @{ available = $false; rows = @() } }
+    $text = ''
+    try {
+        $fs = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read,
+            ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+        try {
+            $cap = 131072
+            if ($fs.Length -gt $cap) { $null = $fs.Seek(-$cap, [System.IO.SeekOrigin]::End) }
+            $reader = New-Object System.IO.StreamReader($fs)
+            $text = $reader.ReadToEnd()
+        } finally { $fs.Dispose() }
+    } catch {
+        return @{ available = $false; rows = @() }
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($line in ($text -split "`n")) {
+        if (-not $line.Contains('handled request')) { continue }
+        $i = $line.IndexOf('{')
+        if ($i -lt 0) { continue }
+        $j = $null
+        try { $j = $line.Substring($i) | ConvertFrom-Json } catch { continue }
+        if ($null -eq $j -or $null -eq $j.PSObject.Properties['request']) { continue }
+        # The prefix timestamp is UTC ("2026/08/24 13:49:24.638\t...").
+        $time = ''
+        try {
+            $stamp = $line.Substring(0, 23)
+            $utc = [datetime]::ParseExact($stamp, 'yyyy/MM/dd HH:mm:ss.fff', $null,
+                [System.Globalization.DateTimeStyles]::AssumeUniversal)
+            $time = $utc.ToLocalTime().ToString('HH:mm:ss')
+        } catch { }
+        $rows.Add(@{
+            time   = $time
+            ip     = [string]$j.request.remote_ip
+            method = [string]$j.request.method
+            uri    = [string]$j.request.uri
+            status = [int]$j.status
+            size   = [long]$j.size
+        })
+    }
+    $all = @($rows.ToArray())
+    $take = [Math]::Min($MaxRows, $all.Count)
+    $slice = @()
+    if ($take -gt 0) { $slice = @($all[($all.Count - $take)..($all.Count - 1)]) }
+    [array]::Reverse($slice)
+    @{ available = $true; rows = $slice }
+}
+
 function Sync-AppPxeBootDeployClientPublish {
     <#
     .SYNOPSIS

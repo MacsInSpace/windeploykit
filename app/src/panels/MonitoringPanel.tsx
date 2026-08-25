@@ -7,5 +7,5 @@
 import { PxeWorkspace } from "../workspaces/PxeWorkspace";
 
 export function MonitoringPanel() {
-  return <PxeWorkspace sections={["pxeLog", "imagingClients"]} title="Monitoring" />;
+  return <PxeWorkspace sections={["pxeLog", "imagingClients", "httpFetches"]} title="Monitoring" />;
 }
