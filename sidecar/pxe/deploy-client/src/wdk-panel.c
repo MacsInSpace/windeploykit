@@ -72,6 +72,7 @@ static HFONT f_title, f_body, f_mono, f_note;
 static int g_frame;         /* animation counter for the indeterminate bar */
 static int g_confirmUp;
 static int g_dirty = 1;
+static unsigned long long g_applyBytes;   /* uncompressed image size */
 
 /* Read up to cap bytes from the END of a file that another process keeps
  * open for writing - full sharing, and never fail the caller. */
@@ -128,6 +129,12 @@ static void parse_state(void)
             widen(v, vlen, g.serial, 64);
         else if (klen == 4 && !memcmp(line, "note", 4))
             widen(v, vlen, g.note, 256);
+        else if (klen == 10 && !memcmp(line, "applybytes", 10)) {
+            g_applyBytes = 0;
+            for (int i = 0; i < vlen; i++)
+                if (v[i] >= '0' && v[i] <= '9')
+                    g_applyBytes = g_applyBytes * 10 + (unsigned)(v[i] - '0');
+        }
         else if (klen >= 6 && !memcmp(line, "stage", 5) && g.stages < MAX_STAGES) {
             char *tld = memchr(v, '~', vlen);
             if (!tld) continue;
@@ -304,6 +311,47 @@ static void paint(HWND hwnd, HDC dc, RECT *rc)
 
     /* Progress bar, drawn by hand: known percent > filled; running with no
      * percent > a sliding block; everything ok > full. */
+    /* Byte-accurate progress (Craig: "not simulated"): the engine passes
+     * the image's uncompressed size (dism /Get-WimInfo) via deploy.state,
+     * and W:'s used bytes are what DISM has actually written. Console
+     * scraping was tried first and froze the panel - reading the screen
+     * buffer fights conhost's lock while DISM streams progress into it. */
+    if (run_seen && g_applyBytes > 0) {
+        ULARGE_INTEGER freeb, total;
+        if (GetDiskFreeSpaceExW(L"W:\\", &freeb, &total, NULL) && total.QuadPart > freeb.QuadPart) {
+            unsigned long long used = total.QuadPart - freeb.QuadPart;
+            int v = (int)((used * 100ULL) / g_applyBytes);
+            if (v > 99) v = 99;
+            g.pct = v;
+            /* Occasionally into the panel-side imaging log too (Craig): the
+             * heartbeat loop reads this file and pushes the value as a log
+             * line whenever it changes - the panel has the number, the
+             * engine has curl. */
+            static int lastWritten = -1;
+            if (v != lastWritten) {
+                HANDLE pf = CreateFileW(L"X:\\Windows\\Temp\\deploy.pct",
+                                        GENERIC_WRITE, FILE_SHARE_READ, NULL,
+                                        CREATE_ALWAYS, 0, NULL);
+                if (pf != INVALID_HANDLE_VALUE) {
+                    char buf[16];
+                    int n = wsprintfA(buf, "%d%%\r\n", v);
+                    DWORD wr;
+                    WriteFile(pf, buf, (DWORD)n, &wr, NULL);
+                    CloseHandle(pf);
+                    lastWritten = v;
+                }
+            }
+        }
+    }
+    if (g.pct >= 0) {
+        WCHAR pt[16];
+        _snwprintf(pt, 16, L"%d%%", g.pct);
+        pt[15] = 0;
+        RECT prc = { x, y - 24, x + cw, y };
+        SelectObject(mem, f_body);
+        SetTextColor(mem, c_accent);
+        DrawTextW(mem, pt, -1, &prc, DT_RIGHT | DT_BOTTOM | DT_SINGLELINE | DT_NOPREFIX);
+    }
     RECT track = { x, y, x + cw, y + 16 };
     HBRUSH tb = CreateSolidBrush(RGB(
         GetRValue(c_panel) + 24, GetGValue(c_panel) + 24, GetBValue(c_panel) + 32));

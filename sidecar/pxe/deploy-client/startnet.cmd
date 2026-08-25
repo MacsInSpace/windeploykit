@@ -308,11 +308,17 @@ if not defined APPLYDIR (
 )
 call :ui_stage 6 ok
 call :log "Applying to %APPLYDIR%"
-call :log "Applying image - DISM prints no lines while it runs; the panel shows a heartbeat until it finishes."
+call :log "Applying image - DISM runs quiet in the log; live percent on screen."
 
 rem --- apply ----------------------------------------------------------------
+rem The image's UNCOMPRESSED size feeds the panel's byte-accurate progress:
+rem W: used bytes vs this number is what DISM has really written - the real
+rem percent Craig asked for, with no console scraping (that froze the panel
+rem against conhost's lock). One metadata read over SMB, a few seconds.
+set "APPLYBYTES="
+for /f "tokens=1,* delims=:" %%A in ('dism /Get-WimInfo /WimFile:"%WIMPATH%" /Index:%TS_INDEX% 2^>nul ^| find /i "Size"') do if not defined APPLYBYTES set "APPLYBYTES=%%B"
 call :ui_stage 7 run
-call :ui_note "Applying the image - DISM shows its own progress below."
+call :ui_note "Applying the image..."
 dism /Apply-Image /ImageFile:"%WIMPATH%" /Index:%TS_INDEX% /ApplyDir:%APPLYDIR%
 if errorlevel 1 (
     call :fail "DISM /Apply-Image failed - see the DISM output above."
@@ -458,10 +464,22 @@ rem orphaned remainder, the anchor exits, and winpeshl reboots WinPE. This was
 rem the "VM crashes right after wpeinit" loop (found via the boot-chain VM,
 rem 2026-08-25: last log line "Log push:", "Connecting" never arrived). Parens
 rem are only special inside a block, so plain lines are safe.
+rem Each tick posts EITHER the apply percent (when the panel's deploy.pct
+rem changed - the panel measures it, this loop has curl) or a plain
+rem heartbeat. %%P%%/%%LASTP%% are escaped so they expand in the CHILD.
 > "%HBCMD%" echo @echo off
 >>"%HBCMD%" echo :loop
 >>"%HBCMD%" echo if not exist "%HBFLAG%" exit
+>>"%HBCMD%" echo set "P="
+>>"%HBCMD%" echo if exist "X:\Windows\Temp\deploy.pct" set /p P=^<"X:\Windows\Temp\deploy.pct"
+>>"%HBCMD%" echo if not defined P goto :beat
+>>"%HBCMD%" echo if "%%P%%"=="%%LASTP%%" goto :beat
+>>"%HBCMD%" echo "%CURL%" -s -m 3 -o NUL -H "Content-Type: application/json" -d "{\"serial\":\"%SERIAL%\",\"make\":\"%MAKE%\",\"model\":\"%MODEL%\",\"session\":\"%SESSION%\",\"lines\":[\"Apply progress: %%P%%\"]}" "%LOGHOST%/imaging-log/ingest" ^>nul 2^>^&1
+>>"%HBCMD%" echo set "LASTP=%%P%%"
+>>"%HBCMD%" echo goto :sleep
+>>"%HBCMD%" echo :beat
 >>"%HBCMD%" echo "%CURL%" -s -m 3 -o NUL -H "Content-Type: application/json" -d "{\"serial\":\"%SERIAL%\",\"make\":\"%MAKE%\",\"model\":\"%MODEL%\",\"session\":\"%SESSION%\",\"heartbeat\":true,\"lines\":[]}" "%LOGHOST%/imaging-log/ingest" ^>nul 2^>^&1
+>>"%HBCMD%" echo :sleep
 >>"%HBCMD%" echo ping -n 31 127.0.0.1 ^>nul
 >>"%HBCMD%" echo goto :loop
 start "" /b cmd /c "%HBCMD%"
@@ -558,6 +576,7 @@ if not defined STATE goto :eof
     if defined MAKE (echo machine=!MAKE! / !MODEL!) else echo machine=
     if defined SERIAL (echo serial=!SERIAL!) else echo serial=
     if defined UINOTE (echo note=!UINOTE!) else echo note=
+    if defined APPLYBYTES (echo applybytes=!APPLYBYTES!) else echo applybytes=
     for /l %%i in (1,1,%STGCOUNT%) do echo stage%%i=!ST%%i!~!STG%%i!
 )
 move /y "%STATE%.tmp" "%STATE%" >nul 2>&1
