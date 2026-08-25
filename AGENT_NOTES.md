@@ -888,11 +888,19 @@ Mirrored from USM the same night (converged libs, ASCII-clean, all three gates g
   notarised (id `25836e2c-...`) and DMG notarised (id `aa38cef6-...`), stapling
   Error 65 as documented. Incremental universal build + notarisation: about 4 minutes.
 - **The "full code review before build" Craig asked for earlier was NOT done** - the
-  later instruction went straight to build and release. It is the next item: review
-  0.6.0 as shipped, then 0.6.1. The repo is private, so nothing has reached the public.
-- Two policy items for Craig, both flagged in the release recap: the default
-  background's licence/source (`NOTICE.md` row), and `sidecar/pxe/mdt-boot-x64/`
-  (Microsoft boot files) riding into any build made on his Mac.
+  later instruction went straight to build and release. Craig (2026-08-26, after the
+  release): 0.6.0 is the right number because it has never been opened on a fresh
+  Mac; he will do that himself; **the code review happens on his call - do not start
+  it unasked.** The repo is private, so nothing has reached the public.
+- Policy calls, answered by Craig 2026-08-26: `sidecar/pxe/mdt-boot-x64/` - "leave
+  them, they are not needed" (LiteTouch WIMs are not a target; if the files are ever
+  in the way, excluding them from the bundle is fine). The default background's
+  licence/source is still to be recorded (`NOTICE.md` row).
+- **Craig's order after the fresh-Mac test:** (1) a Windows build (needs a
+  `tauri.windows.conf.json` carrying `vendor/binaries/pxe-windows/`, the Windows
+  aria2 zips and `packaging/pxe-tftpd64.json`), then (2) Applications and the
+  post-install steps of the Task Sequence (section 2.3's Phase-C runner is the
+  dependency).
 
 ## 10. Windows evaluation media (Evaluation Center ISOs) - 2026-08-22
 
