@@ -878,18 +878,21 @@ Mirrored from USM the same night (converged libs, ASCII-clean, all three gates g
   `c5bb958` overlay regression it flushed out are in the dated section at the end of this
   file ("Update Deployment Share and Restart Services").
 - Section 3's handler table re-measured: 83 commands, four without a handler.
-- **Next, in Craig's words (2026-08-26), ahead of items 1-10 above:**
-  1. "Make sure all assets are packaged in with the 1st release" - audit
-     `scripts/prepare-bundle-deps.ps1` against everything the sidecar reads at runtime:
-     `sidecar/pxe/<arch>/` trees, wimboot, the patched snponly, `sidecar/pxe/tools/*`
-     (7z, curl, `wdk-bg.exe`, `wdk-panel.exe`), `sidecar/pxe/deploy-client/`, the
-     vendored psmodules, the driver/eval catalogs, the Caddy / dnsmasq / tftpd64 binaries.
-     Prove it the way the vault was proved: build the bundle, run it from a clean HOME,
-     Start, boot a VM.
-  2. "A full code review before build."
-  3. Then the build, per `docs/AGENT_NOTES_MACOS_BUILD.md` (carried from PSOpenAD-FE -
-     same PowerShell + Tauri shape; Craig: "seems like a great combination for cross
-     platform work").
+- **Done the same day, on Craig's later instruction** ("make sure all assets will be
+  included (except the isos ofc) and run a build and release (MacOS universal
+  please)"): the bundle audit (dated section at the end of this file), the bundled
+  default WinPE background, and **release v0.6.0** -
+  `https://github.com/MacsInSpace/windeploykit/releases/tag/v0.6.0`, built from
+  `282034a` (tag `v0.6.0`, clean tree), `WinDeployKit_0.6.0_universal.dmg` 31.7 MB,
+  SHA-256 `1d7fd9aff6845e8fe3fd42ceda8dd27a4e4d6608e49a7d790d65dda583c968d7`, app
+  notarised (id `25836e2c-...`) and DMG notarised (id `aa38cef6-...`), stapling
+  Error 65 as documented. Incremental universal build + notarisation: about 4 minutes.
+- **The "full code review before build" Craig asked for earlier was NOT done** - the
+  later instruction went straight to build and release. It is the next item: review
+  0.6.0 as shipped, then 0.6.1. The repo is private, so nothing has reached the public.
+- Two policy items for Craig, both flagged in the release recap: the default
+  background's licence/source (`NOTICE.md` row), and `sidecar/pxe/mdt-boot-x64/`
+  (Microsoft boot files) riding into any build made on his Mac.
 
 ## 10. Windows evaluation media (Evaluation Center ISOs) - 2026-08-22
 

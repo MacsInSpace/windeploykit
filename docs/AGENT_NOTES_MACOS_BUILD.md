@@ -236,3 +236,14 @@ unpacked the aria2 tar.gz and rejected the `aria2c` inside (first 0.6.0 attempt)
 
 `bundle.targets` is `["app", "dmg"]` - the DMG is what a release publishes.
 
+**0.6.0 release record (2026-08-26).** Three builds: the first was rejected by
+notarisation for the `aria2c` inside a tar.gz (see the table), the second accepted
+with the archive removed, the third from tag `v0.6.0` (`282034a`) accepted again -
+app ticket `25836e2c-22df-409b-875b-5d4f238d54d3`. The DMG was then notarised on its
+own with `xcrun notarytool submit --wait` (`aa38cef6-5669-40fb-b347-8685e672ca52`,
+Accepted); stapling failed with Error 65 exactly as above and the DMG bytes did not
+change. `spctl -a -t open` on the DMG still says "Unnotarized Developer ID" locally -
+that is the missing staple, not a missing ticket. Timings on Craig's Mac with a warm
+cargo cache: Rust 25 s per architecture, bundle + sign + notarise about 3 minutes.
+Published asset downloaded back: SHA-256 identical to the build.
+
