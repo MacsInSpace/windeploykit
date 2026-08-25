@@ -2170,9 +2170,15 @@ function Write-AppPxeBootMenuFiles {
         - nothing imported -> WAN deploy chain when configured, else guidance + shell
     #>
 
+    param(
+        # The caller just ran Sync-AppPxeBootTaskSequenceStore itself (Update Deployment
+        # Share wants its count) - skip the second, identical pass.
+        [switch]$SkipTaskSequenceSync
+    )
+
     # Task-sequence unattends ride the same regen cadence (save / start / import) so
     # Z:\TaskSequences always matches the panel. Guarded: lib loads after this one.
-    if (Test-AppSidecarCommand Sync-AppPxeBootTaskSequenceStore) {
+    if (-not $SkipTaskSequenceSync -and (Test-AppSidecarCommand Sync-AppPxeBootTaskSequenceStore)) {
         try { Sync-AppPxeBootTaskSequenceStore | Out-Null } catch {
             Write-SidecarLogVerbose "PXE boot: task-sequence sync skipped - $($_.Exception.Message)"
         }
@@ -2185,6 +2191,19 @@ function Write-AppPxeBootMenuFiles {
         }
     }
     $cfg = Read-AppPxeBootConfig
+
+    # The deploy overlay (deploy.unc, deploy.cred, loghost, startnet.cmd, tools) is
+    # decided here too: Get-AppPxeBootWimOverlayInitrdLines only injects a profile whose
+    # Required files exist, so they must be published BEFORE the menu lines below are
+    # built. This call lived in the FieldIso asset sync until c5bb958 deleted that
+    # function (2026-08-24); from then on a fresh store never got an overlay at all and
+    # an imported WIM booted to a bare WinPE prompt - it kept working on the dev box
+    # only because the files already existed and the housekeeping tick refreshed them.
+    try {
+        Write-AppPxeBootWimOverlayRuntimeAssets -LanIp ([string](Get-AppPxeBootLanIp -InterfaceId $cfg.interfaceId))
+    } catch {
+        Write-SidecarLog "PXE boot: deploy overlay publish failed - $($_.Exception.Message)"
+    }
     $port = [int]$cfg.httpPort
     if ($port -lt 1 -or $port -gt 65535) { $port = 8080 }
     $deployBase = Get-AppPxeBootWanIsoCatalogUrl
@@ -8654,6 +8673,207 @@ function Sync-AppPxeBootDeployClientPublish {
     } catch {
         Write-SidecarLogVerbose "PXE boot: deploy client re-publish failed - $($_.Exception.Message)"
     }
+}
+
+function Get-AppPxeBootServiceRestartReasons {
+    <#
+    .SYNOPSIS
+        What a file rewrite cannot fix: running daemons that still carry the old
+        network. Empty means Update-AppPxeBootDeploymentShare was enough.
+    .NOTES
+        Caddy listens on 0.0.0.0 and its Caddyfile names no LAN IP, so HTTP never
+        needs a restart for an address change. dnsmasq does: dhcp-boot=<file>,<ip>,<ip>
+        is baked into its config at start and it does not re-read that on SIGHUP. The
+        other case is an ISO mounted after HTTP came up - its /iso-wim/<token>/ route
+        is written into the Caddyfile at HTTP start only.
+    #>
+    param(
+        [string]$LanIp,
+        [bool]$HttpRunning,
+        [bool]$TftpRunning
+    )
+    $reasons = [System.Collections.Generic.List[string]]::new()
+    $paths = Get-AppPxeBootLayoutPaths
+    $tftpName = ''
+    try {
+        if ($TftpRunning -and $script:AppPxeBootState.TftpProcess) {
+            $tftpName = [string]$script:AppPxeBootState.TftpProcess.ProcessName
+        }
+    } catch { $tftpName = '' }
+    # tftpd64 on Windows carries no address; only a dnsmasq config can go stale.
+    if ($TftpRunning -and $tftpName -notmatch 'tftpd' -and -not [string]::IsNullOrWhiteSpace($LanIp)) {
+        try {
+            if (Test-Path -LiteralPath $paths.dnsmasqConf) {
+                $conf = Get-Content -LiteralPath $paths.dnsmasqConf -Raw -ErrorAction Stop
+                if ($conf -match '(?m)^dhcp-boot=[^,\r\n]+,(\d{1,3}(?:\.\d{1,3}){3})') {
+                    $answers = $Matches[1]
+                    if ($answers -ne $LanIp) {
+                        [void]$reasons.Add("TFTP/proxyDHCP still names $answers as the boot server; this machine is now $LanIp.")
+                    }
+                }
+            }
+        } catch { }
+    }
+    if ($HttpRunning) {
+        try {
+            if (Test-Path -LiteralPath $paths.caddyfile) {
+                $caddyText = Get-Content -LiteralPath $paths.caddyfile -Raw -ErrorAction Stop
+                $unrouted = @($script:AppPxeBootState.IsoMounts.Values | Where-Object {
+                        $base = [string]$_.base
+                        $base -and -not $caddyText.Contains("/iso-wim/$base/")
+                    })
+                if ($unrouted.Count -gt 0) {
+                    [void]$reasons.Add("$($unrouted.Count) mounted ISO(s) have no HTTP route yet (routes are written when HTTP starts).")
+                }
+            }
+        } catch { }
+    }
+    return @($reasons)
+}
+
+function Update-AppPxeBootDeploymentShare {
+    <#
+    .SYNOPSIS
+        MDT's "Update Deployment Share": regenerate everything the services serve,
+        for the network this machine is on now - without touching a process.
+    .DESCRIPTION
+        Everything a Start does on the way up, minus the daemons: fresh LAN IP (memos
+        cleared), store layout, bundled boot assets (snponly, wimboot, arch trees -
+        hash-compared), per-WIM boot assets, the Deploy$ share re-ensured while a
+        service is up (idempotent; a first-ever run mints the throwaway credential),
+        task sequences to Z:\TaskSequences, boot.ipxe / menu.ipxe / the TFTP menu, the
+        deploy overlay (deploy.unc, loghost, deploy.cred, startnet.cmd, tools), and ISO
+        mounts re-asserted while HTTP serves.
+        Nothing here kills, starts, dismounts or unshares, so a device mid-apply on Z:\
+        keeps reading. The one thing files cannot do is move a running daemon to a new
+        address - those come back as restartReasons for the panel to say "Restart
+        Services". Craig, 2026-08-26: "everything minus the services".
+    .OUTPUTS
+        Summary hashtable - no status payload on purpose: Get-AppPxeBootStatus was 1.1 s
+        of a 2.0 s call (measured 2026-08-26) and the panel refetches status right after
+        anyway. Memos are cleared at the end so that refetch sees the new state.
+    #>
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    Clear-AppPxeBootMemo
+    $cfg = Read-AppPxeBootConfig
+    $lanIp = [string](Get-AppPxeBootLanIp -InterfaceId $cfg.interfaceId)
+    if (-not $lanIp) {
+        [void]$warnings.Add('No LAN IP: boot URLs and deploy.unc fall back to the host name, which WinPE resolves unreliably.')
+    }
+
+    Ensure-AppPxeBootStoreLayoutLite | Out-Null
+    $assetsChanged = [bool](Sync-AppPxeBootBundledBootAssets)
+    if (Sync-AppPxeBootWimBootAssets) { $assetsChanged = $true }
+    $layout = Test-AppPxeBootLayout -SkipStoreInit
+    if (-not $layout.ok) {
+        [void]$warnings.Add('Missing boot files: ' + (@($layout.missing) -join ', '))
+    }
+
+    Sync-AppPxeBootHttpProcessState -Port ([int]$cfg.httpPort)
+    Sync-AppPxeBootTftpProcessState
+    $httpRunning = [bool]($script:AppPxeBootState.HttpProcess -and -not $script:AppPxeBootState.HttpProcess.HasExited)
+    $tftpRunning = [bool]($script:AppPxeBootState.TftpProcess -and -not $script:AppPxeBootState.TftpProcess.HasExited)
+
+    # Share before menu: a first-ever run mints the throwaway credential inside the
+    # ensure, and the overlay the menu pass publishes must carry it (Start gets there
+    # with two menu passes; one is enough when the order is right). Only while a
+    # service is up - Stop tore the share down on purpose, and Start brings it back.
+    $share = $null
+    if (($httpRunning -or $tftpRunning) -and [bool]$cfg.smbShareEnabled) {
+        $probe = Get-AppPxeBootImageLibraryShareStatus
+        if ($probe.tccBlocked) {
+            [void]$warnings.Add([string]$probe.guidance)
+        } else {
+            try {
+                $share = @(Ensure-AppPxeBootImageLibraryShare) | Select-Object -Last 1
+            } catch {
+                [void]$warnings.Add("Deploy share not re-published - $($_.Exception.Message)")
+            }
+        }
+    }
+    if (-not $share) { $share = Get-AppPxeBootImageLibraryShareStatus }
+
+    $tsPublished = 0
+    if (Test-AppSidecarCommand Sync-AppPxeBootTaskSequenceStore) {
+        try {
+            $tsPublished = [int](Sync-AppPxeBootTaskSequenceStore).published
+        } catch {
+            [void]$warnings.Add("Task sequences not published - $($_.Exception.Message)")
+        }
+    }
+    # boot.ipxe / menu.ipxe, the TFTP menu + autoexec, and the deploy overlay (published
+    # inside the menu pass, before the initrd lines that depend on it are built).
+    Write-AppPxeBootMenuFiles -SkipTaskSequenceSync
+
+    $isoMounts = 0
+    if ($httpRunning) {
+        try {
+            $isoMounts = @(Mount-AppPxeBootInstallWimIsos).Count
+        } catch {
+            [void]$warnings.Add("ISO mounts - $($_.Exception.Message)")
+        }
+    }
+
+    $restartReasons = @(Get-AppPxeBootServiceRestartReasons -LanIp $lanIp -HttpRunning $httpRunning -TftpRunning $tftpRunning)
+    $deployUnc = $null
+    try {
+        $uncFile = Join-Path (Join-Path (Get-AppPxeBootLayoutPaths).httpRoot 'deploy') 'deploy.unc'
+        if (Test-Path -LiteralPath $uncFile) {
+            $deployUnc = [string](Get-Content -LiteralPath $uncFile -TotalCount 1 -ErrorAction Stop)
+        }
+    } catch { $deployUnc = $null }
+    Clear-AppPxeBootMemo
+    $sw.Stop()
+
+    $servicesText = if ($httpRunning -and $tftpRunning) { 'HTTP + TFTP up' } elseif ($httpRunning) { 'HTTP up' } elseif ($tftpRunning) { 'TFTP up' } else { 'stopped' }
+    $shareText = if ([bool]$share.active) { 'shared' } elseif ([bool]$share.enabled) { 'enabled, not published' } else { 'off' }
+    $lanText = if ($lanIp) { $lanIp } else { 'none' }
+    $uncText = if ($deployUnc) { $deployUnc } else { 'not published' }
+    Write-SidecarLog ("PXE boot: deployment share updated in {0} ms - LAN {1}; boot menu + {2} task sequence(s); overlay {3}; Deploy`$ {4}; {5} ISO mount(s); services {6}" -f `
+            $sw.ElapsedMilliseconds, $lanText, $tsPublished, $uncText, $shareText, $isoMounts, $servicesText)
+    foreach ($r in $restartReasons) { Write-SidecarLog "PXE boot: restart needed - $r" }
+    foreach ($w in $warnings) { Write-SidecarLog "PXE boot: update warning - $w" }
+
+    [ordered]@{
+        ok                     = $true
+        lanIp                  = $(if ($lanIp) { $lanIp } else { $null })
+        httpRunning            = $httpRunning
+        tftpRunning            = $tftpRunning
+        servicesRunning        = ($httpRunning -or $tftpRunning)
+        shareEnabled           = [bool]$share.enabled
+        shareActive            = [bool]$share.active
+        deployUnc              = $deployUnc
+        taskSequencesPublished = $tsPublished
+        isoMounts              = $isoMounts
+        bootAssetsChanged      = $assetsChanged
+        restartReasons         = @($restartReasons)
+        warnings               = @($warnings)
+        elapsedMs              = [int]$sw.ElapsedMilliseconds
+    }
+}
+
+function Restart-AppPxeBootServices {
+    <#
+    .SYNOPSIS
+        Bounce the daemons and bring them back bound to the network as it is now.
+    .DESCRIPTION
+        Minimal stop, full start: Caddy and dnsmasq/tftpd64 go down and come back with
+        a freshly read LAN IP, and Start regenerates every served file on the way up
+        (menus, task sequences, overlay, assets, share) - so this is
+        Update-AppPxeBootDeploymentShare plus the bounce. The Deploy$ share and the ISO
+        mounts stay up throughout: neither carries the LAN IP (host-named share,
+        path-named mounts) and both are what a device mid-apply reads from, so an apply
+        already copying from Z:\ survives, while a device still booting (menu, boot.wim
+        download) fails and needs another PXE boot. The handler guards that case with
+        the imaging-clients count.
+    .PARAMETER IngestPort
+        The parent sidecar's imaging-log listener when this runs in a child pwsh - see
+        Start-AppPxeBootHttpServer.
+    #>
+    param([int]$IngestPort = 0)
+    Stop-AppPxeBootServices -Minimal | Out-Null
+    return (Start-AppPxeBootServices -IngestPort $IngestPort)
 }
 
 function Dismount-AppPxeBootInstallWimIso {

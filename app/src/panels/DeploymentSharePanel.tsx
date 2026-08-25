@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PanelShell } from "../components/PanelShell";
 import { useConsoleActions, type ConsoleNodeActions } from "../state/consoleActions";
 import { SetupWizard } from "../components/SetupWizard";
+import { updateDeploymentShare } from "../lib/deploymentShare";
 import {
   formatBytes,
   getImageLibraryFreeSpace,
@@ -31,6 +32,7 @@ export function DeploymentSharePanel() {
   const [root, setRoot] = useState("");
   const [space, setSpace] = useState<FreeSpaceInfo | null>(null);
   const [editing, setEditing] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [, setTick] = useState(0);
 
   useEffect(() => subscribeSettings(() => setTick((n) => n + 1)), []);
@@ -45,15 +47,33 @@ export function DeploymentSharePanel() {
   // Properties... is the Workbench verb for the share root; it opens the same
   // wizard first run used. Registered with the shell, not drawn here.
   const openProperties = useCallback(() => setEditing(true), []);
+  // Update Deployment Share - the Workbench's first verb on the share root. Ours
+  // regenerates everything the services serve and touches no process (Netboot has
+  // Restart Services for that), so it is safe while devices are imaging.
+  const runUpdate = useCallback(async () => {
+    setUpdating(true);
+    try {
+      await updateDeploymentShare();
+    } finally {
+      setUpdating(false);
+      refresh();
+    }
+  }, [refresh]);
   const consoleActions = useMemo<ConsoleNodeActions>(
     () => ({
       // The shell renders Properties... itself (bold, Alt+Enter) from `properties`,
       // so it is not repeated in `items` - that showed the verb twice.
-      items: [],
+      items: [
+        {
+          label: updating ? "Updating..." : "Update Deployment Share",
+          disabled: updating,
+          onSelect: () => void runUpdate(),
+        },
+      ],
       properties: openProperties,
       refresh,
     }),
-    [openProperties, refresh],
+    [openProperties, refresh, runUpdate, updating],
   );
   useConsoleActions(consoleActions);
 

@@ -103,6 +103,7 @@ export type SidecarCommand =
   | "RefreshVendorSccmCatalogs"
   | "RemovePxeBootIso"
   | "RemovePxeBootWim"
+  | "RestartPxeBootServices"
   | "RevealSmbdForFullDiskAccess"
   | "RefreshEvalIsoCatalog"
   | "SavePxeBootTaskSequences"
@@ -120,6 +121,7 @@ export type SidecarCommand =
   | "StopAria2Daemon"
   | "StopPxeBootServices"
   | "SubmitAcerSccmCatalogHarvest"
+  | "UpdatePxeBootDeploymentShare"
   | "harvest_acer_sccm_urls";
 
 // ----------------------------------------------------------------------------
@@ -751,6 +753,52 @@ export interface StartPxeBootServicesParams {
 export interface StopPxeBootServicesParams {
   httpOnly?: boolean;
   tftpOnly?: boolean;
+}
+
+export interface RestartPxeBootServicesParams {
+  /** Restart even though devices are imaging (the panel asked and the user said yes). */
+  force?: boolean;
+}
+
+/**
+ * RestartPxeBootServices refuses while devices are mid-image unless `force` is set;
+ * this is what it answers instead, so the panel can name them and ask.
+ */
+export interface PxeBootServiceRestartBlocked {
+  blocked: true;
+  imagingClientsActive: number;
+  clients: Array<{ serial: string; model?: string; ip?: string; lastLine?: string }>;
+}
+
+export type PxeBootServiceRestartResult =
+  | PxeBootPluginStatus
+  | PxeBootServiceStartAck
+  | PxeBootServiceRestartBlocked;
+
+export function isPxeBootServiceRestartBlocked(
+  v: PxeBootServiceRestartResult | undefined,
+): v is PxeBootServiceRestartBlocked {
+  return Boolean(v && (v as PxeBootServiceRestartBlocked).blocked === true);
+}
+
+/** UpdatePxeBootDeploymentShare: what was regenerated, and what a file rewrite could not fix. */
+export interface PxeBootDeploymentShareUpdateResult {
+  ok: boolean;
+  lanIp?: string | null;
+  httpRunning: boolean;
+  tftpRunning: boolean;
+  servicesRunning: boolean;
+  shareEnabled: boolean;
+  shareActive: boolean;
+  /** First line of the published deploy.unc, e.g. \\10.0.0.5\Deploy$. */
+  deployUnc?: string | null;
+  taskSequencesPublished: number;
+  isoMounts: number;
+  bootAssetsChanged: boolean;
+  /** Non-empty = a running daemon still carries the old network; Restart Services fixes it. */
+  restartReasons: string[];
+  warnings: string[];
+  elapsedMs: number;
 }
 
 /** aria2 torrent client plug-in (Plug-ins panel). */

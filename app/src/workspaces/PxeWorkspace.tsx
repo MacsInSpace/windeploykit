@@ -6,7 +6,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { DataTable, type DataTableColumn } from "../components/DataTable";
 import type { MaybeInfoTipRow } from "../components/InfoTip";
 import { VaultEditorOverlay } from "../components/VaultEditorOverlay";
-import { isPxeBootServiceStartAck } from "../lib/types";
+import { isPxeBootServiceRestartBlocked, isPxeBootServiceStartAck } from "../lib/types";
 import { InfrastructureCredentialsOverlay } from "../components/InfrastructureCredentialsOverlay";
 import { PanelShell } from "../components/PanelShell";
 import { SEP } from "../components/ContextMenu";
@@ -51,8 +51,12 @@ import type {
   SetPxeBootPluginConfigParams,
   StartPxeBootServicesParams,
   StopPxeBootServicesParams,
+  RestartPxeBootServicesParams,
+  PxeBootServiceRestartBlocked,
+  PxeBootServiceRestartResult,
 } from "../lib/types";
 import { getImageLibraryRoot } from "../lib/imageLibrary";
+import { updateDeploymentShare } from "../lib/deploymentShare";
 import { toast } from "../state/toastStore";
 
 const PLUGIN_TITLE = "Netboot";
@@ -320,6 +324,10 @@ export function PxeWorkspace({
   // A service start now runs in a child process, so the button has to stay in
   // "Starting..." until the job-finished event lands rather than until the call returns.
   const [servicesStarting, setServicesStarting] = useState(false);
+  // Which verb handed the services to the child: the job-finished toast says "started"
+  // or "restarted" from this, and the menu label "Starting..." / "Restarting...".
+  const servicesVerbRef = useRef<"start" | "restart">("start");
+  const [restartConfirm, setRestartConfirm] = useState<PxeBootServiceRestartBlocked | null>(null);
   const [menuRebuildMessage, setMenuRebuildMessage] = useState<string | null>(null);
   const [httpPort, setHttpPort] = useState("8080");
   const [interfaceId, setInterfaceId] = useState("");
@@ -546,8 +554,9 @@ export function PxeWorkspace({
       if (!d || d.job !== "pxe-services") return;
       setServicesStarting(false);
       setBusy(false);
+      const done = servicesVerbRef.current === "restart" ? "restarted" : "started";
       if (!d.ok) {
-        toast.error(PLUGIN_TITLE, d.error ?? "The services could not be started.");
+        toast.error(PLUGIN_TITLE, d.error ?? `The services could not be ${done}.`);
         void reloadConfig();
         return;
       }
@@ -557,15 +566,15 @@ export function PxeWorkspace({
         if (s.httpRunning && !tccBlockedRef.current) setSmbShareEnabled(true);
       }
       if (s?.httpRunning && s?.tftpRunning) {
-        toast.info(PLUGIN_TITLE, "TFTP + HTTP started.");
+        toast.info(PLUGIN_TITLE, `TFTP + HTTP ${done}.`);
       } else if (s?.httpRunning && s?.tftpLastError) {
-        toast.info(PLUGIN_TITLE, "HTTP started. TFTP was not started - see TFTP section below.");
+        toast.info(PLUGIN_TITLE, `HTTP ${done}. TFTP was not ${done} - see TFTP section below.`);
       } else if (s?.httpRunning) {
-        toast.info(PLUGIN_TITLE, "HTTP started.");
+        toast.info(PLUGIN_TITLE, `HTTP ${done}.`);
       } else if (s?.tftpRunning) {
-        toast.info(PLUGIN_TITLE, "TFTP started.");
+        toast.info(PLUGIN_TITLE, `TFTP ${done}.`);
       } else {
-        toast.info(PLUGIN_TITLE, "Services started (see status).");
+        toast.info(PLUGIN_TITLE, `Services ${done} (see status).`);
       }
       void reloadConfig();
     });
@@ -1333,6 +1342,7 @@ export function PxeWorkspace({
         );
       }
       if (!(await persistConfig(undefined, { skipMenuRegen: true }))) return;
+      servicesVerbRef.current = "start";
       const s = await sidecar.invoke<PxeBootServiceStartResult>("StartPxeBootServices");
       // Backgrounded: the sidecar answered straight away so the rest of the app stays
       // usable. The finished status arrives as a job-finished event (see below), which
@@ -1462,6 +1472,61 @@ export function PxeWorkspace({
       setBusy(false);
     }
   }, []);
+
+  // Stop + Start with a freshly read LAN IP; the Deploy$ share and ISO mounts stay up.
+  // Without `force` the sidecar holds the restart while devices are imaging and names
+  // them - that opens the confirm below, which calls back with force=true.
+  const restartServices = useCallback(
+    async (force: boolean) => {
+      setBusy(true);
+      try {
+        if (!(await prefetchMacAdminForPxe())) return;
+        if (!(await persistConfig(undefined, { skipMenuRegen: true }))) return;
+        servicesVerbRef.current = "restart";
+        const params: RestartPxeBootServicesParams = force ? { force: true } : {};
+        const s = await sidecar.invoke<PxeBootServiceRestartResult>("RestartPxeBootServices", params);
+        if (isPxeBootServiceRestartBlocked(s)) {
+          setRestartConfirm(s);
+          return;
+        }
+        if (isPxeBootServiceStartAck(s)) {
+          setServicesStarting(true);
+          return;
+        }
+        patchPxeBootPanelStatus(s);
+        if (s.httpRunning && s.tftpRunning) {
+          toast.info(PLUGIN_TITLE, "TFTP + HTTP restarted.");
+        } else if (s.httpRunning) {
+          toast.info(PLUGIN_TITLE, "HTTP restarted. TFTP was not started - see TFTP section below.");
+        } else {
+          toast.info(PLUGIN_TITLE, "Services restarted (see status).");
+        }
+        await reloadConfig();
+      } catch (e) {
+        toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
+        await reloadConfig();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [persistConfig, prefetchMacAdminForPxe, reloadConfig],
+  );
+
+  const confirmRestartServices = useCallback(async () => {
+    setRestartConfirm(null);
+    await restartServices(true);
+  }, [restartServices]);
+
+  // "Update Deployment Share": everything the services serve, regenerated for the
+  // network as it is now - and no process touched, so safe while devices image.
+  const updateShare = useCallback(async () => {
+    setBusy(true);
+    try {
+      if (await updateDeploymentShare()) await reloadConfig();
+    } finally {
+      setBusy(false);
+    }
+  }, [reloadConfig]);
 
   const imagingColumns = useMemo(
     (): DataTableColumn<PxeBootImagingClient>[] => [
@@ -1655,7 +1720,12 @@ export function PxeWorkspace({
             {
               // servicesStarting: the start is running in a child process, so the call
               // has already returned - the menu must not read as idle until it lands.
-              label: servicesStarting ? "Starting..." : busy ? "Working..." : "Start Services",
+              label:
+                servicesStarting && servicesVerbRef.current !== "restart"
+                  ? "Starting..."
+                  : busy
+                    ? "Working..."
+                    : "Start Services",
               disabled: busy || servicesStarting || loading || !hasLanIp,
               onSelect: () => void startServices(),
             },
@@ -1664,12 +1734,40 @@ export function PxeWorkspace({
               disabled: busy || servicesStarting || loading || !running,
               onSelect: () => void stopServices(),
             },
+            {
+              // Stop + Start with a freshly read LAN IP. Share and ISO mounts stay up;
+              // a device still booting fails, an apply already on Z:\ carries on.
+              label: servicesStarting && servicesVerbRef.current === "restart" ? "Restarting..." : "Restart Services",
+              disabled: busy || servicesStarting || loading || !running || !hasLanIp,
+              onSelect: () => void restartServices(false),
+            },
+            SEP,
+            {
+              // MDT's verb. Everything the services serve, regenerated for the network as
+              // it is now, with no process touched - safe while devices are imaging.
+              label: "Update Deployment Share",
+              disabled: busy || servicesStarting || loading,
+              onSelect: () => void updateShare(),
+            },
           ]
         : [],
       refresh: reloadConfig,
       status: lanIpText,
     }),
-    [showHost, busy, servicesStarting, loading, hasLanIp, running, startServices, stopServices, reloadConfig, lanIpText],
+    [
+      showHost,
+      busy,
+      servicesStarting,
+      loading,
+      hasLanIp,
+      running,
+      startServices,
+      stopServices,
+      restartServices,
+      updateShare,
+      reloadConfig,
+      lanIpText,
+    ],
   );
   useConsoleActions(consoleActions);
 
@@ -3698,6 +3796,35 @@ export function PxeWorkspace({
         }
         onCancel={() => setReplaceConfirm(null)}
         onConfirm={() => confirmReplaceWim()}
+      />
+
+      <ConfirmModal
+        open={!!restartConfirm}
+        title="Restart services while devices are imaging?"
+        subtitle={restartConfirm ? `${restartConfirm.imagingClientsActive} device(s) imaging right now` : undefined}
+        danger
+        confirmLabel="Restart anyway"
+        body={
+          <div className="flex flex-col gap-2">
+            <ul className="mono text-[11px]" style={{ color: "var(--text)" }}>
+              {(restartConfirm?.clients ?? []).map((c) => (
+                <li key={c.serial}>
+                  {c.serial}
+                  {c.model ? ` - ${c.model}` : ""}
+                  {c.ip ? ` (${c.ip})` : ""}
+                </li>
+              ))}
+            </ul>
+            <p className="text-[12px] leading-relaxed" style={{ color: "var(--text2)" }}>
+              Restarting stops the boot menu, boot image downloads and log pushes while the services come
+              back. A device that is still booting will fail and need another PXE boot. The Deploy$ share
+              and ISO mounts stay up, so an apply already copying from Z: carries on; the log lines it
+              pushes during the restart are lost.
+            </p>
+          </div>
+        }
+        onCancel={() => setRestartConfirm(null)}
+        onConfirm={() => confirmRestartServices()}
       />
 
       <ConfirmModal

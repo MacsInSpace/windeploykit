@@ -379,16 +379,21 @@ is the section 3b lesson made visible rather than just documented.
 > to the default regardless of the setting. If the Deploy$ base ever appears to be
 > ignored, check that call first.
 
-### Commands without a sidecar handler (re-measured 2026-08-22)
+### Commands without a sidecar handler (re-measured 2026-08-26)
 
-`app/src/lib/types.ts` declares 69 `SidecarCommand`s; six have no `Handle-*`:
+`app/src/lib/types.ts` declares 83 `SidecarCommand`s; four have no `Handle-*`:
 
 | Command | Callers | What it is |
 | --- | --- | --- |
 | `GetSiteProfile` / `SetSiteProfile` | none | Expected - section 5 |
-| `LoadLocalMachineCredentialToSession` | 1 | Incomplete credential port; wire it or cut the caller |
-| `ClearMacOsAdminCredentialCache` / `PrefetchMacOsAdminCredential` | 1 each | macOS elevation cache from upstream; decide with the `AppElevation` re-vendor (section 9) |
+| `LoadLocalMachineCredentialToSession` | none (its one caller went with the vault work) | Dead entry - cut it from the union |
 | `harvest_acer_sccm_urls` | 1 | **Not a sidecar command** - a Rust `#[tauri::command]` in `acer_harvest.rs` that is wrongly in the sidecar union. Move it out |
+
+The macOS credential-cache pair (`ClearMacOsAdminCredentialCache` /
+`PrefetchMacOsAdminCredential`) got handlers on 2026-08-22 (section 9b). Re-measure with:
+
+    awk '/^export type SidecarCommand =/,/;$/' app/src/lib/types.ts | grep -o '"[A-Za-z_]*"' | tr -d '"' | \
+      while read c; do grep -q "^function Handle-$c\b" sidecar/windeploykit-sidecar.ps1 sidecar/handlers/*.ps1 || echo $c; done
 
 The 2026-08-21 list of 12 is closed: the seven credential commands and
 `DeleteInfraSshCredential` got handlers with the vault.
@@ -869,6 +874,27 @@ Mirrored from USM the same night (converged libs, ASCII-clean, all three gates g
   torn down while the panel still showed it ticked - WinPE then fails with "network path not
   found". Panel guidance for "ticked but not published" rewritten to match.
 
+### 9e. Update 2026-08-26 - Update Deployment Share / Restart Services; what Craig wants next
+
+- Done: **Update Deployment Share** (Netboot node and the Deployment Share root) and
+  **Restart Services** (Netboot, beside Start / Stop) - Action menu and both right-click
+  menus via `consoleActions`, with the mid-image guard. Design, measurements and the
+  `c5bb958` overlay regression it flushed out are in the dated section at the end of this
+  file ("Update Deployment Share and Restart Services").
+- Section 3's handler table re-measured: 83 commands, four without a handler.
+- **Next, in Craig's words (2026-08-26), ahead of items 1-10 above:**
+  1. "Make sure all assets are packaged in with the 1st release" - audit
+     `scripts/prepare-bundle-deps.ps1` against everything the sidecar reads at runtime:
+     `sidecar/pxe/<arch>/` trees, wimboot, the patched snponly, `sidecar/pxe/tools/*`
+     (7z, curl, `wdk-bg.exe`, `wdk-panel.exe`), `sidecar/pxe/deploy-client/`, the
+     vendored psmodules, the driver/eval catalogs, the Caddy / dnsmasq / tftpd64 binaries.
+     Prove it the way the vault was proved: build the bundle, run it from a clean HOME,
+     Start, boot a VM.
+  2. "A full code review before build."
+  3. Then the build, per `docs/AGENT_NOTES_MACOS_BUILD.md` (carried from PSOpenAD-FE -
+     same PowerShell + Tauri shape; Craig: "seems like a great combination for cross
+     platform work").
+
 ## 10. Windows evaluation media (Evaluation Center ISOs) - 2026-08-22
 
 Craig's `GetWinISOs.ps1` rebuilt as a real feature, at the top of Operating Systems.
@@ -1341,3 +1367,60 @@ extract produces a 610 MB `Server2025-boot.wim` with `bootAssetsReady=True`.
 Also: the Sidecar Log gained a **Copy** button (and explicit `user-select: text`), because
 "I cant copy paste from Sidecar" - it copies exactly what is on screen, filter included.
 
+### Update Deployment Share and Restart Services (2026-08-26)
+
+Craig: an "Update Deployment Share" verb - "people know it" from MDT - in the Action menu
+and the right-click menu, tied to all the rebuilding: overlay, task sequence publishing,
+a refetched IP, "all the healing". And: "this should not interrupt imaging in flight",
+so restarting services is separate - "everything minus the services". Two verbs, one rule:
+**Update touches files, Restart touches processes.**
+
+| Verb | Where | Sidecar | Does | Safe mid-image? |
+| --- | --- | --- | --- | --- |
+| Update Deployment Share | Netboot and the Deployment Share root (`consoleActions` items - the shell puts every item in Action and both right-click menus) | `UpdatePxeBootDeploymentShare` -> `Update-AppPxeBootDeploymentShare`, inline | Fresh LAN IP (memos cleared); store layout; bundled boot assets (hash-compared); per-WIM boot assets; Deploy$ re-ensured while a service is up; task sequences to `Z:\TaskSequences`; `boot.ipxe` / `menu.ipxe` / TFTP menu + autoexec; the deploy overlay; ISO mounts re-asserted while HTTP serves | Yes. Nothing is killed, started, dismounted or unshared |
+| Restart Services | Netboot, beside Start / Stop | `RestartPxeBootServices` -> `Restart-AppPxeBootServices` = `Stop -Minimal` then `Start`; same child-pwsh rule and same `pxe-services` job name as Start, so the panel's one `job-finished` path serves both | Caddy and dnsmasq/tftpd64 down and back on the fresh IP. Start regenerates every served file on the way up, so Restart = Update + the bounce | No for a device still booting (menu, boot.wim). An apply already reading `Z:\` carries on: `-Minimal` leaves the share and the ISO mounts alone (host-named and path-named - neither carries the IP); only its log pushes during the bounce are lost |
+
+The mid-image guard lives in the sidecar, not the panel. Without `force` the handler
+counts `Get-AppPxeBootImagingClients` rows with `active` (a log push or heartbeat in the
+last 3 minutes), answers `{ blocked, imagingClientsActive, clients[] }`, and the panel
+opens a danger `ConfirmModal` naming serial / model / IP and calls again with
+`force: true`. The panel's own 8 s status poll is not trusted for this - a device can
+start between polls.
+
+What a file rewrite cannot fix comes back as `restartReasons` and a "Restart Services to
+finish" toast: dnsmasq bakes `dhcp-boot=<file>,<ip>,<ip>` into its config and does not
+re-read it, so after a network move TFTP/proxyDHCP still names the old address; and an ISO
+mounted after HTTP came up has no `/iso-wim/<token>/` route, because routes are written
+into the Caddyfile at HTTP start. Caddy itself needs neither - it listens on `0.0.0.0` and
+its Caddyfile names no LAN IP. (`Get-AppPxeBootServiceRestartReasons`.)
+
+Measured over stdio against an isolated HOME with an empty store: Update 5.9 s the first
+time on a fresh store (staging snponly, wimboot, 24 MB of arch trees and the deploy
+client), **1.05 s warm**. It was 2.0 s warm until the `Get-AppPxeBootStatus` at the end
+(1.1 s of it) was dropped: the Netboot panel calls `reloadConfig()` right after the verb
+and the share root's badges ride the 8 s poll, so the result carries no status and clears
+the memos instead. Inline on purpose, unlike Start: the macOS share ensure may need the
+admin dialog from this process, and re-asserted ISO mounts must land in this process's
+`IsoMounts`. Not exercised: the `force` restart - a real dnsmasq was live on this Mac and
+Stop would have reached it (the rule under "Image not on the share": never Start/Stop
+against a live host). The guard path was: a fake `imaging-logs/FAKE1.json` seconds old,
+`RestartPxeBootServices` -> `blocked: true`, `clients[0].serial = FAKE1`.
+
+**Regression found and fixed on the way.** Since `c5bb958` (FieldIso removal, 2026-08-24)
+nothing on the Start path called `Write-AppPxeBootWimOverlayRuntimeAssets`; the only
+callers left were the four branding handlers and the housekeeping refresh, which needs
+the files to exist first. A fresh store therefore never got `http/deploy/` and an imported
+WIM booted to a bare WinPE prompt - it kept working on the dev box only because the files
+were already there. The publish now sits in `Write-AppPxeBootMenuFiles`, before the initrd
+lines that depend on `deploy.unc` existing, so Start, Update, Restart, config save and
+every import go through it. Confirmed on the isolated store: `deploy.unc`, `loghost`,
+`startnet.cmd` and the tools appeared on the first Update. (`Write-AppPxeBootMenuFiles`
+also grew `-SkipTaskSequenceSync` so Update can take the publish count without running the
+sync twice.)
+
+Craig floated "Update Deployment Share & Restart Services" as the destructive verb's name,
+so the label itself warns. Not done: Start regenerates everything, so that verb and
+"Restart Services" would be one action under two names, and section 4 wants one verb per
+action in MDT/ADUC wording. The confirm carries the warning instead, and only appears when
+a device is actually mid-image. If the longer label is wanted anyway it is the one string
+in `PxeWorkspace.tsx` ("Restart Services").

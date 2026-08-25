@@ -204,6 +204,67 @@ function Handle-StopPxeBootServices {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-UpdatePxeBootDeploymentShare {
+    <#
+    .SYNOPSIS
+        "Update Deployment Share" - the Action / right-click verb on Netboot and on the
+        share root. Everything a Start regenerates, with nothing stopped or started, so
+        it is safe while devices are imaging. See Update-AppPxeBootDeploymentShare.
+    .NOTES
+        Inline on purpose, unlike Start: the macOS share ensure may need the admin dialog
+        (this process only), and the ISO mounts it re-asserts must land in THIS process's
+        state so housekeeping and the Caddyfile writer see them.
+    #>
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    Write-SidecarResponse -Id $Id -Data (Update-AppPxeBootDeploymentShare)
+}
+
+function Handle-RestartPxeBootServices {
+    <#
+    .SYNOPSIS
+        Stop + Start with a freshly read LAN IP; the Deploy$ share and ISO mounts stay up.
+    .NOTES
+        Refuses while devices are imaging unless force is set: the panel shows who is
+        mid-image, asks, and calls again with force=true. Same backgrounding rule as Start
+        (child pwsh unless macOS needs the admin dialog from this process) and the same
+        'pxe-services' job name, so the panel's one job-finished path serves both.
+    #>
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $force = [bool](Get-AppSidecarParam -Params $Params -Name 'force')
+    if (-not $force) {
+        $active = @(Get-AppPxeBootImagingClients | Where-Object { $_.active })
+        if ($active.Count -gt 0) {
+            Write-SidecarLog "PXE boot: restart held - $($active.Count) device(s) imaging right now; asking first"
+            Write-SidecarResponse -Id $Id -Data @{
+                blocked              = $true
+                imagingClientsActive = $active.Count
+                clients              = @($active | ForEach-Object {
+                        @{ serial = [string]$_.serial; model = [string]$_.model; ip = [string]$_.ip; lastLine = [string]$_.lastLine }
+                    })
+            }
+            return
+        }
+    }
+    $canBackground = (Test-AppSidecarCommand Start-AppSidecarJob) -and -not (Test-AppPxeBootServiceStartNeedsPrompt)
+    $data = if ($canBackground) {
+        # As in Start: the ingest listener must outlive the child, so it is started (or
+        # reused) here and the child gets the port for the Caddyfile.
+        $parentIngestPort = Start-AppPxeBootImagingLogIngest
+        Start-AppSidecarJob -Name 'pxe-services' -FunctionName 'Restart-AppPxeBootServices' -TimeoutMinutes 5 `
+            -Arguments @{ IngestPort = [int]$parentIngestPort } `
+            -OnComplete {
+                param($ok, $result, $err)
+                if (Test-AppSidecarCommand Clear-AppPxeBootMemo) { Clear-AppPxeBootMemo }
+            }
+    } else {
+        Restart-AppPxeBootServices
+    }
+    $script:AppSidecarStartedPxeServices = $true
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
 function Handle-OpenPxeBootStoreFolder {
     param([int]$Id, $Params)
     $data = Open-AppPxeBootStoreFolder
