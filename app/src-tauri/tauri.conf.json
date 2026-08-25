@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "WinDeployKit",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "identifier": "com.macsinspace.windeploykit",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -39,10 +39,28 @@
     "active": true,
     "publisher": "MacsInSpace",
     "targets": [
-      "app"
+      "app",
+      "dmg"
     ],
     "resources": {
-      "../../sidecar/": "sidecar/"
+      "../../sidecar/": "sidecar/",
+      "../../vendor/psmodules/": "vendor/psmodules/",
+      "../../vendor/binaries/pxe-macos/dnsmasq-universal": "vendor/binaries/pxe-macos/dnsmasq-universal",
+      "../../vendor/binaries/pxe-macos/wimlib-imagex-universal": "vendor/binaries/pxe-macos/wimlib-imagex-universal",
+      "../../vendor/binaries/pxe-macos/COPYING.dnsmasq": "vendor/binaries/pxe-macos/COPYING.dnsmasq",
+      "../../vendor/binaries/pxe-macos/COPYING.wimlib": "vendor/binaries/pxe-macos/COPYING.wimlib",
+      "../../vendor/binaries/pxe-macos/VERSION.dnsmasq": "vendor/binaries/pxe-macos/VERSION.dnsmasq",
+      "../../vendor/binaries/pxe-macos/VERSION.wimlib": "vendor/binaries/pxe-macos/VERSION.wimlib",
+      "../../vendor/binaries/dialog-macos/windeploykit-dialog-universal": "vendor/binaries/dialog-macos/windeploykit-dialog-universal",
+      "../../vendor/aria2-tools/aria2-1.37.0_mac_arm64.tar.gz": "vendor/aria2-tools/aria2-1.37.0_mac_arm64.tar.gz",
+      "../../packaging/pxe-caddy.json": "packaging/pxe-caddy.json",
+      "../../packaging/aria2-tools.json": "packaging/aria2-tools.json",
+      "../../packaging/p7zip-tools.json": "packaging/p7zip-tools.json",
+      "../../packaging/acer-sccm-catalog.json": "packaging/acer-sccm-catalog.json",
+      "../../packaging/dell-sccm-catalog.json": "packaging/dell-sccm-catalog.json",
+      "../../packaging/hp-sccm-catalog.json": "packaging/hp-sccm-catalog.json",
+      "../../packaging/lenovo-sccm-catalog.json": "packaging/lenovo-sccm-catalog.json",
+      "../../packaging/microsoft-sccm-catalog.json": "packaging/microsoft-sccm-catalog.json"
     },
     "icon": [
       "icons/32x32.png",

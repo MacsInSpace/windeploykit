@@ -1,6 +1,6 @@
 [package]
 name = "windeploykit"
-version = "0.1.0"
+version = "0.6.0"
 description = "Cross-platform Windows deployment toolkit"
 authors = ["Craig Hair"]
 edition = "2021"

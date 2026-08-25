@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# =============================================================================
+# INERT IN THIS REPO (2026-08-26 bundle audit): sources scripts/load-local-env.sh
+# and calls four other scripts that do not exist here, so it stops at line ~37
+# under set -e. The macOS build is `npm run tauri:build:universal` with the
+# resources map in app/src-tauri/tauri.conf.json - docs/AGENT_NOTES_MACOS_BUILD.md.
+# =============================================================================
 # Build a macOS distributable. Bundles sidecar + PSOpenAD; pwsh 7 is a separate install unless --bundle-pwsh.
 #
 # Produces:

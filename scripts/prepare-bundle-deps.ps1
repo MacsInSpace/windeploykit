@@ -1,3 +1,12 @@
+# =============================================================================
+# INERT IN THIS REPO (2026-08-26 bundle audit). Nothing runs this: tauri.conf.json's
+# beforeBuildCommand is `npm run build` only, and the script itself dies at
+# `scripts/lib/BuildDownload.ps1` (missing) before staging anything - a port from
+# another product whose modules, templates and manifests do not exist here.
+# What ships is decided by `bundle.resources` in app/src-tauri/tauri.conf.json;
+# see docs/AGENT_NOTES_MACOS_BUILD.md. Kept only as a reference for the Windows
+# bundle work. Do not "fix" it piecemeal - either port it properly or delete it.
+# =============================================================================
 #requires -Version 7.0
 <#
 .SYNOPSIS

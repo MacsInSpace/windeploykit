@@ -137,7 +137,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 try {
-    . (Join-Path $SidecarRoot 'lib/NpsLogViewer.ps1')
+    # (A dot-source of lib/NpsLogViewer.ps1 sat here - a USM file this repo never had.
+    # Under ErrorActionPreference=Stop it made every background catalog refresh exit 1
+    # before doing anything; the shims below are all the child ever needed. 2026-08-26.)
     if (-not (Get-Command Write-SidecarLog -ErrorAction SilentlyContinue)) {
         function Write-SidecarLog { param([string]$Message) }
     }

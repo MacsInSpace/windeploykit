@@ -620,13 +620,31 @@ function Ensure-AppAria2Binary {
         if ($entry.githubUrl -and $entry.githubUrl -ne $entry.downloadUrl) {
             [void]$downloadUrls.Add([string]$entry.githubUrl)
         }
-        if ($downloadUrls.Count -eq 0) {
-            throw 'aria2: manifest entry has no download URL - ship the binary in vendor/binaries for this platform.'
-        }
-
         $downloaded = $false
         $lastError = $null
+        # Bundled archive first - vendor/aria2-tools/<archiveName>, the same shape as
+        # p7zip's vendor/p7zip-tools fallback. macOS has no download URL at all (the
+        # manifest entry is a Homebrew bottle repack), so before this the packaged app
+        # could never install aria2 there (found by the 2026-08-26 bundle audit).
+        $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
+        if ($root) {
+            $localArchive = Join-Path $root ("vendor/aria2-tools/$($entry.archiveName)" -replace '/', [IO.Path]::DirectorySeparatorChar)
+            if (Test-Path -LiteralPath $localArchive) {
+                Copy-Item -LiteralPath $localArchive -Destination $archivePath -Force
+                if (Test-AppAria2ArchiveFile -Path $archivePath -ExpectedSha256 $entry.sha256 -ExpectedSizeBytes $entry.sizeBytes) {
+                    $downloaded = $true
+                    Write-SidecarLog "aria2: using the bundled archive $($entry.archiveName)"
+                } else {
+                    Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+                    $lastError = 'bundled archive failed its SHA256/size check'
+                }
+            }
+        }
+        if (-not $downloaded -and $downloadUrls.Count -eq 0) {
+            throw 'aria2: manifest entry has no download URL and no bundled archive (vendor/aria2-tools) for this platform.'
+        }
         foreach ($url in @($downloadUrls)) {
+            if ($downloaded) { break }
             try {
                 if (Test-Path -LiteralPath $archivePath) {
                     Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
