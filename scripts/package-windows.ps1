@@ -171,14 +171,17 @@ function Resolve-RustBuildToolchain {
     }
 
     $toolchain = "stable-$rustTarget"
-    $installed = @((rustup toolchain list 2>$null) -match [regex]::Escape($toolchain)) -contains $true
+    # -match on an array yields the matching STRINGS, so compare by count; and the
+    # install output must not reach the pipeline or it rides along in the return
+    # value and the caller's .RustTarget read throws.
+    $installed = @((rustup toolchain list 2>$null) -match [regex]::Escape($toolchain)).Count -gt 0
     if (-not $installed) {
         Write-Host "==> Rust host ($defaultHost) differs from build arch ($Arch) - installing $toolchain" -ForegroundColor Cyan
         if ($Arch -eq 'x64') {
-            rustup toolchain install $toolchain --force-non-host
+            rustup toolchain install $toolchain --force-non-host | Out-Host
         }
         else {
-            rustup toolchain install $toolchain
+            rustup toolchain install $toolchain | Out-Host
         }
     }
 
@@ -600,8 +603,8 @@ if (-not (Test-Path -LiteralPath $portableExe)) {
     $portableExe = Join-Path $AppDir 'src-tauri/target/release/windeploykit.exe'
 }
 
-$msiName = "WinDeployKit_${Version}_x64_en-US.msi"
-$setupName = "WinDeployKit_${Version}_x64-setup.exe"
+$msiName = "WinDeployKit_${Version}_${Arch}_en-US.msi"
+$setupName = "WinDeployKit_${Version}_${Arch}-setup.exe"
 if ($msi) { Copy-Item -LiteralPath $msi.FullName -Destination (Join-Path $OutDir $msiName) }
 if ($nsis) { Copy-Item -LiteralPath $nsis.FullName -Destination (Join-Path $OutDir $setupName) }
 if (Test-Path -LiteralPath $portableExe) {
@@ -652,7 +655,7 @@ INSTALL (pick one)
 0. Install PowerShell 7+ if not already present (see above).
 
 1. MSI (recommended for IT deployment and upgrades):
-   Run WinDeployKit_${Version}_x64_en-US.msi
+   Run WinDeployKit_${Version}_${Arch}_en-US.msi
    Installs under Program Files with Start Menu shortcut.
    Replaces a previous MSI of the same product automatically.
 

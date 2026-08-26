@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "../../vendor/binaries/pxe-macos/dnsmasq-universal": null,
+      "../../vendor/binaries/pxe-macos/wimlib-imagex-universal": null,
+      "../../vendor/binaries/pxe-macos/COPYING.dnsmasq": null,
+      "../../vendor/binaries/pxe-macos/COPYING.wimlib": null,
+      "../../vendor/binaries/pxe-macos/VERSION.dnsmasq": null,
+      "../../vendor/binaries/pxe-macos/VERSION.wimlib": null,
+      "../../vendor/binaries/dialog-macos/windeploykit-dialog-universal": null,
+      "../../vendor/binaries/pxe-windows/": "vendor/binaries/pxe-windows/",
+      "../../packaging/pxe-tftpd64.json": "packaging/pxe-tftpd64.json"
+    }
+  }
+}
