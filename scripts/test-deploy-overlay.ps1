@@ -22,9 +22,13 @@ Set-StrictMode -Version Latest
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $SidecarRoot = Join-Path $RepoRoot 'sidecar'
 $script:SidecarRoot = $SidecarRoot
+# The sidecar entry sets this before any lib is dot-sourced; the libs read it
+# bare, so under StrictMode a gate that skips it fails on the first such read.
+$script:AppSidecarProjectRoot = $RepoRoot
 $script:AppState = @{ IsReady = $true }
 function Write-SidecarLog { param([string]$Message, [switch]$Flush) }
 function Write-SidecarLogVerbose { param([string]$Message) }
+. (Join-Path $SidecarRoot 'lib/AppPlatform.ps1')
 . (Join-Path $SidecarRoot 'lib/AppPaths.ps1')
 . (Join-Path $SidecarRoot 'lib/AppProductIdentity.ps1')
 . (Join-Path $SidecarRoot 'lib/PxeBootTaskSequences.ps1')
