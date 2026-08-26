@@ -6,20 +6,13 @@
 .EXAMPLE
     pwsh -File .\scripts\bootstrap-windows.ps1
 
-.PARAMETER SkipMiniPlayerToolsBuild
-    Skip downloading yt-dlp/deno when GitHub is unreachable (corp proxy). Mini player
-    downloads tools on first use at runtime instead; release builds should use the
-    Optional: build-mini-player-tools.ps1 for seed-lofi-watch-url.ps1 / dev (not bundled in release).
 #>
 [CmdletBinding()]
-param(
-    [switch] $SkipMiniPlayerToolsBuild
-)
+param()
 
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-. (Join-Path $PSScriptRoot 'lib/BuildDownload.ps1')
 $AppDir = Join-Path $RepoRoot 'app'
 
 function Write-Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -105,32 +98,6 @@ try {
     else { Write-Host '  node_modules OK (tauri.cmd present)' }
 }
 finally { Pop-Location }
-
-Write-Step 'Checking .NET SDK (build PSOpenAD from vendor lock)'
-Install-DotNetSdkIfMissing -Channel '10.0'
-
-Write-Step 'Building vendored PSOpenAD (for prepare-bundle-deps.ps1)'
-$vendorManifest = Join-Path $RepoRoot 'vendor/PSOpenAD/PSOpenAD.psd1'
-if (-not (Test-Path -LiteralPath $vendorManifest)) {
-    & (Join-Path $RepoRoot 'scripts/build-psopenad.ps1')
-}
-else {
-    Write-Host '  vendor/PSOpenAD already present'
-}
-
-Write-Step 'Building vendored mini player tools (yt-dlp + deno)'
-$miniPlayerManifest = Join-Path $RepoRoot 'vendor/mini-player-tools/manifest.json'
-if (-not (Test-Path -LiteralPath $miniPlayerManifest)) {
-    if ($SkipMiniPlayerToolsBuild) {
-        Write-Host '  Skipped (-SkipMiniPlayerToolsBuild). Lo-Fi player will download tools on first use.' -ForegroundColor Yellow
-    }
-    else {
-        & (Join-Path $RepoRoot 'scripts/build-mini-player-tools.ps1')
-    }
-}
-else {
-    Write-Host '  vendor/mini-player-tools already present'
-}
 
 Write-Step 'Bootstrap complete.'
 Write-Host ''

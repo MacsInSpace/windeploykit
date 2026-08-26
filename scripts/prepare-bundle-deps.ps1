@@ -1,8 +1,9 @@
 # =============================================================================
 # INERT IN THIS REPO (2026-08-26 bundle audit). Nothing runs this: tauri.conf.json's
-# beforeBuildCommand is `npm run build` only, and the script itself dies at
-# `scripts/lib/BuildDownload.ps1` (missing) before staging anything - a port from
-# another product whose modules, templates and manifests do not exist here.
+# beforeBuildCommand is `npm run build` only. It is a port from another product,
+# and templates and manifests it expects do not all exist here. The USM-era
+# PSOpenAD staging and its dot-source of the missing scripts/lib/BuildDownload.ps1
+# were removed on 2026-08-26; what is left has not been run end to end.
 # What ships is decided by `bundle.resources` in app/src-tauri/tauri.conf.json;
 # see docs/AGENT_NOTES_MACOS_BUILD.md. Kept only as a reference for the Windows
 # bundle work. Do not "fix" it piecemeal - either port it properly or delete it.
@@ -15,10 +16,8 @@
 .DESCRIPTION
     Writes to packaging/staged/:
       sidecar/      - copy of repo sidecar/
-      modules/      - PSOpenAD + WinDeployKitPS.psm1 + Posh-SSH (when vendor/Posh-SSH present)
+      modules/      - WinDeployKitPS.psm1 + Posh-SSH (when vendor/Posh-SSH present)
       powershell/   - full portable PowerShell 7 install (optional; -BundlePowerShell)
-
-    Lo-Fi mini player tools (yt-dlp + deno) download at first play - not staged here.
 
     Run on the SAME OS you will use for `tauri build` (Windows build -> -Platform Windows).
 
@@ -51,10 +50,6 @@ param(
 
     [string] $PwshVersion = '7.5.4',
 
-    [string] $PsOpenAdSrc,
-
-    [switch] $SkipPsOpenAdBuild,
-
     [switch] $SkipPoshSshVendor,
 
     [switch] $BundlePowerShell,
@@ -65,7 +60,6 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-. (Join-Path $PSScriptRoot 'lib/BuildDownload.ps1')
 $Staged = Join-Path $RepoRoot 'packaging/staged'
 $SidecarSrc = Join-Path $RepoRoot 'sidecar'
 $PsModuleSrcDir = Join-Path $RepoRoot 'modules/WinDeployKitPS'
@@ -239,7 +233,7 @@ function Test-AppVendoredPoshSshLayout {
 function Normalize-AppVendoredPoshSshLayout {
     <#
         Save-Module writes vendor/Posh-SSH/<version>/Posh-SSH.psd1 - flatten to vendor/Posh-SSH/Posh-SSH.psd1
-        so staging matches PSOpenAD (direct manifest under modules/Posh-SSH).
+        so staging is a direct manifest under modules/Posh-SSH.
     #>
     param([Parameter(Mandatory)][string]$VendorPoshSshRoot)
 
@@ -306,40 +300,6 @@ if ($Arch -eq 'Host') {
     else {
         $Arch = 'x64'
     }
-}
-
-$VendorPsOpenAd = Join-Path $RepoRoot 'vendor/PSOpenAD'
-$VendorManifest = Join-Path $VendorPsOpenAd 'PSOpenAD.psd1'
-$BuildPsOpenAdScript = Join-Path $RepoRoot 'scripts/build-psopenad.ps1'
-
-if (-not $PsOpenAdSrc) {
-    if (Test-Path -LiteralPath $VendorManifest) {
-        $PsOpenAdSrc = $VendorPsOpenAd
-    }
-    elseif (-not $SkipPsOpenAdBuild -and (Test-Path -LiteralPath $BuildPsOpenAdScript)) {
-        Write-Step 'vendor/PSOpenAD missing - building from vendor/psopenad.lock.json (requires git + dotnet SDK)'
-        & $BuildPsOpenAdScript
-        if (Test-Path -LiteralPath $VendorManifest) {
-            $PsOpenAdSrc = $VendorPsOpenAd
-        }
-    }
-}
-if (-not $PsOpenAdSrc) {
-    $PsOpenAdSrc = (Get-Module -ListAvailable PSOpenAD | Select-Object -First 1).ModuleBase
-}
-if (-not $PsOpenAdSrc -or -not (Test-Path -LiteralPath (Join-Path $PsOpenAdSrc 'PSOpenAD.psd1'))) {
-    throw @"
-PSOpenAD not found for bundling.
-
-Preferred (CI / release):
-  CI job build:psopenad, or locally:
-  pwsh -File ./scripts/build-psopenad.ps1
-
-Then re-run prepare-bundle-deps.ps1 (uses vendor/PSOpenAD automatically).
-
-Fallback: Install-Module PSOpenAD -Scope CurrentUser -Force
-Or pass -PsOpenAdSrc 'C:\path\to\built\PSOpenAD'
-"@
 }
 
 if (-not (Test-Path -LiteralPath $PsModuleSrc)) {
@@ -528,12 +488,6 @@ foreach ($driverCatalog in @('acer-sccm-catalog.json', 'lenovo-sccm-catalog.json
         Write-Step "Copied $driverCatalog into staged sidecar/packaging"
     }
 }
-
-Write-Step "Staging PSOpenAD from $PsOpenAdSrc"
-$openAdDest = Join-Path $Staged 'modules/PSOpenAD'
-if (Test-Path -LiteralPath $openAdDest) { Remove-Item -LiteralPath $openAdDest -Recurse -Force }
-New-Item -ItemType Directory -Path (Join-Path $Staged 'modules') -Force | Out-Null
-Copy-Item -LiteralPath $PsOpenAdSrc -Destination $openAdDest -Recurse -Force
 
 Write-Step 'Staging WinDeployKitPS (core + full)'
 $psModuleDest = Join-Path $Staged 'modules/WinDeployKitPS'

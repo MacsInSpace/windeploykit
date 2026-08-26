@@ -5,7 +5,7 @@
 # under set -e. The macOS build is `npm run tauri:build:universal` with the
 # resources map in app/src-tauri/tauri.conf.json - docs/AGENT_NOTES_MACOS_BUILD.md.
 # =============================================================================
-# Build a macOS distributable. Bundles sidecar + PSOpenAD; pwsh 7 is a separate install unless --bundle-pwsh.
+# Build a macOS distributable. Bundles the sidecar; pwsh 7 is a separate install unless --bundle-pwsh.
 #
 # Produces:
 #   dist/macos/WinDeployKit_<version>_<arch>/
@@ -217,13 +217,8 @@ REQUIREMENTS (install once per Mac)
 WHAT IS BUNDLED IN THE .APP
 ---------------------------
   - WinDeployKit (Tauri UI)
-  - PSOpenAD + WinDeployKitPS PowerShell modules
+  - WinDeployKitPS PowerShell module
   - SchoolManager sidecar scripts
-
-MINI PLAYER (optional)
-----------------------
-  yt-dlp + deno are downloaded on first Lo-Fi play to per-user app data
-  (cache/tools under the canonical app data root). GitHub HTTPS required once per Mac.
 
 INSTALL
 -------

@@ -474,20 +474,11 @@ if (-not $SkipPrepare) {
     }
     & (Join-Path $PSScriptRoot 'prepare-bundle-deps.ps1') @prepArgs
 
-    $psOpenAdManifest = Join-Path $RepoRoot 'packaging/staged/modules/PSOpenAD/PSOpenAD.psd1'
     $psModuleManifest = Join-Path $RepoRoot 'packaging/staged/modules/WinDeployKitPS/WinDeployKitPS.psm1'
-    if (-not (Test-Path -LiteralPath $psOpenAdManifest)) {
-        throw @"
-PSOpenAD was not staged for the installer.
-Expected: $psOpenAdManifest
-Run: pwsh -File .\scripts\build-psopenad.ps1
-Or use a CI artifact from job build:psopenad, then re-run package-windows.ps1 (without -SkipPrepare).
-"@
-    }
     if (-not (Test-Path -LiteralPath $psModuleManifest)) {
         throw "bundled module staging failed: missing $psModuleManifest"
     }
-    Write-Step 'Verified staged PSOpenAD modules'
+    Write-Step 'Verified staged WinDeployKitPS module'
 
     $bannerManifest = Join-Path $RepoRoot 'packaging/staged/sidecar/templates/email/banners/manifest.json'
     if (-not (Test-Path -LiteralPath $bannerManifest)) {
@@ -580,13 +571,6 @@ finally {
     }
 }
 
-$psOpenAdInBundle = @(Get-ChildItem -Path (Join-Path $AppDir 'src-tauri/target') -Recurse -Filter 'PSOpenAD.psd1' -ErrorAction SilentlyContinue)
-if ($psOpenAdInBundle.Count -eq 0) {
-    Write-Host 'WARN: PSOpenAD.psd1 not found under src-tauri/target after build - MSI may be missing LDAP module.' -ForegroundColor Yellow
-} else {
-    Write-Step "Bundle contains PSOpenAD ($($psOpenAdInBundle.Count) manifest(s))"
-}
-
 $BundleRoot = Join-Path $AppDir "src-tauri/target/$RustTarget/release/bundle"
 if (-not (Test-Path -LiteralPath $BundleRoot)) {
   $BundleRoot = Join-Path $AppDir 'src-tauri/target/release/bundle'
@@ -647,7 +631,7 @@ WHAT IS BUNDLED
 ---------------
 The installers include:
   - WinDeployKit (Tauri UI)
-  - PSOpenAD + WinDeployKitPS modules
+  - WinDeployKitPS module
   - SchoolManager sidecar scripts
 
 INSTALL (pick one)
