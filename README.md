@@ -256,6 +256,9 @@ logos or typefaces are used.
 
 ## Licence
 
+MIT - see [`LICENSE`](LICENSE). Use it, borrow from it, improve it; the one
+condition is that the copyright notice travels with the copy.
+
 See [`NOTICE.md`](NOTICE.md) for third-party components (dnsmasq, wimlib, Caddy,
 aria2, iPXE/wimboot) and their licences.
 
