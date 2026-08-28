@@ -9,6 +9,7 @@ Prebuilt tools copied into `packaging/staged/` during `prepare-bundle-deps.ps1`.
 | `dialog-macos/windeploykit-dialog-universal` | macOS (Intel + Apple Silicon) | `.app` -> `Resources/binaries/` (native admin/password prompts) |
 | `pxe-macos/dnsmasq-universal` | macOS (Intel + Apple Silicon) | `.app` -> `Resources/binaries/` (Netboot TFTP) |
 | `pxe-macos/wimlib-imagex-universal` | macOS (Intel + Apple Silicon) | `.app` -> `Resources/binaries/` (Netboot boot assets) |
+| `pxe-macos/aria2c-universal` | macOS (Intel + Apple Silicon) | `.app` -> `Resources/binaries/` (Downloads - aria2 publishes no macOS binary; built from upstream source, no Homebrew) |
 | `pxe-wimboot/wimboot` | macOS + Windows | `resources/sidecar/pxe/wimboot` -> user store on field PXE start |
 | `pxe-secure-boot-x64/x86_64-sb/` | macOS + Windows | `resources/sidecar/pxe/x86_64-sb/` -> `tftp/x86_64-sb/` on Netboot enable / Start Imaging Services |
 | `pxe-mdt-boot/x64/` | macOS + Windows | `resources/sidecar/pxe/mdt-boot-x64/` -> `http/wim-boot/<LiteTouch*>` on import |
@@ -68,6 +69,21 @@ Coherent BCD + boot.sdi + UEFI bootmgr from MDT LiteTouch `Boot/x64` (not live s
 pwsh -File ./scripts/fetch-mdt-boot-assets.ps1 -SourceRoot '/Volumes/DeployShare$/Boot/x64'
 git add vendor/binaries/pxe-mdt-boot/ sidecar/pxe/mdt-boot-x64/
 ```
+
+## Refresh Downloads aria2c (macOS)
+
+aria2 publishes no macOS binary and Homebrew is treated as not installed on every Mac
+(Craig, 2026-08-29), so the app carries its own build from the upstream source tarball:
+Apple TLS (Security.framework) plus the SDK's libxml2 / zlib / sqlite3, nothing else.
+The script refuses to finish if `otool -L` shows a library outside `/usr/lib` or `/System`.
+Windows gets aria2 from the upstream release archives at setup (`packaging/aria2-tools.json`).
+
+```bash
+./scripts/build-aria2-macos.sh        # Xcode / CLT only - no Homebrew needed
+git add vendor/binaries/pxe-macos/aria2c-universal vendor/binaries/pxe-macos/COPYING.aria2 vendor/binaries/pxe-macos/VERSION.aria2
+```
+
+Then Developer ID sign it in place like the other Mach-O binaries (`docs/AGENT_NOTES_MACOS_BUILD.md`).
 
 ## Refresh Netboot wimlib-imagex (boot asset extraction)
 

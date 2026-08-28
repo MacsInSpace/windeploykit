@@ -48,7 +48,7 @@ $script:AppPxeBootState = @{
 
 $script:AppPxeBootStoreInitializing = $false
 # Keep in sync with packaging/p7zip-tools.json (runtime install - not bundled in signed macOS pkg).
-$script:AppPxeBootP7zipPinnedVersion = '17.06'
+$script:AppPxeBootP7zipPinnedVersion = '25.01'   # upstream 7-Zip (7zz), not the Homebrew p7zip repack
 $script:AppPxeBootP7zipInstallInProgress = $false
 $script:AppPxeBootOptionalAssetsManifestCache = $null
 $script:AppPxeBootOptionalAssetsManifestCacheAt = $null
@@ -1143,14 +1143,8 @@ function Get-AppPxeBootWimlibImagexPath {
         $cmd = Get-Command $name -ErrorAction SilentlyContinue
         if ($cmd) { return $cmd.Source }
     }
-    if ($IsMacOS) {
-        foreach ($candidate in @(
-            '/opt/homebrew/bin/wimlib-imagex'
-            '/usr/local/bin/wimlib-imagex'
-        )) {
-            if (Test-Path -LiteralPath $candidate) { return $candidate }
-        }
-    }
+    # No Homebrew / MacPorts probe (Craig, 2026-08-29: treat Homebrew as not installed -
+    # the bundled binary is the only supported macOS source).
     return $null
 }
 
@@ -2609,9 +2603,9 @@ function Get-AppPxeBootP7zipMarkerPath {
 function Test-AppPxeBootP7zipInstalled {
     param([switch]$RequirePinnedVersion)
     $dir = Get-AppPxeBootP7zipToolsDir
-    $sevenZa = Join-Path $dir '7za'
-    $sevenSo = Join-Path $dir '7z.so'
-    if (-not ((Test-Path -LiteralPath $sevenZa) -and (Test-Path -LiteralPath $sevenSo))) {
+    # Upstream 7-Zip ships one self-contained universal binary, 7zz (no 7z.so).
+    $sevenZz = Join-Path $dir '7zz'
+    if (-not (Test-Path -LiteralPath $sevenZz -PathType Leaf)) {
         return $false
     }
     if ($RequirePinnedVersion) {
@@ -2676,7 +2670,7 @@ function Read-AppPxeBootP7zipManifestObject {
         if ($membersProp) {
             $members = @($membersProp | ForEach-Object { [string]$_ } | Where-Object { $_ })
         }
-        if ($members.Count -eq 0) { $members = @('7za', '7z.so') }
+        if ($members.Count -eq 0) { $members = @('7zz') }
         $platforms[$prop.Name] = @{
             archiveName = $archiveName
             archiveKind = if ($archiveKind) { $archiveKind } else { 'tar.gz' }
@@ -2696,12 +2690,16 @@ function Read-AppPxeBootP7zipManifestObject {
 
 function Get-AppPxeBootP7zipManifest {
     $manifestUrl = Get-AppPxeBootP7zipManifestDefaultUrl
-    try {
-        $remote = Invoke-RestMethod -Uri $manifestUrl -Method Get -UseBasicParsing -TimeoutSec 45
-        $parsed = Read-AppPxeBootP7zipManifestObject -Obj $remote
-        if ($parsed) { return $parsed }
-    } catch {
-        Write-SidecarLogVerbose "PXE boot: p7zip manifest fetch failed ($manifestUrl): $($_.Exception.Message)"
+    # This product publishes no asset feed: skip the (always failing) remote fetch and
+    # read the bundled manifest, whose downloadUrl points at the upstream project.
+    if (-not [string]::IsNullOrWhiteSpace([string]$manifestUrl)) {
+        try {
+            $remote = Invoke-RestMethod -Uri $manifestUrl -Method Get -UseBasicParsing -TimeoutSec 45
+            $parsed = Read-AppPxeBootP7zipManifestObject -Obj $remote
+            if ($parsed) { return $parsed }
+        } catch {
+            Write-SidecarLogVerbose "PXE boot: p7zip manifest fetch failed ($manifestUrl): $($_.Exception.Message)"
+        }
     }
     $bundledPath = Get-AppPxeBootP7zipBundledManifestPath
     if ($bundledPath) {
@@ -2762,6 +2760,12 @@ function Expand-AppPxeBootP7zipArchive {
         if ($LASTEXITCODE -ne 0) {
             throw "PXE boot: p7zip tar extract failed for $(Split-Path -Leaf $Archive)"
         }
+    } elseif ($ArchiveKind -eq 'tar.xz') {
+        # Upstream 7-Zip's macOS archive (7z<ver>-mac.tar.xz); macOS tar reads xz natively.
+        & tar -xJf $Archive -C $DestDir @($Members)
+        if ($LASTEXITCODE -ne 0) {
+            throw "PXE boot: 7-Zip tar.xz extract failed for $(Split-Path -Leaf $Archive)"
+        }
     } else {
         throw "PXE boot: unknown p7zip archive kind $ArchiveKind"
     }
@@ -2775,19 +2779,30 @@ function Expand-AppPxeBootP7zipArchive {
 function Ensure-AppPxeBootP7zipTools {
     <#
     .SYNOPSIS
-        Locate 7z if this Mac already has one. NEVER downloads.
+        7-Zip (7zz) on macOS: the installed pinned copy, else a 7z already on PATH, else -
+        ONLY with -Download - fetch upstream 7-Zip from 7-zip.org per packaging/p7zip-tools.json.
     .NOTES
-        Craig, 2026-08-22: "WDK should not download anything from gitlab". It used to fetch
-        a pinned p7zip from the product asset feed on first ISO read - which in this product
-        points at a placeholder host, so every attempt failed with a DNS error and ~10s of
-        dead time before falling back:
-            p7zip install failed - nodename nor servname provided (artifacts.example.com:443)
-        Nothing needs it: macOS reads ISOs with hdiutil (reusing the mount Netboot already
-        holds) and Windows with Mount-DiskImage. If a 7z happens to be on PATH we will use
-        it; otherwise we simply say so and the mount path handles it.
+        Craig, 2026-08-22: "WDK should not download anything from gitlab" - the old p7zip
+        came from the product asset feed (a placeholder host here) and every first ISO read
+        paid ~10s of DNS failure. Nothing needs 7z for ISOs: macOS mounts them with hdiutil
+        and Windows with Mount-DiskImage. So the default stays no-download; the setup
+        wizard's "Download tools" (Handle-EnsureTools) passes -Download and the archive comes
+        from the upstream project, verified by SHA-256. Homebrew is never probed (Craig,
+        2026-08-29) - a plain Get-Command on PATH is the only outside lookup.
     #>
+    param([switch]$Download)
     if (-not ($IsMacOS -or $IsDarwin)) {
         return @{ ok = $true; skipped = $true; reason = 'not_macos' }
+    }
+    if (Test-AppPxeBootP7zipInstalled -RequirePinnedVersion) {
+        return @{
+            ok      = $true
+            skipped = $true
+            reason  = 'installed'
+            dir     = (Get-AppPxeBootP7zipToolsDir)
+            path    = (Join-Path (Get-AppPxeBootP7zipToolsDir) '7zz')
+            version = $script:AppPxeBootP7zipPinnedVersion
+        }
     }
     foreach ($candidate in @('7zz', '7z', '7za')) {
         $found = Get-Command $candidate -ErrorAction SilentlyContinue
@@ -2795,19 +2810,12 @@ function Ensure-AppPxeBootP7zipTools {
             return @{ ok = $true; skipped = $true; reason = 'system_7z'; path = [string]$found.Source }
         }
     }
-    return @{ ok = $false; skipped = $true; reason = 'no_download'; message = 'No 7z on this Mac - ISOs are read by mounting them instead.' }
+    if (-not $Download) {
+        return @{ ok = $false; skipped = $true; reason = 'no_download'; message = 'No 7-Zip on this Mac - ISOs are read by mounting them instead. Setup > Download tools installs it from 7-zip.org.' }
+    }
     if ($script:AppPxeBootP7zipInstallInProgress) {
         return @{ ok = $false; installing = $true; skipped = $true; reason = 'install_in_progress' }
     }
-    if (Test-AppPxeBootP7zipInstalled -RequirePinnedVersion) {
-        return @{
-            ok      = $true
-            skipped = $true
-            dir     = (Get-AppPxeBootP7zipToolsDir)
-            version = $script:AppPxeBootP7zipPinnedVersion
-        }
-    }
-
     $platformKey = Get-AppPxeBootP7zipPlatformKey
     if (-not $platformKey) {
         return @{ ok = $false; message = 'p7zip install is supported on macOS only.' }
@@ -2819,12 +2827,12 @@ function Ensure-AppPxeBootP7zipTools {
     }
     $entry = $manifest.platforms[$platformKey]
     if ([string]::IsNullOrWhiteSpace($entry.downloadUrl)) {
-        return @{ ok = $false; message = 'p7zip manifest entry has no downloadUrl - ship the archive in vendor/binaries.' }
+        return @{ ok = $false; message = '7-Zip manifest entry has no downloadUrl (expected the upstream 7-zip.org archive).' }
     }
 
     $toolsDir = Get-AppPxeBootP7zipToolsDir
     $sizeMb = if ($entry.sizeBytes -gt 0) { [math]::Round($entry.sizeBytes / 1MB, 1) } else { 6 }
-    Write-SidecarLog "PXE boot: installing p7zip $($manifest.version) ($platformKey, ~${sizeMb} MB) to $toolsDir"
+    Write-SidecarLog "PXE boot: installing 7-Zip $($manifest.version) from the upstream project ($platformKey, ~${sizeMb} MB) to $toolsDir"
 
     $tmpRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("sm-pxe-p7zip-" + [guid]::NewGuid().ToString())
     $archivePath = Join-Path $tmpRoot $entry.archiveName
@@ -2874,9 +2882,9 @@ function Ensure-AppPxeBootP7zipTools {
             -ArchiveKind $entry.archiveKind `
             -DestDir $toolsDir `
             -Members @($entry.members)
-        Set-AppPxeBootWimlibExecutable -Path (Join-Path $toolsDir '7za')
+        Set-AppPxeBootWimlibExecutable -Path (Join-Path $toolsDir '7zz')
         Set-Content -LiteralPath (Get-AppPxeBootP7zipMarkerPath) -Value $script:AppPxeBootP7zipPinnedVersion -Encoding ASCII -Force
-        Write-SidecarLog "PXE boot: p7zip $($script:AppPxeBootP7zipPinnedVersion) ready at $toolsDir"
+        Write-SidecarLog "PXE boot: 7-Zip $($script:AppPxeBootP7zipPinnedVersion) ready at $toolsDir"
         return @{
             ok      = $true
             skipped = $false
@@ -2904,7 +2912,11 @@ function Get-AppPxeBootWindows7zToolsDir {
 function Get-AppPxeBootHost7zPath {
     if ($IsMacOS -or $IsDarwin) {
         if (Test-AppPxeBootP7zipInstalled) {
-            return (Join-Path (Get-AppPxeBootP7zipToolsDir) '7za')
+            return (Join-Path (Get-AppPxeBootP7zipToolsDir) '7zz')
+        }
+        foreach ($candidate in @('7zz', '7z', '7za')) {
+            $found = Get-Command $candidate -ErrorAction SilentlyContinue
+            if ($found -and $found.Source) { return [string]$found.Source }
         }
         return $null
     }
@@ -4263,14 +4275,8 @@ function Resolve-AppPxeBootDnsmasqPath {
 
     $cmd = Get-Command dnsmasq -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source) { return $cmd.Source }
-    if ($IsMacOS) {
-        foreach ($candidate in @(
-            '/opt/homebrew/opt/dnsmasq/sbin/dnsmasq'
-            '/usr/local/opt/dnsmasq/sbin/dnsmasq'
-        )) {
-            if (Test-Path -LiteralPath $candidate) { return $candidate }
-        }
-    }
+    # No Homebrew / MacPorts probe (Craig, 2026-08-29): the bundled dnsmasq is the only
+    # supported macOS source.
     return $null
 }
 
@@ -5406,7 +5412,6 @@ function Get-AppPxeBootElevatedTftpStartShellMac {
         [switch]$IncludePortClear
     )
     $parts = [System.Collections.Generic.List[string]]::new()
-    [void]$parts.Add('brew services stop dnsmasq 2>/dev/null || true')
     if ($IncludePortClear) {
         foreach ($line in @(Get-AppPxeBootElevatedPort69ClearShellMac)) {
             [void]$parts.Add($line)
@@ -5576,7 +5581,7 @@ function Get-AppPxeBootPort69ConflictMessage {
             if (-not ($lines | Where-Object { $_ -match '\.69\s' })) { return $null }
             return @(
                 'PXE boot: UDP port 69 is already in use on this workstation.'
-                "Stop PXE services in $(Get-AppProductDisplayName), or stop brew dnsmasq / another TFTP server, then retry."
+                "Stop PXE services in $(Get-AppProductDisplayName), or stop the other dnsmasq / TFTP server, then retry."
             ) -join ' '
         }
 
@@ -5592,24 +5597,11 @@ function Get-AppPxeBootPort69ConflictMessage {
         $nameHint = if ($procName) { " ($procName)" } else { '' }
         return @(
             "PXE boot: UDP port 69 is already in use (pid $holder$nameHint)."
-            'Stop the other TFTP server (brew dnsmasq, setup-laptop-macos.sh, etc.) and retry.'
+            'Stop the other TFTP server (another dnsmasq, setup-laptop-macos.sh, etc.) and retry.'
         ) -join ' '
     } catch {
         return $null
     }
-}
-
-function Stop-AppPxeBootBrewDnsmasqIfRunning {
-    if (-not ($IsMacOS -or $IsDarwin)) { return }
-    if (-not (Get-Command brew -ErrorAction SilentlyContinue)) { return }
-    try {
-        $list = (& brew services list 2>$null | Out-String)
-        if ($list -notmatch 'dnsmasq\s+started') { return }
-        Write-SidecarLog 'PXE boot: stopping brew dnsmasq background service'
-        if (Test-AppSidecarCommand Invoke-AppMacOsAdminShellCommand) {
-            Invoke-AppMacOsAdminShellCommand -ShellCommand 'brew services stop dnsmasq 2>/dev/null || true' -AllowFailure | Out-Null
-        }
-    } catch { }
 }
 
 function Read-AppPxeBootDnsmasqLogTail {
@@ -6013,7 +6005,7 @@ function Start-AppPxeBootTftpServer {
         if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
             throw 'PXE boot: Tftpd64 could not be installed - enable Netboot and retry, or set a custom path in Settings.'
         }
-        throw 'PXE boot: bundled dnsmasq not found - run ./scripts/build-dnsmasq-macos.sh and rebuild, or brew install dnsmasq.'
+        throw 'PXE boot: bundled dnsmasq not found - run ./scripts/build-dnsmasq-macos.sh and rebuild.'
     }
 
     $confPath = (Get-AppPxeBootLayoutPaths).dnsmasqConf

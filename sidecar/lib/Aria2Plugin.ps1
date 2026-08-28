@@ -412,10 +412,33 @@ function Test-AppAria2BinaryInstalled {
     return $true
 }
 
+function Get-AppAria2BundledBinaryPath {
+    <#
+    .SYNOPSIS
+        The aria2c the app ships (macOS only): vendor/binaries/pxe-macos/aria2c-universal,
+        built from the upstream source tarball by scripts/build-aria2-macos.sh (AppleTLS +
+        SDK libxml2/zlib/sqlite3). aria2 publishes no macOS binary and Homebrew is treated
+        as not installed (Craig, 2026-08-29), so this is the only macOS source. Same lookup
+        shape as Get-AppPxeBootBundledDnsmasqPath.
+    #>
+    if (-not ($IsMacOS -or ((Get-Variable -Name IsDarwin -Scope Global -ErrorAction SilentlyContinue) -and $IsDarwin))) { return $null }
+    $root = if ($script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($ProjectRoot) { $ProjectRoot } else { $null }
+    if (-not $root) { return $null }
+    foreach ($rel in @('binaries/aria2c-universal', 'vendor/binaries/pxe-macos/aria2c-universal')) {
+        $path = Join-Path $root $rel
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        Set-AppAria2BinaryExecutable -Path $path
+        return (Resolve-Path -LiteralPath $path).Path
+    }
+    return $null
+}
+
 function Get-AppAria2BinaryPath {
     if ($env:APP_ARIA2 -and (Test-Path -LiteralPath $env:APP_ARIA2 -PathType Leaf)) {
         return (Resolve-Path -LiteralPath $env:APP_ARIA2).Path
     }
+    $bundled = Get-AppAria2BundledBinaryPath
+    if ($bundled) { return $bundled }
     $paths = Get-AppAria2LayoutPaths
     $bin = Join-Path $paths.binaryDir (Get-AppAria2BinaryFileName)
     if (Test-Path -LiteralPath $bin -PathType Leaf) {
@@ -588,6 +611,18 @@ function Ensure-AppAria2Binary {
         return @{ ok = $false; installing = $true; skipped = $true; reason = 'install_in_progress' }
     }
     Ensure-AppAria2StoreLayout | Out-Null
+    $bundledBin = Get-AppAria2BundledBinaryPath
+    if ($bundledBin) {
+        # macOS ships its own build; there is nothing to download and the manifest's
+        # macOS entries are informational only.
+        return @{
+            ok      = $true
+            skipped = $true
+            bundled = $true
+            path    = $bundledBin
+            version = $script:AppAria2PinnedVersion
+        }
+    }
     if (Test-AppAria2BinaryInstalled -RequirePinnedVersion) {
         return @{
             ok      = $true

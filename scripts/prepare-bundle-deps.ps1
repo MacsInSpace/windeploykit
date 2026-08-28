@@ -152,6 +152,13 @@ function Stage-AppPxeVendorBinaries {
         } else {
             Write-Warning "Vendored wimlib missing: $wimlibUni - run ./scripts/fetch-wimlib.ps1"
         }
+        $aria2Uni = Join-Path $RepoRoot 'vendor/binaries/pxe-macos/aria2c-universal'
+        if (Test-Path -LiteralPath $aria2Uni) {
+            Copy-Item -LiteralPath $aria2Uni -Destination (Join-Path $destDir 'aria2c-universal') -Force
+            Write-Step 'Staged vendored aria2c-universal (Downloads - built from upstream source, no Homebrew)'
+        } else {
+            Write-Warning "Vendored aria2c missing: $aria2Uni - run ./scripts/build-aria2-macos.sh"
+        }
         $dialogUni = Join-Path $RepoRoot 'vendor/binaries/dialog-macos/windeploykit-dialog-universal'
         if (Test-Path -LiteralPath $dialogUni) {
             Copy-Item -LiteralPath $dialogUni -Destination (Join-Path $destDir 'windeploykit-dialog-universal') -Force

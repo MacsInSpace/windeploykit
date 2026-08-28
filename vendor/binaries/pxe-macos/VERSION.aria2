@@ -1,0 +1,3 @@
+aria2 1.37.0 - built by scripts/build-aria2-macos.sh on 2026-08-28T21:18:10Z
+source: https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0.tar.xz
+TLS: Apple Security.framework (AppleTLS); libs: SDK libxml2, zlib, sqlite3; no Homebrew

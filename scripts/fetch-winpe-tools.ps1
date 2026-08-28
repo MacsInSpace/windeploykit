@@ -74,7 +74,7 @@ try {
     Save-Download -Uri 'https://www.7-zip.org/a/7z2501-extra.7z' -OutFile $sevenArchive
     $sevenCmd = Get-Command 7z -ErrorAction SilentlyContinue
     if (-not $sevenCmd) {
-        throw 'Need 7z on PATH to extract 7z2409-extra.7z (brew install p7zip).'
+        throw 'Need a 7-Zip on PATH to extract 7z2501-extra.7z - run the app once and use Setup > Download tools (7zz from 7-zip.org), or download 7zz from https://7-zip.org/download.html.'
     }
     & $sevenCmd.Source x $sevenArchive "-o$sevenStage" -y | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "7z extract failed (exit $LASTEXITCODE)" }

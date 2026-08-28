@@ -1,28 +1,30 @@
 {
   "schema": 1,
   "version": "1.37.0",
-  "updated": "2026-06-23",
+  "updated": "2026-08-29",
   "manifestUrl": "",
   "platforms": {
     "macos_arm64": {
-      "archiveName": "aria2-1.37.0_mac_arm64.tar.gz",
-      "archiveKind": "tar.gz",
-      "binaryName": "aria2c",
-      "sizeBytes": 1038611,
-      "sha256": "bd62ee64319289bfb950047c5e12a913f26517ca9a4db3dacd23d52b20dbf995",
-      "downloadUrl": null,
-      "githubUrl": null,
-      "notes": "Homebrew bottle repack - run scripts/fetch-aria2-tools.ps1 on Apple Silicon Mac to refresh."
-    },
-    "macos_amd64": {
-      "archiveName": "aria2-1.37.0_mac_amd64.tar.gz",
-      "archiveKind": "tar.gz",
+      "archiveName": "",
+      "archiveKind": "",
       "binaryName": "aria2c",
       "sizeBytes": 0,
       "sha256": "",
       "downloadUrl": null,
       "githubUrl": null,
-      "notes": "No official macOS x64 binary - maintainer repack via fetch-aria2-tools.ps1 on Intel Mac."
+      "notes": "Bundled universal build from upstream source (scripts/build-aria2-macos.sh). The previous Homebrew-bottle repack is gone - it only ran where Homebrew's aria2 was already installed.",
+      "bundled": "vendor/binaries/pxe-macos/aria2c-universal"
+    },
+    "macos_amd64": {
+      "archiveName": "",
+      "archiveKind": "",
+      "binaryName": "aria2c",
+      "sizeBytes": 0,
+      "sha256": "",
+      "downloadUrl": null,
+      "githubUrl": null,
+      "notes": "Bundled universal build from upstream source (scripts/build-aria2-macos.sh). The previous Homebrew-bottle repack is gone - it only ran where Homebrew's aria2 was already installed.",
+      "bundled": "vendor/binaries/pxe-macos/aria2c-universal"
     },
     "windows_amd64": {
       "archiveName": "aria2-1.37.0-win-64bit-build1.zip",
@@ -43,5 +45,6 @@
       "githubUrl": "https://github.com/minnyres/aria2-windows-arm64/releases/download/v1.37.0/aria2_1.37.0_arm64.zip",
       "notes": "Community Windows on ARM build (minnyres/aria2-windows-arm64)."
     }
-  }
+  },
+  "note": "Windows: upstream release archives (aria2/aria2; arm64 from the minnyres community build) downloaded at setup or first use, verified by SHA-256. macOS: aria2 publishes no binary, so the app BUNDLES its own build from the upstream source tarball - vendor/binaries/pxe-macos/aria2c-universal, made by scripts/build-aria2-macos.sh (AppleTLS + SDK libxml2/zlib/sqlite3, no Homebrew). The macOS entries below are informational; Ensure-AppAria2Binary never downloads on macOS."
 }

@@ -54,6 +54,7 @@ export type SidecarCommand =
   | "EnsureAria2Binary"
   | "EnsurePxeBootCaddy"
   | "EnsurePxeBootTftpd64"
+  | "EnsureTools"
   | "ExportPxeBootWimBootAssets"
   | "GetAria2Downloads"
   | "GetAria2PluginConfig"
@@ -62,6 +63,7 @@ export type SidecarCommand =
   | "GetLocalMachineCredential"
   | "GetTaskSequenceStepLibrary"
   | "GetTaskSequenceStepFromLibrary"
+  | "GetTools"
   | "GetPathFreeSpace"
   | "GetPxeBootImagingClientLog"
   | "GetPxeBootImagingClients"
@@ -260,6 +262,35 @@ export interface PxeBootOptionalAssetsStatus {
   manifestSource?: string;
   updated?: string | null;
   assets: PxeBootOptionalAssetStatus[];
+}
+
+/** One row of the product-wide tool inventory (GetTools / EnsureTools). */
+export interface ToolStatusRow {
+  id: "caddy" | "tftpd64" | "dnsmasq" | "wimlib" | "aria2" | "sevenzip";
+  label: string;
+  present: boolean;
+  path: string | null;
+  version: string | null;
+  /** Where it comes from - the upstream project, or "bundled" when built into the app. */
+  source: string;
+  optional: boolean;
+  bundled: boolean;
+  /** True when EnsureTools can obtain it on this platform (bundled rows are never downloaded). */
+  downloadable: boolean;
+  note: string | null;
+}
+
+export interface ToolsStatus {
+  platform: "macos" | "windows" | "linux";
+  rows: ToolStatusRow[];
+  missingRequired: number;
+}
+
+export interface EnsureToolsResult {
+  ok: boolean;
+  lines: string[];
+  failures: Array<{ tool: string; message: string }>;
+  tools: ToolsStatus;
 }
 
 export interface PxeBootCaddyStatus {

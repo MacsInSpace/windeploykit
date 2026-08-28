@@ -129,7 +129,7 @@ function Get-AppHpSccmCabExtractTool {
     # Same tool ladder as the Dell lib (cabextract -> 7z -> expand.exe) - CI-side only.
     $cabextract = Get-Command cabextract -ErrorAction SilentlyContinue
     if ($cabextract) { return @{ kind = 'cabextract'; command = $cabextract.Source; name = 'cabextract' } }
-    foreach ($name in @('7z', '7za')) {
+    foreach ($name in @('7zz', '7z', '7za')) {
         $sevenZip = Get-Command $name -ErrorAction SilentlyContinue
         if ($sevenZip) { return @{ kind = '7z'; command = $sevenZip.Source; name = $name } }
     }

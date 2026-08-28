@@ -1,32 +1,31 @@
 {
   "schema": 1,
-  "version": "17.06",
-  "updated": "2026-06-24",
+  "version": "25.01",
+  "updated": "2026-08-29",
   "manifestUrl": "",
+  "note": "Upstream 7-Zip for macOS (7-zip.org), the universal 7zz binary. Replaces the Homebrew p7zip 17.06 repack - Homebrew is treated as not installed on every Mac (Craig, 2026-08-29). Downloaded at setup ('Download tools') or on demand, never bundled; verified by SHA-256. Optional: ISOs are read by mounting them, 7zz only speeds up cab/driver-pack work.",
   "platforms": {
     "macos_arm64": {
-      "archiveName": "p7zip-17.06_mac_arm64.tar.gz",
-      "archiveKind": "tar.gz",
+      "archiveName": "7z2501-mac.tar.xz",
+      "archiveKind": "tar.xz",
       "members": [
-        "7za",
-        "7z.so"
+        "7zz"
       ],
-      "sizeBytes": 2720122,
-      "sha256": "e92578adffedd95aa7b3bd00cbeb51c2ab3ea63596353ba3ca6e3607b43073e5",
-      "downloadUrl": null,
-      "notes": "Homebrew p7zip repack - run scripts/fetch-p7zip-tools.ps1 on Apple Silicon Mac to refresh."
+      "sizeBytes": 1876264,
+      "sha256": "26aa75bc262bb10bf0805617b95569c3035c2c590a99f7db55c7e9607b2685e0",
+      "downloadUrl": "https://7-zip.org/a/7z2501-mac.tar.xz",
+      "notes": "Universal binary (arm64 + x86_64) - the same archive serves both macOS keys."
     },
     "macos_amd64": {
-      "archiveName": "p7zip-17.06_mac_amd64.tar.gz",
-      "archiveKind": "tar.gz",
+      "archiveName": "7z2501-mac.tar.xz",
+      "archiveKind": "tar.xz",
       "members": [
-        "7za",
-        "7z.so"
+        "7zz"
       ],
-      "sizeBytes": 0,
-      "sha256": "",
-      "downloadUrl": null,
-      "notes": "Run scripts/fetch-p7zip-tools.ps1 on Intel Mac to refresh."
+      "sizeBytes": 1876264,
+      "sha256": "26aa75bc262bb10bf0805617b95569c3035c2c590a99f7db55c7e9607b2685e0",
+      "downloadUrl": "https://7-zip.org/a/7z2501-mac.tar.xz",
+      "notes": "Universal binary (arm64 + x86_64) - the same archive serves both macOS keys."
     }
   }
 }

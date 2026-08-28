@@ -374,6 +374,18 @@ state and inferring from it would re-run the wizard every launch.
 The wizard shows **free space** on the chosen volume and warns under 20 GB. That
 is the section 3b lesson made visible rather than just documented.
 
+**Step 2 - Tools (built 2026-08-29).** Craig: "we should not probe homebrew. Treat it
+as not installed (as it probably wont be on any mac) ... in WDK, we should grab
+executables from their projects (not edustar.tech) and offer to install at setup".
+So the wizard's second step is AdobeUpdateKit's "Download tools" shape:
+
+| Piece | Where |
+| --- | --- |
+| Inventory + one-shot download | `sidecar/handlers/Tools.ps1` - `GetTools` (rows: caddy, tftpd64 / dnsmasq, wimlib, aria2, 7-Zip) and `EnsureTools` (every downloadable row, or a `tools` subset; per-tool lines, failures never abandon the rest) |
+| Sources | Caddy - GitHub release; Tftpd64 - GitHub release (Windows); aria2 - GitHub release on Windows, **bundled build from upstream source on macOS** (`scripts/build-aria2-macos.sh`, `vendor/binaries/pxe-macos/aria2c-universal`); 7-Zip - `7zz` from 7-zip.org on macOS (`packaging/p7zip-tools.json`, `Ensure-AppPxeBootP7zipTools -Download`); dnsmasq and wimlib-imagex - bundled |
+| Rule | No resolver looks under `/opt/homebrew` or `/usr/local`; the only outside lookup is a plain `Get-Command` on PATH. Neither product fetches tools from `gitlab.edustar.tech` (that is USM's feed, not ours) |
+| Finish | Never blocked by a missing tool - the Netboot and Downloads panels retry on demand and say what is missing |
+
 > **`pushImageLibraryRoot()` is now called at startup** (`App.tsx`). Nothing called
 > it before, so the sidecar never learned the configured root and always fell back
 > to the default regardless of the setting. If the Deploy$ base ever appears to be

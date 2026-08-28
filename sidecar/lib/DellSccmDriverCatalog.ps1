@@ -127,7 +127,7 @@ function Get-AppDellSccmCabExtractTool {
         return @{ kind = 'cabextract'; command = $cabextract.Source; name = 'cabextract' }
     }
 
-    foreach ($name in @('7z', '7za')) {
+    foreach ($name in @('7zz', '7z', '7za')) {
         $sevenZip = Get-Command $name -ErrorAction SilentlyContinue
         if ($sevenZip) {
             return @{ kind = '7z'; command = $sevenZip.Source; name = $name }
