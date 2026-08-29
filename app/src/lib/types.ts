@@ -43,6 +43,7 @@ export type SidecarCommand =
   | "AddAria2Download"
   | "ApplyRuntimeConfig"
   | "CancelAria2DirectDownload"
+  | "CheckToolUpdates"
   | "ClearInfraSshCredentialPassword"
   | "ClearLocalMachineCredentialPassword"
   | "ClearMacOsAdminCredentialCache"
@@ -64,6 +65,8 @@ export type SidecarCommand =
   | "GetTaskSequenceStepLibrary"
   | "GetTaskSequenceStepFromLibrary"
   | "GetTools"
+  | "RollbackTool"
+  | "UpdateTool"
   | "GetPathFreeSpace"
   | "GetPxeBootImagingClientLog"
   | "GetPxeBootImagingClients"
@@ -264,26 +267,57 @@ export interface PxeBootOptionalAssetsStatus {
   assets: PxeBootOptionalAssetStatus[];
 }
 
-/** One row of the product-wide tool inventory (GetTools / EnsureTools). */
+/** One row of the product-wide tool inventory (GetTools / EnsureTools / Tools panel). */
 export interface ToolStatusRow {
-  id: "caddy" | "tftpd64" | "dnsmasq" | "wimlib" | "aria2" | "sevenzip";
+  id: string;
   label: string;
+  /** github = upstream release, updatable; manifest = pinned archive from the tool's site; bundled = built into the app; prereq = not ours to install. */
+  kind: "github" | "manifest" | "bundled" | "prereq";
   present: boolean;
   path: string | null;
+  /** What is installed (marker / state), null when missing. */
   version: string | null;
+  /** The product's known-good default for a fresh install. */
+  pinnedVersion: string | null;
+  /** The project's latest release, from the last update check. */
+  latestVersion: string | null;
+  latestUrl: string | null;
+  updateAvailable: boolean;
+  updateCheckError: string | null;
+  /** The kept copy a rollback would restore. */
+  previousVersion: string | null;
+  installedAt: string | null;
   /** Where it comes from - the upstream project, or "bundled" when built into the app. */
   source: string;
   optional: boolean;
+  /** Needed to serve on a school LAN with no internet - obtain before going on site. */
+  offline: boolean;
   bundled: boolean;
   /** True when EnsureTools can obtain it on this platform (bundled rows are never downloaded). */
   downloadable: boolean;
+  /** True when the Tools panel can install a newer upstream release (github kind with a live path). */
+  updatable: boolean;
   note: string | null;
 }
 
 export interface ToolsStatus {
   platform: "macos" | "windows" | "linux";
+  platformKey: string;
   rows: ToolStatusRow[];
   missingRequired: number;
+  updatesAvailable: number;
+  updateCheckedAt: string | null;
+}
+
+export interface CheckToolUpdatesResult {
+  checkedAt: string;
+  tools: ToolsStatus;
+}
+
+export interface ToolActionResult {
+  ok: boolean;
+  lines: string[];
+  tools: ToolsStatus;
 }
 
 export interface EnsureToolsResult {

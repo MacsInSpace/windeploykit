@@ -13,6 +13,7 @@ export const NAV_ICON_ROLES = {
   advanced: "settings",
   "site-profile": "building",
   transfers: "download",
+  tools: "package",
   logs: "terminal",
 } as const;
 

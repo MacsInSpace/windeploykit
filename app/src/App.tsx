@@ -20,6 +20,7 @@ import { OutOfBoxDriversPanel } from "./panels/OutOfBoxDriversPanel";
 import { TransfersPanel } from "./panels/TransfersPanel";
 import { DeploymentSharePanel } from "./panels/DeploymentSharePanel";
 import { SidecarLogPanel } from "./panels/SidecarLogPanel";
+import { ToolsPanel } from "./panels/ToolsPanel";
 import { SETTING_SETUP_COMPLETED } from "./lib/setupSettings";
 import { getSetting } from "./lib/settings";
 import { pushImageLibraryRoot } from "./lib/imageLibrary";
@@ -69,6 +70,8 @@ function renderPanel(id: string) {
       return <TransfersPanel />;
     case "logs":
       return <SidecarLogPanel />;
+    case "tools":
+      return <ToolsPanel />;
     default:
       return <NotBuiltYet id={id} />;
   }

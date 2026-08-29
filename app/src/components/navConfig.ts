@@ -47,6 +47,7 @@ export const NAV_TREE: NavNode[] = [
         children: [
           { id: "site-profile", label: "Site Profile", icon: "site-profile" },
           { id: "transfers", label: "Transfers", icon: "transfers" },
+          { id: "tools", label: "Tools", icon: "tools" },
           { id: "logs", label: "Sidecar Log", icon: "logs" },
         ],
       },

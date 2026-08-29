@@ -71,6 +71,7 @@ $libRoot = Join-Path $script:SidecarRoot 'lib'
 . (Join-Path $libRoot 'Aria2TrackerScrape.ps1')
 . (Join-Path $libRoot 'Aria2PxeIntegration.ps1')
 . (Join-Path $libRoot 'EvalIsoCatalog.ps1')
+. (Join-Path $libRoot 'ToolsRegistry.ps1')
 
 foreach ($handler in (Get-ChildItem -Path (Join-Path $script:SidecarRoot 'handlers') -Filter '*.ps1' -File | Sort-Object Name)) {
     . $handler.FullName

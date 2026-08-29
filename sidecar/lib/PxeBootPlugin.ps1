@@ -4498,7 +4498,8 @@ function Test-AppPxeBootCaddyInstalled {
         $marker = Get-AppPxeBootCaddyMarkerPath
         if (-not (Test-Path -LiteralPath $marker)) { return $false }
         $installed = [string](Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue).Trim()
-        if ($installed -ne $script:AppPxeBootCaddyVersion) { return $false }
+        $expected = if (Test-AppSidecarCommand Get-AppToolExpectedVersion) { Get-AppToolExpectedVersion -Id 'caddy' -Default $script:AppPxeBootCaddyVersion } else { $script:AppPxeBootCaddyVersion }
+        if ($installed -ne $expected) { return $false }
     }
     return $true
 }
@@ -4950,7 +4951,8 @@ function Test-AppPxeBootTftpd64Installed {
         $marker = Get-AppPxeBootTftpd64MarkerPath
         if (-not (Test-Path -LiteralPath $marker)) { return $false }
         $installed = [string](Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue).Trim()
-        if ($installed -ne $script:AppPxeBootTftpd64Version) { return $false }
+        $expected = if (Test-AppSidecarCommand Get-AppToolExpectedVersion) { Get-AppToolExpectedVersion -Id 'tftpd64' -Default $script:AppPxeBootTftpd64Version } else { $script:AppPxeBootTftpd64Version }
+        if ($installed -ne $expected) { return $false }
     }
     return $true
 }

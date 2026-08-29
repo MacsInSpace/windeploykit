@@ -386,6 +386,19 @@ So the wizard's second step is AdobeUpdateKit's "Download tools" shape:
 | Rule | No resolver looks under `/opt/homebrew` or `/usr/local`; the only outside lookup is a plain `Get-Command` on PATH. Neither product fetches tools from `gitlab.edustar.tech` (that is USM's feed, not ours) |
 | Finish | Never blocked by a missing tool - the Netboot and Downloads panels retry on demand and say what is missing |
 
+**Tools node (Advanced Configuration > Tools, built 2026-08-29)** - AdobeUpdateKit's
+Core Updates shape. Craig: "a panel for managing these ... so the user can update them
+where available ... install via github and let the user update when there is one."
+
+| Piece | Where |
+| --- | --- |
+| Registry, state, mechanics | `sidecar/lib/ToolsRegistry.ps1` - one table (`Get-AppToolsRegistry`: id, kind `github | manifest | bundled | prereq`, repo + asset regex per platform key, pinned / resolve / live / marker / ensure scriptblocks); `tools-state.json` and `update-check.json` under `<data root>/tools/`; kept versions in `tools/<id>/<version>/` |
+| Verbs | `GetTools`, `EnsureTools` (pinned install), `CheckToolUpdates` (GitHub `releases/latest`, cached 24 h, `force`), `UpdateTool` (ONE tool: download the latest asset, verify GitHub's `sha256` digest, refuse an unsigned Mach-O, keep the replaced binary, write marker + state), `RollbackTool` (the kept copy, no network) - `sidecar/handlers/Tools.ps1` |
+| Panel | `app/src/panels/ToolsPanel.tsx`; nav id `tools`; Action menu: Check for updates, Download missing tools |
+| Two versions | The pin in `packaging/*.json` is the default for a fresh install; what the user installed lives in `tools-state.json`. `Test-*Installed -RequirePinnedVersion` compares against `Get-AppToolExpectedVersion` (state, else pin) - without that a user update was "wrong version" to the next Ensure and got reinstalled over |
+| Never automatic | Plug-ins still install the pinned version themselves on enable / service start. Only the panel and the wizard obtain a newer release, on a click |
+| Not updatable from the panel | bundled builds (dnsmasq, wimlib-imagex, macOS aria2c) update with the app; 7-Zip has no release feed (pin bumped with the app); PowerShell is the prerequisite - a newer release is reported with a link, never installed |
+
 > **`pushImageLibraryRoot()` is now called at startup** (`App.tsx`). Nothing called
 > it before, so the sidecar never learned the configured root and always fell back
 > to the default regardless of the setting. If the Deploy$ base ever appears to be

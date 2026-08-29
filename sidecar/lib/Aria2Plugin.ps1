@@ -407,7 +407,8 @@ function Test-AppAria2BinaryInstalled {
         $marker = Get-AppAria2MarkerPath
         if (-not (Test-Path -LiteralPath $marker)) { return $false }
         $installed = [string](Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue).Trim()
-        if ($installed -ne $script:AppAria2PinnedVersion) { return $false }
+        $expected = if (Test-AppSidecarCommand Get-AppToolExpectedVersion) { Get-AppToolExpectedVersion -Id 'aria2' -Default $script:AppAria2PinnedVersion } else { $script:AppAria2PinnedVersion }
+        if ($installed -ne $expected) { return $false }
     }
     return $true
 }
