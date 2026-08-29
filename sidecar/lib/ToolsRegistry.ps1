@@ -118,7 +118,21 @@ function Get-AppToolsRegistry {
         note = 'Ships inside the app; updates with it.'
     })
 
-    if ($isWin) {
+    # aria2: Windows from the upstream release archives; macOS either the build this
+    # product ships (WinDeployKit: Get-AppAria2BundledBinaryPath) or, when the product
+    # publishes an asset feed (USM: gitlab.edustar.tech), the archive from that feed.
+    $aria2Bundled = $false
+    if (Test-AppSidecarCommand Get-AppAria2BundledBinaryPath) {
+        try { $aria2Bundled = [bool](Get-AppAria2BundledBinaryPath) } catch { $aria2Bundled = $false }
+    }
+    if ($aria2Bundled) {
+        [void]$rows.Add(@{
+            id = 'aria2'; label = 'aria2 (downloads)'; kind = 'bundled'; platforms = @('macos')
+            optional = $false; offline = $false; source = 'aria2/aria2 source - built by us, bundled'
+            resolve = { Get-AppAria2BundledBinaryPath }
+            note = 'aria2 publishes no macOS binary; the app carries its own build. Updates with the app.'
+        })
+    } elseif ($isWin) {
         [void]$rows.Add(@{
             id = 'aria2'; label = 'aria2 (downloads)'; kind = 'github'; platforms = @('windows')
             optional = $false; offline = $false; source = 'github.com/aria2/aria2 (arm64: minnyres/aria2-windows-arm64)'
@@ -137,21 +151,33 @@ function Get-AppToolsRegistry {
         })
     } else {
         [void]$rows.Add(@{
-            id = 'aria2'; label = 'aria2 (downloads)'; kind = 'bundled'; platforms = @('macos')
-            optional = $false; offline = $false; source = 'aria2/aria2 source - built by us, bundled'
-            resolve = { Get-AppAria2BundledBinaryPath }
-            note = 'aria2 publishes no macOS binary; the app carries its own build. Updates with the app.'
+            id = 'aria2'; label = 'aria2 (downloads)'; kind = 'manifest'; platforms = @('macos')
+            optional = $false; offline = $false; source = "$(Get-AppToolsProductFeedLabel) - our build from aria2 source"
+            binaryName = 'aria2c'
+            pinned  = { $script:AppAria2PinnedVersion }
+            resolve = { Get-AppAria2BinaryPath }
+            live    = { Join-Path (Get-AppAria2LayoutPaths).binaryDir (Get-AppAria2BinaryFileName) }
+            marker  = { Get-AppAria2MarkerPath }
+            ensure  = { Ensure-AppAria2Binary }
+            note = 'aria2 publishes no macOS binary; the archive on the product feed is our own build from source (no Homebrew). The pin is bumped with the app.'
         })
     }
 
+    # 7-Zip on macOS: WinDeployKit fetches the upstream 7zz from 7-zip.org on demand
+    # (Ensure- has a -Download switch); USM installs its pinned p7zip from the product feed.
+    $sevenEnsure = {
+        $cmd = Get-Command Ensure-AppPxeBootP7zipTools -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Parameters.ContainsKey('Download')) { Ensure-AppPxeBootP7zipTools -Download } else { Ensure-AppPxeBootP7zipTools }
+    }
+    $sevenSource = if (Get-AppToolsProductFeedLabel -Quiet) { "$(Get-AppToolsProductFeedLabel) - p7zip" } else { '7-zip.org' }
     [void]$rows.Add(@{
-        id = 'sevenzip'; label = '7-Zip (7zz)'; kind = 'manifest'; platforms = @('macos')
-        optional = $true; offline = $false; source = '7-zip.org'
+        id = 'sevenzip'; label = '7-Zip / p7zip'; kind = 'manifest'; platforms = @('macos')
+        optional = $true; offline = $false; source = $sevenSource
         binaryName = '7zz'
         pinned  = { $script:AppPxeBootP7zipPinnedVersion }
         resolve = { Get-AppPxeBootHost7zPath }
-        ensure  = { Ensure-AppPxeBootP7zipTools -Download }
-        note = 'Optional: speeds up driver-pack and cab work. ISOs are read by mounting them. 7-zip.org publishes no release feed - the pin is bumped with the app.'
+        ensure  = $sevenEnsure
+        note = 'Optional: speeds up driver-pack and cab work. ISOs are read by mounting them. No release feed to check - the pin is bumped with the app.'
     })
 
     [void]$rows.Add(@{
@@ -166,6 +192,18 @@ function Get-AppToolsRegistry {
 
     $platform = Get-AppToolsPlatformName
     return @($rows.ToArray() | Where-Object { $platform -in @($_['platforms']) })
+}
+
+function Get-AppToolsProductFeedLabel {
+    # 'gitlab.edustar.tech' when this product publishes an asset feed (USM), else $null
+    # (-Quiet) or 'the product asset feed' - the wording the source column shows.
+    param([switch]$Quiet)
+    $base = ''
+    if (Test-AppSidecarCommand Get-AppProductAssetFeedBaseUrl) {
+        try { $base = [string](Get-AppProductAssetFeedBaseUrl) } catch { $base = '' }
+    }
+    if ([string]::IsNullOrWhiteSpace($base)) { return $(if ($Quiet) { $null } else { 'the product asset feed' }) }
+    try { return ([uri]$base).Host } catch { return 'the product asset feed' }
 }
 
 function Get-AppToolSpec {
