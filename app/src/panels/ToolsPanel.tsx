@@ -196,12 +196,12 @@ export function ToolsPanel() {
                         </div>
                         <div className="mono truncate text-[10px]" style={{ color: "var(--text3)" }}>
                           {row.version ? `installed ${row.version}` : "not installed"}
-                          {row.pinnedVersion ? ` · pinned ${row.pinnedVersion}` : ""}
-                          {row.latestVersion ? ` · latest ${row.latestVersion}` : ""}
-                          {row.previousVersion ? ` · previous ${row.previousVersion} kept` : ""}
-                          {" · "}
+                          {row.pinnedVersion ? ` - pinned ${row.pinnedVersion}` : ""}
+                          {row.latestVersion ? ` - latest ${row.latestVersion}` : ""}
+                          {row.previousVersion ? ` - previous ${row.previousVersion} kept` : ""}
+                          {" - "}
                           {row.source}
-                          {row.updateCheckError ? ` · check failed: ${row.updateCheckError}` : ""}
+                          {row.updateCheckError ? ` - check failed: ${row.updateCheckError}` : ""}
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5">
