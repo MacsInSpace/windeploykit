@@ -163,15 +163,16 @@ function Get-AppToolsRegistry {
         })
     }
 
-    # 7-Zip on macOS: WinDeployKit fetches the upstream 7zz from 7-zip.org on demand
-    # (Ensure- has a -Download switch); USM installs its pinned p7zip from the product feed.
+    # 7-Zip on macOS: upstream 7zz in both products. WinDeployKit fetches it from 7-zip.org
+    # on demand (Ensure- has a -Download switch); USM installs the pinned archive from its
+    # product feed with 7-zip.org as the fallback.
     $sevenEnsure = {
         $cmd = Get-Command Ensure-AppPxeBootP7zipTools -ErrorAction SilentlyContinue
         if ($cmd -and $cmd.Parameters.ContainsKey('Download')) { Ensure-AppPxeBootP7zipTools -Download } else { Ensure-AppPxeBootP7zipTools }
     }
-    $sevenSource = if (Get-AppToolsProductFeedLabel -Quiet) { "$(Get-AppToolsProductFeedLabel) - p7zip" } else { '7-zip.org' }
+    $sevenSource = if (Get-AppToolsProductFeedLabel -Quiet) { "$(Get-AppToolsProductFeedLabel), 7-zip.org fallback" } else { '7-zip.org' }
     [void]$rows.Add(@{
-        id = 'sevenzip'; label = '7-Zip / p7zip'; kind = 'manifest'; platforms = @('macos')
+        id = 'sevenzip'; label = '7-Zip (7zz)'; kind = 'manifest'; platforms = @('macos')
         optional = $true; offline = $false; source = $sevenSource
         binaryName = '7zz'
         pinned  = { $script:AppPxeBootP7zipPinnedVersion }
