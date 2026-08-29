@@ -195,7 +195,7 @@ export function ToolsPanel() {
                           ) : null}
                         </div>
                         <div className="mono truncate text-[10px]" style={{ color: "var(--text3)" }}>
-                          {row.version ? `installed ${row.version}` : "not installed"}
+                          {row.present ? (row.version ? `installed ${row.version}` : "installed") : "not installed"}
                           {row.pinnedVersion ? ` - pinned ${row.pinnedVersion}` : ""}
                           {row.latestVersion ? ` - latest ${row.latestVersion}` : ""}
                           {row.previousVersion ? ` - previous ${row.previousVersion} kept` : ""}

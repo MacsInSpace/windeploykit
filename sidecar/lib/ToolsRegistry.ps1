@@ -108,6 +108,7 @@ function Get-AppToolsRegistry {
         id = 'dnsmasq'; label = 'dnsmasq (TFTP / ProxyDHCP)'; kind = 'bundled'; platforms = @('macos')
         optional = $false; offline = $true; source = 'thekelleys.org.uk/dnsmasq - built from source, bundled'
         resolve = { Get-AppPxeBootBundledDnsmasqPath }
+        installedVersion = { Get-AppToolVersionFromCommand -Path (Get-AppPxeBootBundledDnsmasqPath) }
         note = 'Ships inside the app; updates with it.'
     })
 
@@ -115,6 +116,7 @@ function Get-AppToolsRegistry {
         id = 'wimlib'; label = 'wimlib-imagex (WIM tools)'; kind = 'bundled'; platforms = @('windows', 'macos')
         optional = $false; offline = $true; source = 'wimlib.net - bundled'
         resolve = { Get-AppPxeBootBundledWimlibImagexPath }
+        installedVersion = { Get-AppToolVersionFromCommand -Path (Get-AppPxeBootBundledWimlibImagexPath) }
         note = 'Ships inside the app; updates with it.'
     })
 
@@ -130,6 +132,7 @@ function Get-AppToolsRegistry {
             id = 'aria2'; label = 'aria2 (downloads)'; kind = 'bundled'; platforms = @('macos')
             optional = $false; offline = $false; source = 'aria2/aria2 source - built by us, bundled'
             resolve = { Get-AppAria2BundledBinaryPath }
+            installedVersion = { Get-AppToolVersionFromCommand -Path (Get-AppAria2BundledBinaryPath) }
             note = 'aria2 publishes no macOS binary; the app carries its own build. Updates with the app.'
         })
     } elseif ($isWin) {
@@ -177,6 +180,8 @@ function Get-AppToolsRegistry {
         binaryName = '7zz'
         pinned  = { $script:AppPxeBootP7zipPinnedVersion }
         resolve = { Get-AppPxeBootHost7zPath }
+        # 7zz prints its banner with no arguments: "7-Zip (z) 25.01 (arm64) : Copyright ..."
+        installedVersion = { Get-AppToolVersionFromCommand -Path (Get-AppPxeBootHost7zPath) -ArgumentList @() -Pattern '7-Zip[^\d]*(\d+\.\d+)' }
         ensure  = $sevenEnsure
         note = 'Optional: speeds up driver-pack and cab work. ISOs are read by mounting them. No release feed to check - the pin is bumped with the app.'
     })
@@ -295,6 +300,22 @@ function Get-AppToolExpectedVersion {
     return $Default
 }
 
+function Get-AppToolVersionFromCommand {
+    <#
+    .SYNOPSIS
+        Run a binary with a version flag and pull the first dotted number out of its first
+        lines - how bundled tools (no marker, no state) report what they are. Guarded: a
+        missing path or a tool that will not answer reads as $null, never a throw.
+    #>
+    param([AllowNull()][string]$Path, [string[]]$ArgumentList = @('--version'), [string]$Pattern = '(\d+(?:\.\d+)+)')
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try {
+        $out = @(& $Path @ArgumentList 2>&1 | Select-Object -First 4 | ForEach-Object { [string]$_ }) -join ' '
+        if ($out -match $Pattern) { return $Matches[1] }
+    } catch { }
+    return $null
+}
+
 function Get-AppToolInstalledVersion {
     param([Parameter(Mandatory)]$Spec)
     $fromSpec = Invoke-AppToolScript -Spec $Spec -Name 'installedVersion'
@@ -305,8 +326,11 @@ function Get-AppToolInstalledVersion {
         if (-not [string]::IsNullOrWhiteSpace($v)) { return $v.Trim() }
     }
     $entry = Get-AppToolStateEntry -Id ([string]$Spec['id'])
-    if ($entry -and $entry.Contains('installedVersion')) { return [string]$entry['installedVersion'] }
-    if ($Spec['kind'] -eq 'bundled') { return (Invoke-AppToolScript -Spec $Spec -Name 'pinned') }
+    if ($entry -and $entry.Contains('installedVersion') -and $entry['installedVersion']) { return [string]$entry['installedVersion'] }
+    # No marker, no state, no answer from the binary: a plug-in installed it at the pin
+    # (bundled tools ship at the pin by definition), so the pin is the honest answer.
+    $pinned = Invoke-AppToolScript -Spec $Spec -Name 'pinned'
+    if ($pinned) { return [string]$pinned }
     return $null
 }
 
