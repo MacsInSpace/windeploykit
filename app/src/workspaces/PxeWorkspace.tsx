@@ -99,6 +99,68 @@ const TS_FIELD_ORDER = [
   "inputLocale",
   "timeZone",
 ];
+/** Debian sequences compile to a preseed, so they answer entirely different
+ * questions. Nothing here overlaps with the Windows set on purpose: a field that
+ * means one thing under unattend and another under d-i is worse than two fields. */
+const TS_DEBIAN_FIELD_LABELS: Record<string, string> = {
+  hostname: "Hostname",
+  domain: "Domain",
+  locale: "Locale",
+  keymap: "Keyboard",
+  timezone: "Time zone",
+  username: "First user",
+  userFullName: "Full name",
+  userPasswordCrypted: "Password hash (crypt)",
+  disk: "Target disk(s)",
+  partitionRecipe: "Partitioning",
+  packages: "Extra packages",
+  runScriptUrl: "First-boot script URL",
+};
+const TS_DEBIAN_FIELD_ORDER = [
+  "hostname",
+  "domain",
+  "locale",
+  "keymap",
+  "timezone",
+  "username",
+  "userFullName",
+  "userPasswordCrypted",
+  "disk",
+  "partitionRecipe",
+  "packages",
+  "runScriptUrl",
+];
+const TS_DEBIAN_DEFAULT_FIELDS: Record<string, string> = {
+  hostname: "debian",
+  domain: "local",
+  locale: "en_AU.UTF-8",
+  keymap: "us",
+  timezone: "Australia/Melbourne",
+  username: "localadmin",
+  userFullName: "Local Administrator",
+  userPasswordCrypted: "",
+  disk: "/dev/nvme0n1 /dev/sda /dev/mmcblk0",
+  partitionRecipe: "atomic",
+  packages: "",
+  runScriptUrl: "",
+};
+const TS_PLATFORM_LABELS: Record<string, string> = {
+  windows: "Windows",
+  debian: "Debian",
+};
+/** A sequence's platform, defaulting to windows for anything saved before the
+ * field existed. */
+function tsPlatform(seq: { platform?: string }): string {
+  return seq.platform === "debian" ? "debian" : "windows";
+}
+function tsFieldOrder(platform: string): string[] {
+  return platform === "debian" ? TS_DEBIAN_FIELD_ORDER : TS_FIELD_ORDER;
+}
+function tsFieldLabel(platform: string, key: string): string {
+  const table = platform === "debian" ? TS_DEBIAN_FIELD_LABELS : TS_FIELD_LABELS;
+  return table[key] ?? key;
+}
+
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 const IPV4_CIDR_RE = /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/;
 const TS_KIND_LABELS: Record<string, string> = {
@@ -502,6 +564,10 @@ export function PxeWorkspace({
   const [tsSelectedId, setTsSelectedId] = useState<string | null>(null);
   const [tsSaving, setTsSaving] = useState(false);
   const [tsNewName, setTsNewName] = useState("");
+  /** Chosen when a sequence is created: it decides which answer file it compiles
+   * to, and therefore which fields the editor offers. Not changed afterwards,
+   * because the field sets do not overlap. */
+  const [tsNewPlatform, setTsNewPlatform] = useState("windows");
   // Sequences whose local-domain machine OU is in "Custom..." free-text mode (the
   // select alone can't tell "custom equals the suggestion" from "picked the suggestion").
   // Preselected deploy-client menu item ("" = tech picks at the device).
@@ -2698,7 +2764,9 @@ export function PxeWorkspace({
                               </button>
                             )}
                             <span className="mono text-[10px]" style={{ color: "var(--text3)" }}>
-                              {TS_KIND_LABELS[seq.kind] ?? seq.kind}
+                              {tsPlatform(seq) === "debian"
+                                ? TS_PLATFORM_LABELS.debian
+                                : TS_KIND_LABELS[seq.kind] ?? seq.kind}
                             </span>
                             <span
                               className="mono text-[10px]"
@@ -2880,9 +2948,14 @@ export function PxeWorkspace({
                                 />
                                 Join a domain
                               </label>
-                              {TS_FIELD_ORDER
-                                .filter((key) => key in seq.fields || ["registeredOrg", "registeredOwner", "userLocale", "inputLocale", "timeZone"].includes(key))
+                              {tsFieldOrder(tsPlatform(seq))
+                                .filter((key) => tsPlatform(seq) === "debian"
+                                  || key in seq.fields
+                                  || ["registeredOrg", "registeredOwner", "userLocale", "inputLocale", "timeZone"].includes(key))
                                 .filter((key) => {
+                                  // Every Windows-only rule below is skipped for a
+                                  // preseed, which has no join and no static-IP block.
+                                  if (tsPlatform(seq) === "debian") return true;
                                   const joining = Boolean(seq.fields.joinDomain) || tsJoinOptIn.has(seq.id);
                                   if (["ipCidr", "gateway", "dns1"].includes(key))
                                     return seq.fields.network === "static";
@@ -2909,7 +2982,7 @@ export function PxeWorkspace({
                                             : undefined
                                       }
                                     >
-                                      {TS_FIELD_LABELS[key] ?? key}
+                                      {tsFieldLabel(tsPlatform(seq), key)}
                                     </label>
                                     {key === "computerName" ? (
                                       <input
@@ -3754,6 +3827,17 @@ export function PxeWorkspace({
                         spellCheck={false}
                         onChange={(e) => setTsNewName(e.target.value)}
                       />
+                      <div className="input-box h-[26px]">
+                        <select
+                          className="text-[11px]"
+                          value={tsNewPlatform}
+                          title="Windows compiles to unattend.xml; Debian compiles to a d-i preseed. The fields on offer differ, so this is chosen once."
+                          onChange={(e) => setTsNewPlatform(e.target.value)}
+                        >
+                          <option value="windows">Windows</option>
+                          <option value="debian">Debian</option>
+                        </select>
+                      </div>
                       <button
                         type="button"
                         className="btn py-0.5 text-[10px]"
@@ -3765,9 +3849,15 @@ export function PxeWorkspace({
                             {
                               id,
                               name: tsNewName.trim() || "New sequence",
-                              kind: "client",
+                              platform: tsNewPlatform,
+                              // kind is a Windows role; a preseed has none.
+                              kind: tsNewPlatform === "debian" ? "" : "client",
                               enabled: false,
-                              fields: { ...TS_DEFAULT_FIELDS },
+                              fields: {
+                                ...(tsNewPlatform === "debian"
+                                  ? TS_DEBIAN_DEFAULT_FIELDS
+                                  : TS_DEFAULT_FIELDS),
+                              },
                               adminGroups: [],
                               steps: [],
                             },

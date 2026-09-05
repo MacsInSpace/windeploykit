@@ -194,6 +194,14 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
     # Sections replaced kinds (Craig, 2026-08-19): only the client/server role
     # remains; the old OOBE variant is simply a client with no join domain.
     if ($kind -notin @('client', 'server')) { $kind = 'client' }
+    # Which installer consumes this sequence. Windows means unattend.xml; debian
+    # means a d-i preseed. Absent means windows, so every sequence written before
+    # this existed keeps working untouched.
+    $platform = ([string](Get-AppPxeBootTsProp -Item $Item -Name 'platform')).Trim().ToLowerInvariant()
+    if ($platform -notin @('windows', 'debian')) { $platform = 'windows' }
+    # kind is a Windows role. A preseed has no client/server split, and leaving a
+    # stale 'server' on it would show the wrong fields in the panel.
+    if ($platform -ne 'windows') { $kind = '' }
     $fieldsIn = Get-AppPxeBootTsProp -Item $Item -Name 'fields'
     $fields = [ordered]@{}
     if ($fieldsIn) {
@@ -320,6 +328,7 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         enabled     = [bool](Get-AppPxeBootTsProp -Item $Item -Name 'enabled')
         fields      = $fields
         adminGroups = $adminGroups
+        platform    = $platform
         steps       = $steps
     }
     if ($localAccount) { $record['localAccount'] = $localAccount }
@@ -1385,16 +1394,27 @@ function Sync-AppPxeBootTaskSequenceStore {
     foreach ($seq in @(Read-AppPxeBootTaskSequences)) {
         $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq
         if ($null -eq $rec -or -not [bool]$rec.enabled) { continue }
-        $xml = Build-AppPxeBootTaskSequenceUnattendXml -Sequence $rec
-        if (-not $xml) { continue }
-        $file = Join-Path $dir "$($rec.id).xml"
-        # CRLF for Windows-side consumers; idempotent write (skip when unchanged).
-        $body = ($xml -replace "`r`n", "`n") -replace "`n", "`r`n"
+        # Which answer file this sequence compiles to. Windows wants CRLF for
+        # its own consumers; a preseed is read by the Debian installer and LF is
+        # not optional there - d-i takes the CR as part of the value and a
+        # trailing "\r" turns a hostname into one nobody can resolve.
+        if ([string]$rec.platform -eq 'debian') {
+            $rendered = Build-AppPxeBootTaskSequencePreseed -Sequence $rec
+            $ext = 'cfg'
+            $body = ($rendered -replace "`r`n", "`n")
+        } else {
+            $rendered = Build-AppPxeBootTaskSequenceUnattendXml -Sequence $rec
+            $ext = 'xml'
+            $body = ($rendered -replace "`r`n", "`n") -replace "`n", "`r`n"
+        }
+        if (-not $rendered) { continue }
+        $file = Join-Path $dir "$($rec.id).$ext"
+        # idempotent write (skip when unchanged)
         $have = if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -Raw -ErrorAction SilentlyContinue } else { $null }
         if ($have -ne $body) {
             [System.IO.File]::WriteAllText($file, $body, (New-Object System.Text.UTF8Encoding $false))
         }
-        [void]$keep.Add("$($rec.id).xml")
+        [void]$keep.Add("$($rec.id).$ext")
         $published++
 
         # index.json row: what the client needs BEFORE it applies anything. A row with
@@ -1403,7 +1423,8 @@ function Sync-AppPxeBootTaskSequenceStore {
             id              = [string]$rec.id
             name            = [string]$rec.name
             kind            = [string]$rec.kind
-            file            = "$($rec.id).xml"
+            platform        = [string]$rec.platform
+            file            = "$($rec.id).$ext"
             firstBootAction = (Get-AppPxeBootTsFirstBootAction -Sequence $rec)
             image           = $null
         }
@@ -1465,7 +1486,10 @@ function Sync-AppPxeBootTaskSequenceStore {
             [void]$keep.Add("$($rec.id).firstboot.cmd")
         }
     }
-    foreach ($pattern in @('*.xml', '*.env', '*.firstboot.cmd')) {
+    # .cfg belongs here too, or a preseed for a deleted sequence would be left
+    # on the share for ever, and a machine booted from a stale menu entry would
+    # still install from it.
+    foreach ($pattern in @('*.xml', '*.cfg', '*.env', '*.firstboot.cmd')) {
         foreach ($existing in @(Get-ChildItem -LiteralPath $dir -File -Filter $pattern -ErrorAction SilentlyContinue)) {
             if (-not $keep.Contains($existing.Name)) {
                 Remove-Item -LiteralPath $existing.FullName -Force -ErrorAction SilentlyContinue
@@ -1516,7 +1540,7 @@ function Sync-AppPxeBootTaskSequenceStore {
     # pruned rather than preselecting a missing sequence (no marker = None item).
     $marker = Join-Path $dir '_default.txt'
     $default = Get-AppPxeBootTaskSequenceDefaultId
-    $defaultValid = [bool]($default -and $keep.Contains("$default.xml"))
+    $defaultValid = [bool]($default -and ($keep.Contains("$default.xml") -or $keep.Contains("$default.cfg")))
     if ($defaultValid) {
         $want = $default + "`r`n"
         $have = if (Test-Path -LiteralPath $marker) { Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue } else { $null }
@@ -1529,12 +1553,192 @@ function Sync-AppPxeBootTaskSequenceStore {
     @{ published = $published; dir = $dir }
 }
 
+# --- Debian preseed -----------------------------------------------------------
+#
+# A preseed is the direct equivalent of unattend.xml: the answer file the
+# installer reads so nobody stands at the machine. The differences from the
+# Windows path are worth knowing before editing this.
+#
+#   * Selection happens at BOOT, not after it. WinPE shows a picker and copies
+#     the chosen XML to Panther; d-i is told `preseed/url=` on the kernel command
+#     line, so the PXE menu entry decides which sequence a machine gets.
+#   * There is no deploy-time client, so the {{SITE}}/{{SERIAL}} half of the
+#     Windows token model has no counterpart. Anything that must be computed per
+#     machine is shell in late_command, which is why the hostname can be derived
+#     from the MAC there rather than substituted here.
+#   * SECRETS CANNOT BE WITHHELD. The Windows publisher deliberately leaves
+#     {{JoinPw}} in the file for the client to fill, so a join password never
+#     lands on the share. An unauthenticated installer fetching a preseed over
+#     HTTP cannot do that: everything in this file is readable by anything that
+#     can reach the URL. Passwords go in as crypt(3) hashes and nothing else
+#     sensitive goes in at all.
+#   * The mirror is deliberately absent. The PXE menu already points d-i at the
+#     mounted ISO with mirror/http/*; repeating it here would fight those kernel
+#     arguments and send the installer to the internet instead of the ISO.
+#
+# late_command is the SetupComplete.cmd of this world: it runs late in the
+# install with the new system at /target, and `in-target` runs a command inside
+# it. The pattern below - drop a script, register a one-shot systemd unit that
+# disables itself - is the one CampusCast's own preseed uses in production.
+
+function ConvertTo-AppPxeBootTsShellSingleQuoted {
+    <#
+        .SYNOPSIS
+        Quote a value for POSIX sh. Single quotes, with the close-reopen dance
+        for embedded single quotes, so a value can never end the string early.
+    #>
+    param([string]$Value)
+    "'" + ([string]$Value -replace "'", "'\''") + "'"
+}
+
+function Build-AppPxeBootTaskSequencePreseedLateCommand {
+    <#
+        .SYNOPSIS
+        The sequence's steps and run script as one d-i late_command.
+
+        .DESCRIPTION
+        Only cmd steps make sense here: reg and pwsh are Windows verbs and are
+        skipped rather than silently mistranslated. Every command runs in-target,
+        so it sees the installed system and not the installer's ramdisk.
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+
+    $parts = @()
+    $flds = $Sequence.fields
+    $runUrl = if ($flds -and $flds.Contains('runScriptUrl')) { ([string]$flds['runScriptUrl']).Trim() } else { '' }
+    if ($runUrl) {
+        # Fetched at install time rather than embedded, so the script can change
+        # without republishing every sequence that uses it. Failure is loud: a
+        # first-boot script that silently did not run is the worst outcome.
+        #
+        # Quote the WHOLE inner command once, never the URL separately. Quoting a
+        # value inside an already single-quoted sh -c string closes that string
+        # early, and the result still contains every substring a naive test looks
+        # for while being a different command entirely.
+        # Two levels of quoting, both needed. The URL is quoted for the shell that
+        # runs inside sh -c, and the whole payload is quoted again for the shell
+        # that reads the late_command line. Getting only the outer level right
+        # leaves an ampersand in a URL backgrounding half the command.
+        $fetch = "set -e; wget -qO /usr/local/sbin/wdk-run " +
+                 (ConvertTo-AppPxeBootTsShellSingleQuoted $runUrl) +
+                 "; chmod 0755 /usr/local/sbin/wdk-run"
+        $parts += "in-target sh -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $fetch)"
+        $parts += @'
+printf '[Unit]\nDescription=WinDeployKit first boot\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=/usr/local/sbin/wdk-run\n\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/wdk-run\nExecStartPost=/bin/systemctl disable wdk-firstboot.service\nRemainAfterExit=yes\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n' > /target/etc/systemd/system/wdk-firstboot.service
+'@
+        $parts += 'in-target systemctl enable wdk-firstboot.service'
+    }
+    foreach ($step in @($Sequence.steps)) {
+        if ([string]$step.type -ne 'cmd') { continue }
+        $cmd = ([string]$step.command).Trim()
+        if (-not $cmd) { continue }
+        $parts += "in-target sh -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $cmd)"
+    }
+    if ($parts.Count -eq 0) { return '' }
+    # d-i takes one logical line; a trailing backslash continues it.
+    ($parts -join '; ')
+}
+
+function Build-AppPxeBootTaskSequencePreseed {
+    <#
+        .SYNOPSIS
+        Render a Debian preseed for one sequence.
+
+        .DESCRIPTION
+        Publish-time only. Every value is concrete by the time this is written to
+        the library, because there is nothing downstream to substitute tokens.
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+
+    if ([string]$Sequence.platform -ne 'debian') { return '' }
+    $flds = $Sequence.fields
+    $f = {
+        param($n, $d = '')
+        $v = if ($flds -and $flds.Contains($n)) { ([string]$flds[$n]).Trim() } else { '' }
+        if ($v) { $v } else { $d }
+    }
+
+    $hostname  = & $f 'hostname'   'debian'
+    $domain    = & $f 'domain'     'local'
+    $locale    = & $f 'locale'     'en_AU.UTF-8'
+    $keymap    = & $f 'keymap'     'us'
+    $timezone  = & $f 'timezone'   'Australia/Melbourne'
+    $username  = & $f 'username'   'localadmin'
+    $fullName  = & $f 'userFullName' 'Local Administrator'
+    $pwCrypt   = & $f 'userPasswordCrypted'
+    $disk      = & $f 'disk'       '/dev/nvme0n1 /dev/sda /dev/mmcblk0'
+    $recipe    = & $f 'partitionRecipe' 'atomic'
+    $packages  = & $f 'packages'   ''
+    $late      = Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $Sequence
+
+    if ($recipe -notin @('atomic', 'home', 'multi')) { $recipe = 'atomic' }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $add = { param($t) [void]$lines.Add($t) }
+    & $add "# WinDeployKit task sequence: $($Sequence.name)"
+    & $add "# Generated - edit the sequence, not this file."
+    & $add ''
+    & $add "d-i debian-installer/locale string $locale"
+    & $add "d-i keyboard-configuration/xkb-keymap select $keymap"
+    & $add ''
+    & $add 'd-i netcfg/choose_interface select auto'
+    & $add 'd-i netcfg/dhcp_timeout string 60'
+    & $add "d-i netcfg/get_hostname string $hostname"
+    & $add "d-i netcfg/get_domain string $domain"
+    & $add "d-i netcfg/hostname string $hostname"
+    & $add ''
+    & $add '# No mirror block on purpose: the PXE menu already points d-i at the'
+    & $add '# mounted ISO with mirror/http/*, and repeating it here would override it.'
+    & $add ''
+    & $add 'd-i passwd/root-login boolean false'
+    & $add 'd-i passwd/make-user boolean true'
+    & $add "d-i passwd/user-fullname string $fullName"
+    & $add "d-i passwd/username string $username"
+    if ($pwCrypt) {
+        & $add "d-i passwd/user-password-crypted password $pwCrypt"
+    } else {
+        & $add '# No password hash set on this sequence: the installer will ask.'
+    }
+    & $add 'd-i passwd/user-default-groups string audio cdrom video dip plugdev netdev sudo'
+    & $add ''
+    & $add 'd-i clock-setup/utc boolean true'
+    & $add "d-i time/zone string $timezone"
+    & $add 'd-i clock-setup/ntp boolean true'
+    & $add ''
+    & $add 'd-i partman-auto/method string regular'
+    & $add "d-i partman-auto/choose_recipe select $recipe"
+    & $add "d-i partman-auto/disk string $disk"
+    & $add 'd-i partman-lvm/device_remove_lvm boolean true'
+    & $add 'd-i partman-md/device_remove_md boolean true'
+    & $add 'd-i partman/default_filesystem string ext4'
+    & $add 'd-i partman-partitioning/confirm_write_new_label boolean true'
+    & $add 'd-i partman/choose_partition select finish'
+    & $add 'd-i partman/confirm boolean true'
+    & $add 'd-i partman/confirm_nooverwrite boolean true'
+    & $add ''
+    & $add 'tasksel tasksel/first multiselect standard'
+    if ($packages) { & $add "d-i pkgsel/include string $packages" }
+    & $add 'popularity-contest popularity-contest/participate boolean false'
+    & $add ''
+    & $add 'd-i grub-installer/only_debian boolean true'
+    & $add 'd-i grub-installer/bootdev string default'
+    & $add ''
+    & $add 'd-i finish-install/reboot_in_progress note'
+    if ($late) {
+        & $add ''
+        & $add "d-i preseed/late_command string $late"
+    }
+    ($lines -join "`n") + "`n"
+}
+
+
 function Get-AppPxeBootTaskSequencesPayload {
     $sequences = @(Read-AppPxeBootTaskSequences | ForEach-Object { ConvertTo-AppPxeBootTaskSequenceRecord -Item $_ } | Where-Object { $_ })
     $dir = Get-AppPxeBootTaskSequenceLibraryDir
     $publishedFiles = @()
     if ($dir -and (Test-Path -LiteralPath $dir)) {
-        $publishedFiles = @(Get-ChildItem -LiteralPath $dir -File -Filter '*.xml' -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+        $publishedFiles = @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @('.xml', '.cfg') } | ForEach-Object { $_.Name })
     }
     # Join-domain options come from the Site Profile. Guard against wrapper leaks:
     # a store that wraps entries as @{value; userLocked; updatedAt} must be

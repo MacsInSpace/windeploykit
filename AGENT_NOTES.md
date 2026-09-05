@@ -308,6 +308,82 @@ a cache description, correctly left alone.
   looked mounts up by bare ISO stem, but the map is keyed by token, so neither
   ever matched (the warning fired for every ISO whenever HTTP was up).
 
+### Linux task sequences, 2026-09-05 (branch `feature/linux-task-sequences`)
+
+A task sequence now says which installer consumes it. `platform` is `windows`
+(unattend.xml, unchanged) or `debian` (a d-i preseed). Absent means windows, so
+every sequence saved before this keeps working untouched, and `kind` is cleared
+on a preseed because client/server is a Windows role.
+
+**A preseed is the equivalent of unattend.xml, and late_command is the
+equivalent of SetupComplete.cmd.** The worked example in the gate is CampusCast:
+a Debian receiver that installs unattended, then runs one script at first boot
+through a one-shot systemd unit that disables itself. That is the pattern
+CampusCast's own preseed uses in production.
+
+Four differences from the Windows path, all of them load-bearing:
+
+- **Selection happens at boot, not after it.** WinPE shows a picker and copies
+  the chosen XML to Panther. d-i is told `preseed/url=` on the kernel command
+  line, so the *PXE menu entry* decides which sequence a machine gets. Nothing
+  wires that yet - see below.
+- **There is no deploy-time client**, so the `{{SITE}}`/`{{SERIAL}}` half of the
+  token model has no counterpart. Everything is concrete at publish time, and
+  anything per-machine has to be shell in `late_command`.
+- **Secrets cannot be withheld.** The Windows publisher deliberately leaves
+  `{{JoinPw}}` for the client to fill so a join password never lands on the
+  share. An unauthenticated installer fetching a preseed over HTTP cannot do
+  that: everything in the file is readable by anything on the boot VLAN.
+  Passwords go in as crypt(3) hashes and nothing else sensitive goes in at all.
+- **No mirror block in the preseed.** The menu already points d-i at the mounted
+  ISO with `mirror/http/*`; repeating it in the preseed overrides those kernel
+  arguments and sends the installer to the internet instead of the ISO.
+
+Publishing writes `<id>.cfg` beside the Windows `<id>.xml`, and both the prune
+list and the default-sequence check learned about `.cfg` - a preseed for a
+deleted sequence left on the share is one a stale menu entry would still
+install from. Preseeds are written **LF only**: d-i takes a CR as part of the
+value, so a CRLF hostname is one nobody can resolve.
+
+Gotcha worth the whole gate. The fetch line quotes at **two** levels: the URL
+for the shell inside `sh -c`, and the whole payload again for the shell reading
+the late_command line. Getting only the outer level right still produces a
+working command for an ordinary URL, because adjacent quoted strings simply
+concatenate - so `sh -n` passes, and every substring regex passes. It only comes
+apart when the value holds a space or a metacharacter, which is why
+`test-task-sequence-debian.ps1` executes the late_command with `in-target`,
+`wget`, `chmod` and `systemctl` stubbed and asserts the URL arrives as one
+argument. Two smaller ones found writing that: `in-target` cannot be a shell
+function (a hyphen is not a valid POSIX function name, so the stubs are real
+executables on PATH), and `Get-Content` on a one-line file returns a scalar,
+which has no `.Count` under StrictMode.
+
+The panel picks the platform when a sequence is created and never after, since
+the field sets do not overlap. `tsFieldOrder`/`tsFieldLabel` gate the editor, so
+a Debian sequence never offers a machine OU and a Windows one never offers a
+partition recipe.
+
+**Not done, deliberately:**
+
+- Nothing writes `preseed/url=` into the Linux menu entries yet. That belongs in
+  `Add-AppPxeBootDebianInstallerKernelArgs`, beside the `mirror/http/*` it
+  already injects, and needs a decision on the shape: one menu entry per ISO x
+  sequence, or a submenu. `auto=true priority=critical` goes in at the same time
+  so d-i fetches the preseed before it starts asking questions.
+- Nothing serves the first-boot script. `runScriptUrl` is free text today; it
+  should become a file in the library served over the existing Caddy tree.
+- Ubuntu 20.04+ and RHEL are not covered. **Ubuntu is not a gap in Ubuntu** - it
+  has `autoinstall` YAML through cloud-init and is better documented than
+  preseed. The trap is only that a preseed handed to a modern Ubuntu ISO is
+  silently ignored. RHEL/Rocky want kickstart. Both are another `platform`
+  value and another builder; the store, publish and panel gating already take
+  one.
+- Secure Boot stays off for Linux entries, as the ISO-boot work already records.
+
+Gates: `scripts/test-task-sequence-debian.ps1` (22 checks) alongside the existing
+`test-task-sequence-library.ps1` and `test-task-sequence-accounts.ps1`, all green,
+plus `tsc --noEmit`.
+
 ### Scope sweep, 2026-08-21 - removed what is not an MDT/PXE replacement
 
 Craig: *"All we are doing is MDT/WDS and PXE imaging."* Everything below was

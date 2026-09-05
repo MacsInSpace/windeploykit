@@ -683,6 +683,9 @@ export interface VaultSecretsResponse {
 export interface PxeBootTaskSequence {
   id: string;
   name: string;
+  /** Which installer consumes this sequence. Absent means windows. */
+  platform?: "windows" | "debian" | string;
+  /** A Windows role only; empty on other platforms. */
   kind: "client" | "server" | string;
   enabled: boolean;
   /** Publish-time template fields; deploy-time tokens ({{SITE}}, {{SERIAL}}, creds) stay literal. */
