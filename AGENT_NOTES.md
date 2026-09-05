@@ -289,10 +289,37 @@ a cache description, correctly left alone.
   equals the mirror build's `netboot/.../linux` in SHA256SUMS (the kernel is the
   same file in both places); only that build's gtk `initrd.gz` (~80 MB) is
   downloaded, verified, into `http/linux/debian/<codename>-<arch>-<sha8>/`. The
-  menu then boots the ISO's kernel + netboot initrd with `mirror/http/*` pointing
-  at `/iso-mount/<token>` and `debian-installer/allow_unauthenticated=true` (CD
-  trees have an unsigned Release). Offline or unmatched -> ISO-only boot, and the
-  menu + ISO list say so. QEMU `--install` tier: verified 2026-09-04 with debian-13.6.0-amd64-netinst: d-i accepted the served ISO tree as its mirror (dists/trixie Release + debian-installer Packages.gz), then fetched its udebs from pool/ on the mounted ISO through Caddy.
+  menu then boots the ISO's kernel + netboot initrd. **2026-09-06: the mirror is
+  the Debian mirror on the internet, not the ISO tree** - a netinst omits the
+  storage-driver udebs (`sata-modules`, `scsi-modules`...) the netboot initrd
+  needs, so d-i saw no disk; Craig: "drop the premise, the ISOs are freely
+  available and it is always up to date". Signed mirror, no
+  `allow_unauthenticated`. Offline or unmatched -> ISO-only boot, and the
+  menu + ISO list say so. QEMU `--install` tier (ISO-tree era): verified 2026-09-04 with debian-13.6.0-amd64-netinst: d-i accepted the served ISO tree as its mirror (dists/trixie Release + debian-installer Packages.gz), then fetched its udebs from pool/ on the mounted ISO through Caddy.
+- **ISO-less Debian (2026-09-06).** Since the mirror supplies everything, a
+  Debian install needs only the netboot kernel + initrd. Operating Systems >
+  "Linux network installers" (catalog `$script:AppPxeBootDebianNetbootCatalog`:
+  trixie/bookworm x amd64/arm64) - Add fetches the mirror's `current` gtk pair
+  into `http/linux/debian/<codename>-<arch>/` with a `manifest.json`
+  (`Add-AppPxeBootDebianNetboot`, SHA256SUMS-verified, dated d-i build name
+  recorded), Remove deletes the directory; both regenerate the menu.
+  `Get-AppPxeBootDebianNetbootPairs` enumerates complete pairs (live directory
+  state), `ConvertTo-AppPxeBootDebianNetbootInventoryRow` turns one into a menu
+  row with the same keys as an ISO row, so the submenu applies unchanged.
+  Rust `sidecar.rs` gives `AddPxeBootLinuxNetboot` a 1800 s timeout.
+- The preseed builder now forces UEFI (`partman-efi/non_efi_system boolean
+  true`): d-i otherwise stops to ask when another OS in BIOS mode sits on any
+  disk (the QEMU run's iPXE boot disk did it). It also accepts trixie's new
+  recipe names `server` and `small_disk`. **trixie's `atomic` recipe needs about
+  10 GB** (768 MB EFI + 768 MB /boot + 8 GB / + swap); a smaller disk fails with
+  "Unable to satisfy all constraints on the partition" - that is what
+  `small_disk` is for. The QEMU test disk is 16 GB for that reason.
+- Debugging an installer you cannot type at: from tier 3 the QEMU test passes
+  `log_host=10.0.2.2 log_port=5514` and listens with `nc -u -k -l 5514`, so
+  d-i's syslog lands in `$WORK/d-i.syslog` (udeb fetches, module loads, disks
+  seen). partman's own decisions are NOT in syslog (`/var/log/partman`); a
+  `partman/early_command` that pipes `list-devices disk`, `/proc/partitions` and
+  `debconf-get partman-auto/disk` into `logger` showed what it was given.
 - Gotcha found on the way: `Invoke-WebRequest` returns a byte[] for
   octet-stream bodies (deb.debian.org's SHA256SUMS) - `[string]` of that is
   "1 2 3". `Get-AppPxeBootHttpTextContent` decodes. And `$host` is a read-only
@@ -365,11 +392,20 @@ partition recipe.
 
 **Not done, deliberately:**
 
-- Nothing writes `preseed/url=` into the Linux menu entries yet. That belongs in
-  `Add-AppPxeBootDebianInstallerKernelArgs`, beside the `mirror/http/*` it
-  already injects, and needs a decision on the shape: one menu entry per ISO x
-  sequence, or a submenu. `auto=true priority=critical` goes in at the same time
-  so d-i fetches the preseed before it starts asking questions.
+- Menu wiring, 2026-09-05 (same branch): an install-capable Debian entry (netboot
+  initrd in place) with published Debian sequences is a **submenu** - one item
+  per sequence, `Interactive install (no task sequence)`, `Back` - and one
+  handler per item (`Get-AppPxeBootLinuxMenuHandlerLines`). Shape chosen over
+  flat ISO x sequence: 3 ISOs x 8 sequences is 3 top-level items, not 24. A
+  sequence handler adds `auto=true priority=critical
+  preseed/url=${http_base}/TaskSequences/<id>.cfg` before `---`
+  (`Add-AppPxeBootDebianPreseedKernelArgs`); Caddy already serves that path.
+  Interactive is preselected unless the store's default sequence is a Debian
+  one - an unattended install wipes a disk and must never be the default by
+  accident. Boot-only entries and Live media never get a submenu. Choices come
+  from `Get-AppPxeBootLinuxTaskSequenceChoices`: enabled, `platform` debian, and
+  the `.cfg` actually on the share. Gate: `scripts/test-linux-menu.ps1`
+  (19 checks, no store, no mount). QEMU `--preseed` tier: 2026-09-05: the sequence handler booted, d-i fetched debian-qemu-test.cfg off the share, loaded its components off the ISO and asked nothing up to partitioning, where it stopped with 'No root file system is defined' - the storage-udeb gap (next item), not the menu.
 - Nothing serves the first-boot script. `runScriptUrl` is free text today; it
   should become a file in the library served over the existing Caddy tree.
 - Ubuntu 20.04+ and RHEL are not covered. **Ubuntu is not a gap in Ubuntu** - it

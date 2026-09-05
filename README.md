@@ -35,7 +35,7 @@ the deployment server on a site that has no server at all.
 | Area | Capability |
 | --- | --- |
 | **Netboot** | ProxyDHCP + TFTP (dnsmasq), HTTP (Caddy), iPXE -> wimboot chain, Secure Boot shim path, hidden read-only SMB `Deploy$` share |
-| **Linux ISOs** | A Debian installer ISO dropped in the library is mounted read-only and gets its own PXE menu entry. The kernel boots straight off the ISO and the installer takes its packages from the mounted ISO tree; the only download is Debian's matching netboot initrd, fetched once per release. Nothing extracted (Secure Boot off) |
+| **Linux installers** | Debian, with no ISO to keep: Add a release in Operating Systems and the app fetches the mirror's netboot kernel and initrd (about 95 MB), the PXE menu gets the entry, and the installer takes drivers and packages straight from the Debian mirror - always current. Debian task sequences compile to a preseed and appear as a submenu under the entry (Secure Boot off) |
 | **Boot Images** | Pull `boot.wim` out of any Windows ISO and overlay it with wimlib - no ADK on the imaging machine (one prior ADK export per WinPE build; see Requirements) |
 | **Operating Systems** | Windows ISOs mounted read-only and served **zero-copy** - `install.wim` straight out of the ISO, never extracted. Acquisition from Microsoft Evaluation Center, a torrent catalog, or a URL |
 | **Out-of-Box Drivers** | Vendor driver-pack catalogs (Dell, HP, Lenovo, Acer, Microsoft Surface) resolved by model, hash-verified on download, injected offline before first boot |

@@ -1671,7 +1671,10 @@ function Build-AppPxeBootTaskSequencePreseed {
     $packages  = & $f 'packages'   ''
     $late      = Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $Sequence
 
-    if ($recipe -notin @('atomic', 'home', 'multi')) { $recipe = 'atomic' }
+    # partman-auto's built-in recipes. trixie added server and small_disk; atomic there
+    # needs about 10 GB (768 MB EFI + 768 MB /boot + 8 GB / + swap) - a smaller disk fails
+    # with "Unable to satisfy all constraints", which is what small_disk is for.
+    if ($recipe -notin @('atomic', 'home', 'multi', 'server', 'small_disk')) { $recipe = 'atomic' }
 
     $lines = [System.Collections.Generic.List[string]]::new()
     $add = { param($t) [void]$lines.Add($t) }
@@ -1715,6 +1718,10 @@ function Build-AppPxeBootTaskSequencePreseed {
     & $add 'd-i partman/choose_partition select finish'
     & $add 'd-i partman/confirm boolean true'
     & $add 'd-i partman/confirm_nooverwrite boolean true'
+    # The machine PXE-booted in UEFI mode and gets a UEFI install. Without this d-i
+    # stops to ask "Force UEFI installation?" whenever it spots another OS installed
+    # in BIOS mode on any disk (seen 2026-09-06 in the QEMU run: the iPXE boot disk).
+    & $add 'd-i partman-efi/non_efi_system boolean true'
     & $add ''
     & $add 'tasksel tasksel/first multiselect standard'
     if ($packages) { & $add "d-i pkgsel/include string $packages" }

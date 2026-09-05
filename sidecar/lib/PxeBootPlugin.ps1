@@ -2195,14 +2195,14 @@ function Get-AppPxeBootLinuxBootInventory {
         $note = ''
         # Debian installer media: the ISO's own initrd is the CD-ROM flavour and cannot find
         # its media over PXE. With the matching netboot initrd fetched, boot THAT initrd
-        # (kernel still off the ISO) and point the installer at the served ISO tree as its
-        # mirror - the ISO stays the package source, nothing is extracted.
+        # (kernel still off the ISO) and point the installer at the Debian mirror - the
+        # ISO is only the kernel; drivers and packages come from the internet, current.
         $netboot = $linux.netboot
         if ($netboot -and $netboot.ready -and (Test-Path -LiteralPath (Join-Path $paths.httpRoot ([string]$netboot.httpRel)) -PathType Leaf)) {
             $initrdHttpRel = [string]$netboot.httpRel
-            $kernelArgs = Add-AppPxeBootDebianInstallerKernelArgs -KernelArgs $kernelArgs -Token $token -Codename ([string]$linux.codename)
+            $kernelArgs = Add-AppPxeBootDebianInstallerKernelArgs -KernelArgs $kernelArgs -Codename ([string]$linux.codename)
             $installMode = 'netboot'
-            $note = "Installer: netboot initrd (d-i $([string]$netboot.diVersion)) + packages from the mounted ISO"
+            $note = "Installer: netboot initrd (d-i $([string]$netboot.diVersion)), drivers and packages from $([string](Get-AppPxeBootDebianMirrorHostDirectory).host)"
         } elseif ($netboot) {
             $note = "NOTE: installer files not fetched ($([string]$netboot.reason)) - the installer will stop at media detection"
         }
@@ -2217,7 +2217,34 @@ function Get-AppPxeBootLinuxBootInventory {
                 note          = $note
             }) | Out-Null
     }
+    # ISO-less Debian: the netboot pairs kept in the store (Add-AppPxeBootDebianNetboot).
+    foreach ($pair in @(Get-AppPxeBootDebianNetbootPairs)) {
+        $rows.Add((ConvertTo-AppPxeBootDebianNetbootInventoryRow -Pair $pair)) | Out-Null
+    }
     return @($rows | Sort-Object { [string]$_.isoFileName })
+}
+
+function ConvertTo-AppPxeBootDebianNetbootInventoryRow {
+    <#
+    .SYNOPSIS
+        One menu inventory row for a store-resident netboot pair - same keys as an ISO
+        row, so Get-AppPxeBootLinuxMenuHandlerLines treats both alike (submenu included).
+    #>
+    param([Parameter(Mandatory)]$Pair)
+    $codename = [string]$Pair.codename
+    $arch = [string]$Pair.arch
+    $baseArgs = if ($arch -eq 'amd64') { 'vga=788 --- quiet' } else { '--- quiet' }
+    $mirrorHost = [string](Get-AppPxeBootDebianMirrorHostDirectory).host
+    @{
+        id            = Get-AppPxeBootLinuxMenuItemId -FileName "debian-$codename-$arch"
+        isoFileName   = "debian-$codename-$arch"
+        label         = "$(Get-AppPxeBootDebianReleaseLabel -Codename $codename) $arch installer (network)"
+        kernelHttpRel = [string]$Pair.linuxHttpRel
+        initrdHttpRel = [string]$Pair.initrdHttpRel
+        kernelArgs    = Add-AppPxeBootDebianInstallerKernelArgs -KernelArgs $baseArgs -Codename $codename
+        installMode   = 'netboot'
+        note          = "Installer: netboot d-i $([string]$Pair.diVersion), drivers and packages from $mirrorHost"
+    }
 }
 
 function Get-AppPxeBootLocalHttpHostPort {
@@ -2227,41 +2254,123 @@ function Get-AppPxeBootLocalHttpHostPort {
     return ($base -replace '^https?://', '')
 }
 
+function Get-AppPxeBootDebianMirrorHostDirectory {
+    # "https://deb.debian.org/debian" -> @{ host = 'deb.debian.org'; directory = '/debian' }.
+    # d-i takes the mirror as host + directory; protocol is passed separately.
+    $base = Get-AppPxeBootDebianMirrorBase
+    if ($base -match '^[a-z]+://([^/]+)(/.*)?$') {
+        $dir = [string]$Matches[2]
+        if ([string]::IsNullOrWhiteSpace($dir)) { $dir = '/' }
+        return @{ host = [string]$Matches[1]; directory = $dir.TrimEnd('/') + $(if ($dir.TrimEnd('/') -eq '') { '/' } else { '' }) }
+    }
+    return @{ host = 'deb.debian.org'; directory = '/debian' }
+}
+
 function Add-AppPxeBootDebianInstallerKernelArgs {
     param(
         [string]$KernelArgs,
-        [Parameter(Mandatory)][string]$Token,
         [string]$Codename
     )
     # Installer parameters go BEFORE '---': d-i copies whatever follows '---' into the
     # installed system's bootloader config, and a mirror URL has no business there.
-    #   mirror/country=manual                  without it choose-mirror ignores the preseeded
-    #                                          hostname and picks the locale's country mirror
-    #                                          (verified 2026-09-04: udebs came from the internet)
-    #   mirror/*                               the served ISO tree, at this laptop
-    #   mirror/http/proxy=                     answer the proxy question with "none"
-    #   debian-installer/allow_unauthenticated Debian CD trees carry an unsigned Release
-    #   netcfg/choose_interface=auto           the NIC that PXE-booted is the one to use
-    $mirrorHost = Get-AppPxeBootLocalHttpHostPort
+    #
+    # The mirror is the Debian mirror on the internet, not the mounted ISO (Craig,
+    # 2026-09-05: "drop the premise - the ISOs are freely available, and it is always
+    # up to date"). The ISO route (/iso-mount/<token>/) stays for the kernel, but a
+    # netinst tree cannot feed the netboot initrd anyway: it omits the storage-driver
+    # udebs (sata-modules, scsi-modules, ...) that its own CD-ROM initrd has built in,
+    # so d-i reached partitioning with no disk. The signed mirror also means no
+    # allow_unauthenticated - every udeb and .deb is verified.
+    #   mirror/country=manual        without it choose-mirror ignores the preseeded
+    #                                hostname and picks the locale's country mirror
+    #   mirror/http/proxy=           answer the proxy question with "none"
+    #   netcfg/choose_interface=auto the NIC that PXE-booted is the one to use
+    $mirror = Get-AppPxeBootDebianMirrorHostDirectory
     $parts = @(
         'mirror/country=manual'
         'mirror/protocol=http'
-        "mirror/http/hostname=$mirrorHost"
-        "mirror/http/directory=/iso-mount/$Token"
+        "mirror/http/hostname=$([string]$mirror.host)"
+        "mirror/http/directory=$([string]$mirror.directory)"
         'mirror/http/proxy='
     )
     if (-not [string]::IsNullOrWhiteSpace($Codename)) { $parts += "mirror/suite=$Codename" }
-    $parts += @('debian-installer/allow_unauthenticated=true', 'netcfg/choose_interface=auto')
-    $extra = $parts -join ' '
+    $parts += 'netcfg/choose_interface=auto'
+    return (Add-AppPxeBootKernelArgsBeforeSeparator -KernelArgs $KernelArgs -Extra ($parts -join ' '))
+}
+
+function Add-AppPxeBootKernelArgsBeforeSeparator {
+    # Insert installer parameters BEFORE '---'. d-i copies whatever follows '---' into the
+    # installed system's bootloader config; mirror URLs and preseed URLs stay on the
+    # installer side of it.
+    param(
+        [string]$KernelArgs,
+        [Parameter(Mandatory)][string]$Extra
+    )
     $existing = [string]$KernelArgs
     if ($existing -match '^(.*?)\s*---\s*(.*)$') {
         $before = $Matches[1].Trim()
         $after = $Matches[2].Trim()
-        $head = if ($before) { "$before $extra" } else { $extra }
+        $head = if ($before) { "$before $Extra" } else { $Extra }
         return "$head --- $after".Trim()
     }
-    if ([string]::IsNullOrWhiteSpace($existing)) { return $extra }
-    return "$($existing.Trim()) $extra"
+    if ([string]::IsNullOrWhiteSpace($existing)) { return $Extra }
+    return "$($existing.Trim()) $Extra"
+}
+
+function Add-AppPxeBootDebianPreseedKernelArgs {
+    <#
+    .SYNOPSIS
+        Point d-i at a published task sequence: the preseed URL, plus the two switches
+        that make it unattended.
+    .NOTES
+        auto=true defers the locale and keyboard questions until the network is up and
+        the preseed fetched; priority=critical asks nothing the preseed answers. Never
+        emit auto=true without a URL - d-i then stops to ask for one (seen 2026-09-04).
+        ${http_base} is iPXE's variable, expanded on the kernel line at boot, so the
+        URL follows whatever the menu resolved (LAN IP or ${next-server}).
+    #>
+    param(
+        [string]$KernelArgs,
+        [Parameter(Mandatory)][string]$PreseedHttpRel
+    )
+    $extra = 'auto=true priority=critical preseed/url=${http_base}/' + $PreseedHttpRel.TrimStart('/')
+    return (Add-AppPxeBootKernelArgsBeforeSeparator -KernelArgs $KernelArgs -Extra $extra)
+}
+
+function Get-AppPxeBootLinuxTaskSequenceChoices {
+    <#
+    .SYNOPSIS
+        The Debian task sequences the Linux submenu can offer: enabled, platform debian,
+        and the published <id>.cfg actually on the share (Caddy serves it at
+        /TaskSequences/<id>.cfg). isDefault marks the store's default sequence when it is
+        one of these; a Windows default leaves Interactive preselected - an unattended
+        install wipes a disk, so it is never the default by accident.
+    .NOTES
+        PxeBootTaskSequences.ps1 loads after this lib; guarded like the sync call in
+        Write-AppPxeBootMenuFiles.
+    #>
+    if (-not (Test-AppSidecarCommand Read-AppPxeBootTaskSequences)) { return @() }
+    $dir = $null
+    try { $dir = Get-AppPxeBootTaskSequenceLibraryDir } catch { $dir = $null }
+    if (-not $dir -or -not (Test-Path -LiteralPath $dir -PathType Container)) { return @() }
+    $default = ''
+    try { $default = ([string](Get-AppPxeBootTaskSequenceDefaultId)).Trim() } catch { $default = '' }
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($seq in @(Read-AppPxeBootTaskSequences)) {
+        if ($null -eq $seq) { continue }
+        $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq
+        if ($null -eq $rec -or -not [bool]$rec.enabled) { continue }
+        if ([string]$rec.platform -ne 'debian') { continue }
+        $id = [string]$rec.id
+        if (-not (Test-Path -LiteralPath (Join-Path $dir "$id.cfg") -PathType Leaf)) { continue }
+        $rows.Add(@{
+                id         = $id
+                name       = [string]$rec.name
+                cfgHttpRel = "TaskSequences/$id.cfg"
+                isDefault  = ($default -and ($id -eq $default))
+            }) | Out-Null
+    }
+    return $rows.ToArray()
 }
 
 function Get-AppPxeBootLinuxIpxeBlock {
@@ -2298,23 +2407,101 @@ function Get-AppPxeBootLinuxMenuItemLines {
     return $lines.ToArray()
 }
 
+function Get-AppPxeBootLinuxBootFailureLines {
+    param([Parameter(Mandatory)][string]$Label)
+    @(
+        'echo'
+        "echo Boot of $Label failed."
+        # The bundled shim trusts the iPXE CA, not a distro's kernel signing key.
+        'echo If Secure Boot is on, turn it off for Linux - this chain cannot verify a distro kernel.'
+        'goto start'
+        ''
+    )
+}
+
+function Get-AppPxeBootLinuxSequenceMenuItemId {
+    # <entry>__ts_<sequence slug>: unique per ISO x sequence, and a plain iPXE label.
+    param(
+        [Parameter(Mandatory)][string]$EntryId,
+        [Parameter(Mandatory)][string]$SequenceId
+    )
+    $slug = ($SequenceId -replace '[^a-zA-Z0-9]+', '_').Trim('_').ToLower()
+    if ([string]::IsNullOrWhiteSpace($slug)) { $slug = 'ts' }
+    return "${EntryId}__ts_$slug"
+}
+
 function Get-AppPxeBootLinuxMenuHandlerLines {
-    param([array]$Entries)
+    <#
+    .SYNOPSIS
+        The :lnx_* handler blocks. An install-capable entry (netboot initrd in place) with
+        published Debian sequences becomes a submenu - one item per sequence, an
+        Interactive item, Back - and one handler per item; the sequence handlers carry
+        preseed/url=. Boot-only entries and Live media stay a straight boot.
+    .NOTES
+        Selection has to happen HERE: d-i reads preseed/url= off the kernel line, so the
+        menu entry decides which sequence a machine gets (there is no WinPE-style picker
+        after boot). One entry per ISO with a submenu keeps 3 ISOs x 8 sequences at 3
+        top-level items, not 24.
+    #>
+    param(
+        [array]$Entries,
+        # Get-AppPxeBootLinuxTaskSequenceChoices rows: id, name, cfgHttpRel, isDefault.
+        [array]$Sequences
+    )
     $lines = [System.Collections.Generic.List[string]]::new()
+    $seqs = @($Sequences | Where-Object { $null -ne $_ })
     foreach ($entry in $Entries) {
         $label = [string]$entry.label
-        [void]$lines.Add(":$([string]$entry.id)")
+        $entryId = [string]$entry.id
         $note = [string]$entry.note
+        $useSubmenu = (([string]$entry.installMode) -eq 'netboot') -and ($seqs.Count -gt 0)
+        if (-not $useSubmenu) {
+            [void]$lines.Add(":$entryId")
+            if ($note) { [void]$lines.Add("echo $note") }
+            foreach ($bootLine in (Get-AppPxeBootLinuxIpxeBlock -Entry $entry -EchoLabel "Booting $label...")) {
+                [void]$lines.Add($bootLine)
+            }
+            foreach ($l in (Get-AppPxeBootLinuxBootFailureLines -Label $label)) { [void]$lines.Add($l) }
+            continue
+        }
+
+        $manualId = "${entryId}__manual"
+        $defaultTarget = $manualId
+        [void]$lines.Add(":$entryId")
+        [void]$lines.Add("menu $label - task sequence")
+        [void]$lines.Add('item --gap -- ------------------------------')
+        foreach ($seq in $seqs) {
+            $itemId = Get-AppPxeBootLinuxSequenceMenuItemId -EntryId $entryId -SequenceId ([string]$seq.id)
+            [void]$lines.Add((Format-AppPxeBootIpxeMenuItemLine -Id $itemId -Label ([string]$seq.name)))
+            if ([bool]$seq.isDefault) { $defaultTarget = $itemId }
+        }
+        [void]$lines.Add((Format-AppPxeBootIpxeMenuItemLine -Id $manualId -Label 'Interactive install (no task sequence)'))
+        [void]$lines.Add('item --gap -- ------------------------------')
+        [void]$lines.Add((Format-AppPxeBootIpxeMenuItemLine -Id 'start' -Label 'Back'))
+        [void]$lines.Add("choose --default $defaultTarget target || goto start")
+        [void]$lines.Add('goto ${target}')
+        [void]$lines.Add('')
+
+        foreach ($seq in $seqs) {
+            $itemId = Get-AppPxeBootLinuxSequenceMenuItemId -EntryId $entryId -SequenceId ([string]$seq.id)
+            $seqName = [string]$seq.name
+            $seeded = @{} + $entry
+            $seeded.kernelArgs = Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs ([string]$entry.kernelArgs) -PreseedHttpRel ([string]$seq.cfgHttpRel)
+            [void]$lines.Add(":$itemId")
+            if ($note) { [void]$lines.Add("echo $note") }
+            [void]$lines.Add("echo Task sequence: $seqName - unattended, the disk named in the sequence will be wiped.")
+            foreach ($bootLine in (Get-AppPxeBootLinuxIpxeBlock -Entry $seeded -EchoLabel "Booting $label...")) {
+                [void]$lines.Add($bootLine)
+            }
+            foreach ($l in (Get-AppPxeBootLinuxBootFailureLines -Label $label)) { [void]$lines.Add($l) }
+        }
+
+        [void]$lines.Add(":$manualId")
         if ($note) { [void]$lines.Add("echo $note") }
         foreach ($bootLine in (Get-AppPxeBootLinuxIpxeBlock -Entry $entry -EchoLabel "Booting $label...")) {
             [void]$lines.Add($bootLine)
         }
-        [void]$lines.Add('echo')
-        [void]$lines.Add("echo Boot of $label failed.")
-        # The bundled shim trusts the iPXE CA, not a distro's kernel signing key.
-        [void]$lines.Add('echo If Secure Boot is on, turn it off for Linux - this chain cannot verify a distro kernel.')
-        [void]$lines.Add('goto start')
-        [void]$lines.Add('')
+        foreach ($l in (Get-AppPxeBootLinuxBootFailureLines -Label $label)) { [void]$lines.Add($l) }
     }
     return $lines.ToArray()
 }
@@ -2371,6 +2558,8 @@ function Write-AppPxeBootMenuFiles {
     $directBootWim = Get-AppPxeBootDirectBootWimName
     $wims = @(Get-AppPxeBootWimInventory)
     $linuxEntries = @(Get-AppPxeBootLinuxBootInventory)
+    # Published Debian sequences: the task-sequence sync above already wrote their .cfg.
+    $linuxSequences = @(Get-AppPxeBootLinuxTaskSequenceChoices)
 
     $bootMenuLines = [System.Collections.Generic.List[string]]::new()
     $httpBaseLiteral = Get-AppPxeBootLocalHttpBaseUrl
@@ -2435,7 +2624,7 @@ function Write-AppPxeBootMenuFiles {
             [void]$bootMenuLines.Add('goto start')
             [void]$bootMenuLines.Add('')
         }
-        foreach ($line in @(Get-AppPxeBootLinuxMenuHandlerLines -Entries $linuxEntries)) { [void]$bootMenuLines.Add([string]$line) }
+        foreach ($line in @(Get-AppPxeBootLinuxMenuHandlerLines -Entries $linuxEntries -Sequences $linuxSequences)) { [void]$bootMenuLines.Add([string]$line) }
         foreach ($line in @(Get-AppPxeBootIpxeLocalDiskHandlerLines)) { [void]$bootMenuLines.Add([string]$line) }
         [void]$bootMenuLines.Add(':retry')
         [void]$bootMenuLines.Add('chain ${http_base}/boot.ipxe?t=${buildsign} || chain ${http_base}/boot.ipxe || goto start')
@@ -2482,7 +2671,7 @@ function Write-AppPxeBootMenuFiles {
             [void]$bootMenuLines.Add('goto start')
             [void]$bootMenuLines.Add('')
         }
-        foreach ($line in @(Get-AppPxeBootLinuxMenuHandlerLines -Entries $linuxEntries)) { [void]$bootMenuLines.Add([string]$line) }
+        foreach ($line in @(Get-AppPxeBootLinuxMenuHandlerLines -Entries $linuxEntries -Sequences $linuxSequences)) { [void]$bootMenuLines.Add([string]$line) }
         foreach ($line in @(Get-AppPxeBootIpxeLocalDiskHandlerLines)) { [void]$bootMenuLines.Add([string]$line) }
         [void]$bootMenuLines.Add(':retry')
         [void]$bootMenuLines.Add('chain ${http_base}/boot.ipxe?t=${buildsign} || chain ${http_base}/boot.ipxe || goto start')
@@ -2490,7 +2679,7 @@ function Write-AppPxeBootMenuFiles {
         [void]$bootMenuLines.Add(':shell')
         [void]$bootMenuLines.Add('shell')
         [void]$bootMenuLines.Add('goto start')
-        Write-SidecarLog "PXE boot: boot.ipxe local menu ($($wims.Count) WIM(s), $($linuxEntries.Count) Linux ISO(s))"
+        Write-SidecarLog "PXE boot: boot.ipxe local menu ($($wims.Count) WIM(s), $($linuxEntries.Count) Linux ISO(s), $($linuxSequences.Count) Debian sequence(s))"
     } else {
         if ($wanDeployEnabled) {
             [void]$bootMenuLines.Add("# Netboot field PXE - deploy chain - generated $generated")
@@ -4142,7 +4331,7 @@ function Get-AppPxeBootLinuxInstallNote {
     param([Parameter(Mandatory)]$Linux)
     $netboot = $Linux.netboot
     if (-not $netboot) { return $null }
-    if ($netboot.ready) { return "installs from this ISO (netboot initrd d-i $([string]$netboot.diVersion))" }
+    if ($netboot.ready) { return "installs from $([string](Get-AppPxeBootDebianMirrorHostDirectory).host) (netboot initrd d-i $([string]$netboot.diVersion))" }
     return "boots to the installer only - netboot initrd not fetched: $([string]$netboot.reason)"
 }
 
@@ -8885,6 +9074,213 @@ function Read-AppPxeBootDebianSha256Sums {
         }
     }
     return $map
+}
+
+# --- ISO-less Debian: netboot pairs kept in the store --------------------------------------
+# Craig, 2026-09-05: "drop the premise - the ISOs are freely available, I prefer that to
+# having yet another ISO on the laptop, and it is always up to date." A Debian install
+# then needs only the mirror's netboot kernel + initrd (~95 MB per release x arch); the
+# mirror supplies drivers and packages at install time. http/linux/debian/<codename>-<arch>/
+# holds {linux, initrd.gz, manifest.json}, and the menu offers one entry per pair - with
+# the task-sequence submenu, exactly like an ISO-backed entry. Nothing here touches ISOs.
+
+$script:AppPxeBootDebianNetbootCatalog = @(
+    @{ codename = 'trixie';   arch = 'amd64'; label = 'Debian 13 (trixie)' }
+    @{ codename = 'trixie';   arch = 'arm64'; label = 'Debian 13 (trixie)' }
+    @{ codename = 'bookworm'; arch = 'amd64'; label = 'Debian 12 (bookworm)' }
+    @{ codename = 'bookworm'; arch = 'arm64'; label = 'Debian 12 (bookworm)' }
+)
+
+function Get-AppPxeBootDebianReleaseLabel {
+    param([Parameter(Mandatory)][string]$Codename)
+    foreach ($row in $script:AppPxeBootDebianNetbootCatalog) {
+        if ([string]$row.codename -eq $Codename) { return [string]$row.label }
+    }
+    return "Debian $Codename"
+}
+
+function Test-AppPxeBootDebianNetbootPairName {
+    param([string]$Codename, [string]$Arch)
+    return (([string]$Codename) -match '^[a-z]{3,20}$') -and (([string]$Arch) -in @('amd64', 'arm64'))
+}
+
+function Read-AppPxeBootDebianNetbootPair {
+    <#
+    .SYNOPSIS
+        A store pair as a record, or $null when the directory is not a complete pair
+        (both files and the manifest, or it is not offered).
+    #>
+    param([Parameter(Mandatory)][string]$DirName)
+    if ($DirName -notmatch '^([a-z]{3,20})-(amd64|arm64)$') { return $null }
+    $codename = [string]$Matches[1]
+    $arch = [string]$Matches[2]
+    $dir = Join-Path (Get-AppPxeBootDebianNetbootRoot) $DirName
+    $linux = Join-Path $dir 'linux'
+    $initrd = Join-Path $dir 'initrd.gz'
+    $manifestPath = Join-Path $dir 'manifest.json'
+    foreach ($f in @($linux, $initrd, $manifestPath)) {
+        if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { return $null }
+    }
+    $diVersion = ''
+    $fetchedAt = ''
+    $flavour = ''
+    try {
+        $m = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable
+        if ($m.ContainsKey('diVersion')) { $diVersion = [string]$m['diVersion'] }
+        if ($m.ContainsKey('fetchedAt')) { $fetchedAt = [string]$m['fetchedAt'] }
+        if ($m.ContainsKey('flavour')) { $flavour = [string]$m['flavour'] }
+    } catch { return $null }
+    $size = [long](Get-Item -LiteralPath $linux).Length + [long](Get-Item -LiteralPath $initrd).Length
+    @{
+        dirName       = $DirName
+        codename      = $codename
+        arch          = $arch
+        diVersion     = $diVersion
+        flavour       = $flavour
+        fetchedAt     = $fetchedAt
+        sizeBytes     = $size
+        linuxHttpRel  = "linux/debian/$DirName/linux"
+        initrdHttpRel = "linux/debian/$DirName/initrd.gz"
+    }
+}
+
+function Get-AppPxeBootDebianNetbootPairs {
+    # Every complete pair in the store, in name order. Live state: the directory listing.
+    $root = Get-AppPxeBootDebianNetbootRoot
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) { return @() }
+    $pairs = [System.Collections.Generic.List[object]]::new()
+    foreach ($dir in @(Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        $pair = Read-AppPxeBootDebianNetbootPair -DirName $dir.Name
+        if ($pair) { $pairs.Add($pair) | Out-Null }
+    }
+    return $pairs.ToArray()
+}
+
+function Get-AppPxeBootDebianNetbootCatalogStatus {
+    # The catalog joined with the store: what the panel lists, with Add / Remove state.
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($cat in $script:AppPxeBootDebianNetbootCatalog) {
+        $codename = [string]$cat.codename
+        $arch = [string]$cat.arch
+        $pair = Read-AppPxeBootDebianNetbootPair -DirName "$codename-$arch"
+        $rows.Add(@{
+                id            = "debian-$codename-$arch"
+                codename      = $codename
+                arch          = $arch
+                label         = [string]$cat.label
+                ready         = [bool]$pair
+                diVersion     = if ($pair) { [string]$pair.diVersion } else { $null }
+                fetchedAt     = if ($pair) { [string]$pair.fetchedAt } else { $null }
+                sizeBytes     = if ($pair) { [long]$pair.sizeBytes } else { 0 }
+                kernelHttpRel = if ($pair) { [string]$pair.linuxHttpRel } else { $null }
+                initrdHttpRel = if ($pair) { [string]$pair.initrdHttpRel } else { $null }
+            }) | Out-Null
+    }
+    return $rows.ToArray()
+}
+
+function Add-AppPxeBootDebianNetboot {
+    <#
+    .SYNOPSIS
+        Fetch (or refresh) the current netboot kernel + initrd for one release x arch
+        into the store, verified against the mirror's SHA256SUMS, then regenerate the
+        menu. Already current = nothing downloaded.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Codename,
+        [Parameter(Mandatory)][string]$Arch,
+        [ValidateSet('text', 'gtk')][string]$Flavour = 'gtk'
+    )
+    $Codename = $Codename.Trim().ToLowerInvariant()
+    $Arch = $Arch.Trim().ToLowerInvariant()
+    if (-not (Test-AppPxeBootDebianNetbootPairName -Codename $Codename -Arch $Arch)) {
+        throw "PXE boot: '$Codename $Arch' is not a Debian release/arch this app offers."
+    }
+    $mirror = Get-AppPxeBootDebianMirrorBase
+    $suiteBase = "$mirror/dists/$Codename/main/installer-$Arch"
+    $rel = if ($Flavour -eq 'gtk') { "netboot/gtk/debian-installer/$Arch" } else { "netboot/debian-installer/$Arch" }
+    $sums = Read-AppPxeBootDebianSha256Sums -Url "$suiteBase/current/images/SHA256SUMS"
+    $linuxKey = "./$rel/linux"
+    $initrdKey = "./$rel/initrd.gz"
+    if (-not $sums.ContainsKey($linuxKey) -or -not $sums.ContainsKey($initrdKey)) {
+        throw "PXE boot: the mirror has no $Flavour netboot images for $Codename $Arch."
+    }
+    $dirName = "$Codename-$Arch"
+    $dir = Join-Path (Get-AppPxeBootDebianNetbootRoot) $dirName
+    $manifestPath = Join-Path $dir 'manifest.json'
+    $existing = Read-AppPxeBootDebianNetbootPair -DirName $dirName
+    if ($existing) {
+        $have = $null
+        try { $have = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable } catch { $have = $null }
+        if ($have -and $have.ContainsKey('linuxSha256') -and $have.ContainsKey('initrdSha256') -and
+            ([string]$have['linuxSha256'] -eq [string]$sums[$linuxKey]) -and ([string]$have['initrdSha256'] -eq [string]$sums[$initrdKey])) {
+            Write-SidecarLog "PXE boot: Debian netboot $Codename $Arch is current (d-i $([string]$existing.diVersion))"
+            return @{ updated = $false; pair = $existing }
+        }
+    }
+    if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
+    # The dated build name, for the label: the newest dated directory whose linux hash
+    # is the one current points at. Falls back to 'current' when the index is unreadable.
+    $diVersion = 'current'
+    foreach ($build in @(Get-AppPxeBootDebianInstallerBuildDirs -IndexUrl "$suiteBase/")) {
+        if ($build -eq 'current') { continue }
+        try {
+            $s = Read-AppPxeBootDebianSha256Sums -Url "$suiteBase/$build/images/SHA256SUMS"
+            if ($s.ContainsKey($linuxKey) -and ([string]$s[$linuxKey] -eq [string]$sums[$linuxKey])) { $diVersion = $build; break }
+        } catch { }
+    }
+    $got = @{}
+    foreach ($name in @('linux', 'initrd.gz')) {
+        $key = if ($name -eq 'linux') { $linuxKey } else { $initrdKey }
+        $url = "$suiteBase/current/images/$rel/$name"
+        $tmp = Join-Path $dir "$name.part"
+        if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        Write-SidecarLog "PXE boot: fetching Debian netboot $name ($Codename $Arch $Flavour, d-i $diVersion) from $url"
+        Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -TimeoutSec 1800 -ErrorAction Stop
+        $hash = (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($hash -ne [string]$sums[$key]) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            throw "PXE boot: downloaded $name failed SHA256 verification ($Codename $Arch)."
+        }
+        $got[$name] = @{ tmp = $tmp; sha = $hash }
+    }
+    foreach ($name in @('linux', 'initrd.gz')) {
+        Move-Item -LiteralPath $got[$name].tmp -Destination (Join-Path $dir $name) -Force
+    }
+    $manifest = @{
+        codename     = $Codename
+        arch         = $Arch
+        flavour      = $Flavour
+        diVersion    = $diVersion
+        linuxSha256  = $got['linux'].sha
+        initrdSha256 = $got['initrd.gz'].sha
+        source       = "$suiteBase/current/images/$rel/"
+        fetchedAt    = (Get-Date).ToUniversalTime().ToString('o')
+    }
+    ($manifest | ConvertTo-Json) | Set-Content -LiteralPath $manifestPath -Encoding UTF8 -Force
+    $pair = Read-AppPxeBootDebianNetbootPair -DirName $dirName
+    Write-SidecarLog "PXE boot: Debian netboot $Codename $Arch ready (d-i $diVersion, $([math]::Round($pair.sizeBytes / 1MB, 1)) MB)"
+    Write-AppPxeBootMenuFiles
+    return @{ updated = $true; pair = $pair }
+}
+
+function Remove-AppPxeBootDebianNetboot {
+    param(
+        [Parameter(Mandatory)][string]$Codename,
+        [Parameter(Mandatory)][string]$Arch
+    )
+    $Codename = $Codename.Trim().ToLowerInvariant()
+    $Arch = $Arch.Trim().ToLowerInvariant()
+    if (-not (Test-AppPxeBootDebianNetbootPairName -Codename $Codename -Arch $Arch)) {
+        throw "PXE boot: '$Codename $Arch' is not a Debian netboot pair name."
+    }
+    $dir = Join-Path (Get-AppPxeBootDebianNetbootRoot) "$Codename-$Arch"
+    if (Test-Path -LiteralPath $dir -PathType Container) {
+        Remove-Item -LiteralPath $dir -Recurse -Force
+        Write-SidecarLog "PXE boot: removed Debian netboot $Codename $Arch"
+    }
+    Write-AppPxeBootMenuFiles
+    return @{ removed = $true }
 }
 
 function Ensure-AppPxeBootDebianNetbootInitrd {

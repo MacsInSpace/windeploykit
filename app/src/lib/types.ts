@@ -84,6 +84,9 @@ export type SidecarCommand =
   | "ImportPxeBootWimBootAssets"
   | "ImportPxeBootWimFromIso"
   | "ListPxeBootIsos"
+  | "ListPxeBootLinuxNetboot"
+  | "AddPxeBootLinuxNetboot"
+  | "RemovePxeBootLinuxNetboot"
   | "ListPxeBootInstallImages"
   | "SetPxeBootBrandingImage"
   | "ClearPxeBootBrandingImage"
@@ -258,6 +261,31 @@ export interface PxeBootIsoEntry {
   bootLabel?: string | null;
   /** Linux installer media: install-capable (netboot initrd fetched) or boot-only, with the reason. */
   bootNote?: string | null;
+}
+
+/** A Debian release the app can PXE-install with no ISO: kernel + initrd from the Debian
+ *  mirror kept in the store, drivers and packages straight from the mirror at install time. */
+export interface PxeBootLinuxNetbootEntry {
+  /** debian-<codename>-<arch> */
+  id: string;
+  codename: string;
+  arch: "amd64" | "arm64" | string;
+  /** e.g. "Debian 13 (trixie)" */
+  label: string;
+  /** True when linux + initrd.gz + manifest are in the store (the menu offers it). */
+  ready: boolean;
+  /** The d-i build the pair came from, e.g. "20250803+deb13u6". */
+  diVersion?: string | null;
+  fetchedAt?: string | null;
+  sizeBytes: number;
+  kernelHttpRel?: string | null;
+  initrdHttpRel?: string | null;
+}
+
+export interface PxeBootLinuxNetbootResponse {
+  entries: PxeBootLinuxNetbootEntry[];
+  /** The mirror base the pairs (and the installer) use, e.g. https://deb.debian.org/debian */
+  mirror: string;
 }
 
 export interface PxeBootOptionalAssetStatus {

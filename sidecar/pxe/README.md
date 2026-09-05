@@ -113,12 +113,13 @@ automatically for installer media (`Ensure-AppPxeBootDebianNetbootInitrd`):
   store `http/linux/debian/<codename>-<arch>-<sha8>/` with a `manifest.json`. One
   download per Debian build, shared by every ISO of that build.
 - The menu handler then boots the ISO's kernel with the netboot initrd and tells d-i to
-  use the served ISO tree as its mirror: `mirror/country=manual` (without it d-i
-  ignores the preseeded host and picks a country mirror), `mirror/http/hostname=<lan-ip>:8080`,
-  `mirror/http/directory=/iso-mount/<token>`, `mirror/suite=<codename>`,
-  `debian-installer/allow_unauthenticated=true` (CD trees carry an unsigned Release),
+  use the Debian mirror: `mirror/country=manual` (without it d-i ignores the preseeded
+  host and picks a country mirror), `mirror/http/hostname=deb.debian.org`,
+  `mirror/http/directory=/debian`, `mirror/suite=<codename>`,
   `netcfg/choose_interface=auto`. All of it sits BEFORE `---` so none of it leaks into
-  the installed system's bootloader config.
+  the installed system's bootloader config. Not the ISO tree: a netinst omits the
+  storage-driver udebs the netboot initrd needs (2026-09-06), and the internet mirror
+  is signed and always current. `APP_DEBIAN_MIRROR` overrides the mirror base.
 - Offline, or when no build on the mirror matches the ISO's kernel, the entry falls back
   to the ISO's own initrd (boots to the installer only) and says so in the menu and in
   the ISO list. A failed fetch is remembered for 10 minutes so an offline laptop pays
@@ -127,6 +128,29 @@ automatically for installer media (`Ensure-AppPxeBootDebianNetbootInitrd`):
 
 QEMU verification: `scripts/test-linux-iso-boot-qemu.sh --install` - verified 2026-09-04 with debian-13.6.0-amd64-netinst: d-i accepted the served ISO tree as its mirror (dists/trixie Release + debian-installer Packages.gz), then fetched its udebs from pool/ on the mounted ISO through Caddy.
 
-Not done yet: preseed (naming, users, partitioning), and the installed system's apt
-sources will point at this laptop's ISO tree until a preseed fixes them. Secure Boot
-must be off: the bundled shim trusts the iPXE CA, not a distro kernel key.
+### No ISO at all: Linux network installers
+
+Since the mirror supplies drivers and packages, a Debian install needs only the netboot
+kernel and initrd. Operating Systems > **Linux network installers** lists Debian 13 and 12
+for amd64 and arm64; **Add** fetches the mirror's current gtk `linux` + `initrd.gz`
+(about 95 MB) into store `http/linux/debian/<codename>-<arch>/` with a `manifest.json`
+(SHA256SUMS-verified, dated d-i build recorded), and the PXE menu gets
+`Debian 13 (trixie) amd64 installer (network)` with the task-sequence submenu. **Remove**
+drops the directory and the entry. Add on an already-current pair downloads nothing.
+
+### Task sequences reach the installer through the menu
+
+d-i reads `preseed/url=` off the kernel command line, so the menu entry decides which
+task sequence a machine gets (there is no WinPE-style picker after boot). An
+install-capable Debian entry with published Debian sequences (`platform: debian`,
+enabled, `<id>.cfg` on the share) is a submenu: one item per sequence, `Interactive
+install (no task sequence)`, `Back`. A sequence handler boots the same kernel and
+netboot initrd with `auto=true priority=critical preseed/url=${http_base}/TaskSequences/<id>.cfg`
+added before `---`; Interactive carries neither. Interactive is preselected unless the
+store's default sequence is a Debian one. Gate: `scripts/test-linux-menu.ps1`; live:
+`scripts/test-linux-iso-boot-qemu.sh --preseed` (needs a published Debian sequence
+whose disk is `/dev/vda`) - 2026-09-05: the sequence handler booted, d-i fetched debian-qemu-test.cfg off the share, loaded its components off the ISO and asked nothing up to partitioning, where it stopped with 'No root file system is defined' - the storage-udeb gap (next item), not the menu.
+
+Still open: the installed system's apt sources point at this laptop's ISO tree until a
+preseed step fixes them, and `runScriptUrl` is free text rather than a served file.
+Secure Boot must be off: the bundled shim trusts the iPXE CA, not a distro kernel key.

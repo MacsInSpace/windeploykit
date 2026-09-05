@@ -85,23 +85,38 @@ These are not incidental; every one of them shaped the code.
 
 ## 4. Next, in order
 
-1. **Write `preseed/url=` into the Linux menu entries.** This is the piece that
-   makes the feature real, and it is not done. It belongs in
-   `Add-AppPxeBootDebianInstallerKernelArgs` (`sidecar/lib/PxeBootPlugin.ps1`,
-   near the `mirror/http/*` it already injects). Add `auto=true
-   priority=critical` at the same time, or d-i starts asking questions before it
-   fetches the preseed.
-   **Decide the shape first:** one menu entry per ISO x sequence, or one entry
-   per ISO with a submenu. With 8 sequences and 3 ISOs the flat form is 24
-   entries.
-2. **Serve the first-boot script.** `runScriptUrl` is free text today. It should
+1. ~~Write `preseed/url=` into the Linux menu entries.~~ **Done 2026-09-05.**
+   One entry per ISO; an install-capable ISO with published Debian sequences
+   opens a submenu (sequences, Interactive, Back), and each sequence handler
+   carries `auto=true priority=critical preseed/url=` before `---`. Interactive
+   is preselected unless the store default is a Debian sequence. Gate:
+   `scripts/test-linux-menu.ps1`. Live: `scripts/test-linux-iso-boot-qemu.sh
+   --preseed` - 2026-09-05: the sequence handler booted, d-i fetched debian-qemu-test.cfg off the share, loaded its components off the ISO and asked nothing up to partitioning, where it stopped with 'No root file system is defined' - the storage-udeb gap (next item), not the menu.
+2. ~~Storage drivers: the netinst ISO cannot be the whole mirror.~~ **Resolved
+   2026-09-06 by dropping the premise (Craig's call).** The netboot initrd
+   carries only the SCSI core and takes AHCI/virtio/NVMe as udebs from its
+   mirror; a netinst ISO omits those udebs (its own CD-ROM initrd has them built
+   in), so d-i reached partitioning with no disk. The installer now uses the
+   Debian mirror on the internet (`Add-AppPxeBootDebianInstallerKernelArgs`:
+   `mirror/http/hostname=deb.debian.org`, signed, no `allow_unauthenticated`),
+   which also means the install is always current. With that the ISO is only a
+   kernel, so **ISO-less entries** were added: Operating Systems > Linux network
+   installers lists Debian 13/12 x amd64/arm64; Add fetches the mirror's netboot
+   `linux` + `initrd.gz` into `http/linux/debian/<codename>-<arch>/`
+   (`Add-AppPxeBootDebianNetboot`, SHA256-verified, `manifest.json`) and the
+   menu offers the entry with the task-sequence submenu. Handlers
+   `ListPxeBootLinuxNetboot` / `AddPxeBootLinuxNetboot` /
+   `RemovePxeBootLinuxNetboot`. The ISO route still works and still needs
+   nothing extracted, but nobody needs a Debian ISO any more.
+   `APP_DEBIAN_MIRROR` overrides the mirror. Live: verified 2026-09-06 in QEMU: the sequence handler (kernel off the ISO, netboot initrd, preseed off the share) ran a full unattended install from deb.debian.org on a 16 GB virtio disk - partitioning, base system, standard task, GRUB, reboot - and the ISO-less entry (kernel + initrd from the store) booted to the same installer, configured the network and loaded its components from the mirror.
+3. **Serve the first-boot script.** `runScriptUrl` is free text today. It should
    be a file in the library served over the existing Caddy tree, the way
    everything else is.
-3. **Verify end to end in QEMU.** `scripts/test-linux-iso-boot-qemu.sh` already
+4. **Verify end to end in QEMU.** `scripts/test-linux-iso-boot-qemu.sh` already
    boots a Debian netinst; the missing tier is an install that consumes a
    generated preseed and lands a working machine. Nothing here has touched real
    hardware or a real installer.
-4. **Ubuntu and RHEL**, if wanted. Each is another `platform` value and another
+5. **Ubuntu and RHEL**, if wanted. Each is another `platform` value and another
    builder; the store, publish and panel gating already take one.
 
 ---

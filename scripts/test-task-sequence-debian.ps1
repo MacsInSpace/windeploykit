@@ -87,6 +87,15 @@ Check 'the password is a hash, never a plaintext field' {
     $cfg -match 'passwd/user-password-crypted password \$6\$' -and $cfg -notmatch 'passwd/user-password '
 }
 Check 'root login is disabled' { $cfg -match 'passwd/root-login boolean false' }
+Check 'the trixie recipes server and small_disk are accepted, anything else falls back to atomic' {
+    $mk = { param($r) ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = "r-$r"; name = 'R'; platform = 'debian'; fields = [pscustomobject]@{ partitionRecipe = $r } }) }
+    ((Build-AppPxeBootTaskSequencePreseed -Sequence (& $mk 'small_disk')) -match 'choose_recipe select small_disk') -and
+    ((Build-AppPxeBootTaskSequencePreseed -Sequence (& $mk 'server')) -match 'choose_recipe select server') -and
+    ((Build-AppPxeBootTaskSequencePreseed -Sequence (& $mk 'bogus')) -match 'choose_recipe select atomic')
+}
+Check 'UEFI install is forced: d-i must not stop to ask when another OS sits on a disk in BIOS mode' {
+    $cfg -match 'partman-efi/non_efi_system boolean true'
+}
 Check 'no mirror block: the PXE kernel arguments own the mirror' {
     $cfg -notmatch 'mirror/http/hostname' -and $cfg -notmatch 'mirror/http/directory'
 }

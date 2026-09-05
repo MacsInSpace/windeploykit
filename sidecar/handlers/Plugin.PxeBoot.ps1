@@ -592,6 +592,48 @@ function Handle-GetTaskSequenceStepFromLibrary {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-ListPxeBootLinuxNetboot {
+    <#
+    .SYNOPSIS
+        Debian releases the app can PXE-install with no ISO: the catalog joined with what
+        is in the store. Kernel + initrd come from the Debian mirror; so do drivers and
+        packages at install time.
+    #>
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    Write-SidecarResponse -Id $Id -Data @{
+        entries = @(Get-AppPxeBootDebianNetbootCatalogStatus)
+        mirror  = (Get-AppPxeBootDebianMirrorBase)
+    }
+}
+
+function Handle-AddPxeBootLinuxNetboot {
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $codename = Get-AppSidecarParam -Params $Params -Name 'codename'
+    $arch = Get-AppSidecarParam -Params $Params -Name 'arch'
+    if (-not $codename -or -not $arch) { throw 'AddPxeBootLinuxNetboot: codename and arch required.' }
+    $result = Add-AppPxeBootDebianNetboot -Codename ([string]$codename) -Arch ([string]$arch)
+    Write-SidecarResponse -Id $Id -Data @{
+        updated = [bool]$result.updated
+        entries = @(Get-AppPxeBootDebianNetbootCatalogStatus)
+        mirror  = (Get-AppPxeBootDebianMirrorBase)
+    }
+}
+
+function Handle-RemovePxeBootLinuxNetboot {
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $codename = Get-AppSidecarParam -Params $Params -Name 'codename'
+    $arch = Get-AppSidecarParam -Params $Params -Name 'arch'
+    if (-not $codename -or -not $arch) { throw 'RemovePxeBootLinuxNetboot: codename and arch required.' }
+    Remove-AppPxeBootDebianNetboot -Codename ([string]$codename) -Arch ([string]$arch) | Out-Null
+    Write-SidecarResponse -Id $Id -Data @{
+        entries = @(Get-AppPxeBootDebianNetbootCatalogStatus)
+        mirror  = (Get-AppPxeBootDebianMirrorBase)
+    }
+}
+
 function Handle-ListPxeBootIsos {
     <#
     .SYNOPSIS
