@@ -1,7 +1,7 @@
 # Handover: `feature/linux-task-sequences`
 
 Written 2026-09-05 for the next agent. Craig is starting a fresh session so the
-work does not cross over. Read this, then `AGENT_NOTES.md` — the section
+work does not cross over. Read this, then `AGENT_NOTES.md` - the section
 **"Linux task sequences, 2026-09-05"** is the design record and this is only the
 state of play.
 
@@ -17,14 +17,14 @@ Branch `feature/linux-task-sequences`, two commits on top of `main` (`bb28b06`):
 bb28b06  (main) tools: bundled tools report their real version
 ```
 
-**`0ff24ee` is not my work.** The Linux ISO boot work — ISO mount and serve, the
+**`0ff24ee` is not my work.** The Linux ISO boot work - ISO mount and serve, the
 Debian netboot initrd match, `scripts/test-linux-iso-boot-qemu.sh`,
-`sidecar/pxe/README.md` and its AGENT_NOTES section — was sitting *uncommitted*
+`sidecar/pxe/README.md` and its AGENT_NOTES section - was sitting *uncommitted*
 in the working tree on `feature/linux-iso-boot` when I branched. I swept it into
 my own commit by using `git add -A`, then split it back out into its own commit
 so it stays attributable. Content untouched, but **check it is what Craig
 expects before building on it**, and note that `feature/linux-iso-boot` itself
-has no commits beyond `main` — everything was in the working tree.
+has no commits beyond `main` - everything was in the working tree.
 
 Nothing is pushed. There is no remote branch.
 
@@ -45,7 +45,7 @@ tsc --noEmit                  clean
 
 A task sequence now carries `platform`: `windows` (unattend.xml, unchanged) or
 `debian` (a d-i preseed). Absent means `windows`, so every sequence saved before
-this keeps working. `kind` — the client/server role — is cleared on a preseed
+this keeps working. `kind` - the client/server role - is cleared on a preseed
 because it is a Windows concept.
 
 | Where | What changed |
@@ -55,7 +55,7 @@ because it is a Windows concept.
 | `app/src/workspaces/PxeWorkspace.tsx` | Debian field labels, order and defaults; `tsPlatform` / `tsFieldOrder` / `tsFieldLabel`; a platform select on the create row; the list shows the platform for a preseed |
 | `scripts/test-task-sequence-debian.ps1` | New gate, 22 checks |
 
-The worked example throughout is **CampusCast** — Craig's other project, a
+The worked example throughout is **CampusCast** - Craig's other project, a
 Debian digital-signage receiver that installs unattended and then runs one
 script at first boot. Its real preseed is at
 `/Volumes/Data/projects/CampusCast/receiver/preseed/` and is the model for the
@@ -91,7 +91,7 @@ These are not incidental; every one of them shaped the code.
    near the `mirror/http/*` it already injects). Add `auto=true
    priority=critical` at the same time, or d-i starts asking questions before it
    fetches the preseed.
-   **Decide the shape first:** one menu entry per ISO × sequence, or one entry
+   **Decide the shape first:** one menu entry per ISO x sequence, or one entry
    per ISO with a submenu. With 8 sequences and 3 ISOs the flat form is 24
    entries.
 2. **Serve the first-boot script.** `runScriptUrl` is free text today. It should
@@ -112,7 +112,7 @@ These are not incidental; every one of them shaped the code.
 The fetch line quotes the URL for the shell inside `sh -c`, then quotes the
 whole payload again for the shell reading the late_command line. Getting only
 the outer level right still produces a *correct command* for an ordinary URL,
-because adjacent quoted strings concatenate — so `sh -n` passes and so does
+because adjacent quoted strings concatenate - so `sh -n` passes and so does
 every regex for `wget ...`. It only comes apart on a space or a metacharacter.
 That is why the gate executes the command with `in-target`, `wget`, `chmod` and
 `systemctl` stubbed and asserts the URL arrives as one argument. I asserted the
@@ -133,7 +133,7 @@ under StrictMode. Wrap in `@()`. Same for `Where-Object` returning one item.
 variable. Use `"${var}:..."`.
 
 **`$host` is read-only** and `Invoke-WebRequest` returns `byte[]` for
-`octet-stream` — both already in AGENT_NOTES from the ISO work, both still true.
+`octet-stream` - both already in AGENT_NOTES from the ISO work, both still true.
 
 **Do not run the gates while a boot test is in flight.**
 `scripts/test-strictmode.ps1` spawns a real sidecar, which adopts the running
