@@ -265,6 +265,49 @@ a cache description, correctly left alone.
 - **Gateway `catch { }`** in `Get-AppPxeBootNetworkAdapters` (line ~4639) now
   logs instead of discarding - the bug that cost the original "No LAN IP" hunt.
 
+### Linux ISO boot, 2026-09-04 (branch `feature/linux-iso-boot`)
+
+- A Debian installer ISO in the library is mounted read-only like Windows media,
+  served whole at `/iso-mount/<token>/`, and the PXE menu gets one `lnx_<slug>`
+  entry per ISO that boots the ISO's own kernel + initrd in place. No extraction,
+  no copy - Craig's rule for every ISO.
+- macOS cannot hdiutil-mount Debian hybrid ISOs ("no mountable file systems": the
+  Apple partition map wins). `Mount-AppPxeBootIsoReadOnly` falls back to
+  `hdiutil attach -nomount` + `mount -t cd9660`, unprivileged. Dismount must
+  `umount` before `hdiutil detach`, else "Resource busy".
+- Mount records carry `kind` (`windows` | `linux`), `mountRoot`, `livePath` and
+  `linux` (layout, label, kernel/initrd rel paths, kernel args) - same keys for
+  both kinds, StrictMode. Menu regen now runs AFTER the mount pass on Start and
+  on Update Deployment Share, because the Linux entries are read off the mount map.
+- Verified 2026-09-04 in QEMU (`scripts/test-linux-iso-boot-qemu.sh`,
+  debian-13.6.0-amd64-netinst): kernel (12.1 MB) and gtk initrd (76.6 MB) fetched
+  through Caddy, installer reached "Select a language".
+- The netinst's own initrd is the CD-ROM flavour (cdrom-detect, no net-retriever,
+  no NIC modules), so over PXE it stops at "detect and mount installation media".
+  Same day: the mount pass fetches Debian's matching netboot initrd
+  (`Ensure-AppPxeBootDebianNetbootInitrd`). Match = SHA256 of the ISO's kernel
+  equals the mirror build's `netboot/.../linux` in SHA256SUMS (the kernel is the
+  same file in both places); only that build's gtk `initrd.gz` (~80 MB) is
+  downloaded, verified, into `http/linux/debian/<codename>-<arch>-<sha8>/`. The
+  menu then boots the ISO's kernel + netboot initrd with `mirror/http/*` pointing
+  at `/iso-mount/<token>` and `debian-installer/allow_unauthenticated=true` (CD
+  trees have an unsigned Release). Offline or unmatched -> ISO-only boot, and the
+  menu + ISO list say so. QEMU `--install` tier: verified 2026-09-04 with debian-13.6.0-amd64-netinst: d-i accepted the served ISO tree as its mirror (dists/trixie Release + debian-installer Packages.gz), then fetched its udebs from pool/ on the mounted ISO through Caddy.
+- Gotcha found on the way: `Invoke-WebRequest` returns a byte[] for
+  octet-stream bodies (deb.debian.org's SHA256SUMS) - `[string]` of that is
+  "1 2 3". `Get-AppPxeBootHttpTextContent` decodes. And `$host` is a read-only
+  automatic variable - never assign it.
+- Gotcha for anyone testing live: `scripts/test-strictmode.ps1` spawns a real
+  sidecar, which ADOPTS a running Caddy, decides its imaging-log route points at a
+  dead listener, and restarts Caddy from its own (empty) mount map - every
+  `/iso-mount/` and `/iso-wim/` route vanishes until the next Start. Do not run
+  the gates while a boot test is in flight.
+- Secure Boot: the bundled shim trusts the iPXE CA, not Debian's kernel key.
+  Linux entries need Secure Boot off; the handler says so when `boot` fails.
+- Two adjacent fixes rode along: `Remove-AppPxeBootIso` and the layout warning
+  looked mounts up by bare ISO stem, but the map is keyed by token, so neither
+  ever matched (the warning fired for every ISO whenever HTTP was up).
+
 ### Scope sweep, 2026-08-21 - removed what is not an MDT/PXE replacement
 
 Craig: *"All we are doing is MDT/WDS and PXE imaging."* Everything below was

@@ -718,12 +718,19 @@ function Get-AppPxeBootBootChainMode {
 function Get-AppPxeBootMenuDefaultChooseTarget {
     param(
         [string]$DirectBootWim,
-        [array]$BootableWims
+        [array]$BootableWims,
+        # Linux ISO rows (Get-AppPxeBootLinuxBootInventory). Only the default when there
+        # is no WIM at all - Windows imaging stays the product's first answer.
+        [array]$LinuxEntries
     )
     if ($DirectBootWim) { return 'boot_default' }
     $first = @($BootableWims | Select-Object -First 1)
     if ($first.Count -gt 0) {
         return Get-AppPxeBootMenuItemId -FileName ([string]$first[0].fileName)
+    }
+    $firstLinux = @($LinuxEntries | Select-Object -First 1)
+    if ($firstLinux.Count -gt 0) {
+        return [string]$firstLinux[0].id
     }
     return 'shell'
 }
@@ -2155,6 +2162,163 @@ function Get-AppPxeBootMenuItemId {
     "wim_$slug"
 }
 
+function Get-AppPxeBootLinuxMenuItemId {
+    param([Parameter(Mandatory)][string]$FileName)
+    # Same slug rule as the WIM items, different prefix, so a WIM and an ISO that share
+    # a stem never collide in ${target}.
+    $stem = [IO.Path]::GetFileNameWithoutExtension($FileName)
+    $slug = ($stem -replace '[^a-zA-Z0-9]+', '_').Trim('_').ToLower()
+    if ([string]::IsNullOrWhiteSpace($slug)) { $slug = 'iso' }
+    "lnx_$slug"
+}
+
+function Get-AppPxeBootLinuxBootInventory {
+    <#
+    .SYNOPSIS
+        The Linux ISOs the menu can boot right now: mounted, recognised, kernel and initrd
+        still readable. Live state only (the mount map), so the menu never promises an
+        ISO that has left the library or whose mount went away.
+    #>
+    $rows = [System.Collections.Generic.List[object]]::new()
+    $paths = Get-AppPxeBootLayoutPaths
+    foreach ($mount in @($script:AppPxeBootState.IsoMounts.Values)) {
+        if ([string]$mount.kind -ne 'linux') { continue }
+        $linux = $mount.linux
+        if (-not $linux) { continue }
+        if (-not (Test-Path -LiteralPath ([string]$mount.isoPath) -PathType Leaf)) { continue }
+        if (-not (Test-Path -LiteralPath ([string]$linux.kernelPath) -PathType Leaf)) { continue }
+        if (-not (Test-Path -LiteralPath ([string]$linux.initrdPath) -PathType Leaf)) { continue }
+        $token = [string]$mount.base
+        $initrdHttpRel = "iso-mount/$token/$([string]$linux.initrdRel)"
+        $kernelArgs = [string]$linux.kernelArgs
+        $installMode = 'iso'
+        $note = ''
+        # Debian installer media: the ISO's own initrd is the CD-ROM flavour and cannot find
+        # its media over PXE. With the matching netboot initrd fetched, boot THAT initrd
+        # (kernel still off the ISO) and point the installer at the served ISO tree as its
+        # mirror - the ISO stays the package source, nothing is extracted.
+        $netboot = $linux.netboot
+        if ($netboot -and $netboot.ready -and (Test-Path -LiteralPath (Join-Path $paths.httpRoot ([string]$netboot.httpRel)) -PathType Leaf)) {
+            $initrdHttpRel = [string]$netboot.httpRel
+            $kernelArgs = Add-AppPxeBootDebianInstallerKernelArgs -KernelArgs $kernelArgs -Token $token -Codename ([string]$linux.codename)
+            $installMode = 'netboot'
+            $note = "Installer: netboot initrd (d-i $([string]$netboot.diVersion)) + packages from the mounted ISO"
+        } elseif ($netboot) {
+            $note = "NOTE: installer files not fetched ($([string]$netboot.reason)) - the installer will stop at media detection"
+        }
+        $rows.Add(@{
+                id            = Get-AppPxeBootLinuxMenuItemId -FileName ([string]$mount.isoFileName)
+                isoFileName   = [string]$mount.isoFileName
+                label         = [string]$linux.label
+                kernelHttpRel = "iso-mount/$token/$([string]$linux.kernelRel)"
+                initrdHttpRel = $initrdHttpRel
+                kernelArgs    = $kernelArgs
+                installMode   = $installMode
+                note          = $note
+            }) | Out-Null
+    }
+    return @($rows | Sort-Object { [string]$_.isoFileName })
+}
+
+function Get-AppPxeBootLocalHttpHostPort {
+    # "10.0.1.147:8080", or "${next-server}:8080" for iPXE to expand when no LAN IP is known.
+    # d-i's mirror/http/hostname takes host[:port] with no scheme.
+    $base = Get-AppPxeBootLocalHttpBaseUrl
+    return ($base -replace '^https?://', '')
+}
+
+function Add-AppPxeBootDebianInstallerKernelArgs {
+    param(
+        [string]$KernelArgs,
+        [Parameter(Mandatory)][string]$Token,
+        [string]$Codename
+    )
+    # Installer parameters go BEFORE '---': d-i copies whatever follows '---' into the
+    # installed system's bootloader config, and a mirror URL has no business there.
+    #   mirror/country=manual                  without it choose-mirror ignores the preseeded
+    #                                          hostname and picks the locale's country mirror
+    #                                          (verified 2026-09-04: udebs came from the internet)
+    #   mirror/*                               the served ISO tree, at this laptop
+    #   mirror/http/proxy=                     answer the proxy question with "none"
+    #   debian-installer/allow_unauthenticated Debian CD trees carry an unsigned Release
+    #   netcfg/choose_interface=auto           the NIC that PXE-booted is the one to use
+    $mirrorHost = Get-AppPxeBootLocalHttpHostPort
+    $parts = @(
+        'mirror/country=manual'
+        'mirror/protocol=http'
+        "mirror/http/hostname=$mirrorHost"
+        "mirror/http/directory=/iso-mount/$Token"
+        'mirror/http/proxy='
+    )
+    if (-not [string]::IsNullOrWhiteSpace($Codename)) { $parts += "mirror/suite=$Codename" }
+    $parts += @('debian-installer/allow_unauthenticated=true', 'netcfg/choose_interface=auto')
+    $extra = $parts -join ' '
+    $existing = [string]$KernelArgs
+    if ($existing -match '^(.*?)\s*---\s*(.*)$') {
+        $before = $Matches[1].Trim()
+        $after = $Matches[2].Trim()
+        $head = if ($before) { "$before $extra" } else { $extra }
+        return "$head --- $after".Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($existing)) { return $extra }
+    return "$($existing.Trim()) $extra"
+}
+
+function Get-AppPxeBootLinuxIpxeBlock {
+    param(
+        [Parameter(Mandatory)]$Entry,
+        [string]$EchoLabel
+    )
+    # A Linux ISO boots the distro's own kernel + initrd straight off the mounted ISO
+    # (Caddy /iso-mount/<token>/ route) - no wimboot, no extraction. initrd=<name> on the
+    # kernel line is for older EFI stubs that look the initrd up by name; current
+    # kernels take it from iPXE's LoadFile2 handoff and ignore it. BIOS iPXE passes the
+    # initrd through the boot protocol either way.
+    $block = [System.Collections.Generic.List[string]]::new()
+    if ($EchoLabel) { [void]$block.Add("echo $EchoLabel") }
+    [void]$block.Add('imgfree')
+    $initrdName = [IO.Path]::GetFileName([string]$Entry.initrdHttpRel)
+    $kernelArgs = ([string]$Entry.kernelArgs).Trim()
+    $argStr = if ($kernelArgs) { " $kernelArgs" } else { '' }
+    [void]$block.Add("kernel `${http_base}/$([string]$Entry.kernelHttpRel) initrd=$initrdName$argStr")
+    [void]$block.Add("initrd `${http_base}/$([string]$Entry.initrdHttpRel)")
+    [void]$block.Add('boot')
+    [void]$block.Add('imgfree')
+    return @($block)
+}
+
+function Get-AppPxeBootLinuxMenuItemLines {
+    # One separator, then one item per Linux ISO. Nothing when there are none.
+    param([array]$Entries)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($entry in $Entries) {
+        if ($lines.Count -eq 0) { [void]$lines.Add('item --gap -- ------------------------------') }
+        [void]$lines.Add((Format-AppPxeBootIpxeMenuItemLine -Id ([string]$entry.id) -Label ([string]$entry.label)))
+    }
+    return $lines.ToArray()
+}
+
+function Get-AppPxeBootLinuxMenuHandlerLines {
+    param([array]$Entries)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($entry in $Entries) {
+        $label = [string]$entry.label
+        [void]$lines.Add(":$([string]$entry.id)")
+        $note = [string]$entry.note
+        if ($note) { [void]$lines.Add("echo $note") }
+        foreach ($bootLine in (Get-AppPxeBootLinuxIpxeBlock -Entry $entry -EchoLabel "Booting $label...")) {
+            [void]$lines.Add($bootLine)
+        }
+        [void]$lines.Add('echo')
+        [void]$lines.Add("echo Boot of $label failed.")
+        # The bundled shim trusts the iPXE CA, not a distro's kernel signing key.
+        [void]$lines.Add('echo If Secure Boot is on, turn it off for Linux - this chain cannot verify a distro kernel.')
+        [void]$lines.Add('goto start')
+        [void]$lines.Add('')
+    }
+    return $lines.ToArray()
+}
+
 function Write-AppPxeBootMenuFiles {
     <#
     .SYNOPSIS
@@ -2206,6 +2370,7 @@ function Write-AppPxeBootMenuFiles {
 
     $directBootWim = Get-AppPxeBootDirectBootWimName
     $wims = @(Get-AppPxeBootWimInventory)
+    $linuxEntries = @(Get-AppPxeBootLinuxBootInventory)
 
     $bootMenuLines = [System.Collections.Generic.List[string]]::new()
     $httpBaseLiteral = Get-AppPxeBootLocalHttpBaseUrl
@@ -2250,6 +2415,7 @@ function Write-AppPxeBootMenuFiles {
             $id = Get-AppPxeBootMenuItemId -FileName $name
             [void]$bootMenuLines.Add("item $id`t$name")
         }
+        foreach ($line in @(Get-AppPxeBootLinuxMenuItemLines -Entries $linuxEntries)) { [void]$bootMenuLines.Add([string]$line) }
         [void]$bootMenuLines.Add('item --gap -- ------------------------------')
         foreach ($line in @(Get-AppPxeBootIpxeMenuUtilityItemLines)) { [void]$bootMenuLines.Add([string]$line) }
         $defaultTarget = Get-AppPxeBootMenuDefaultChooseTarget -DirectBootWim $directBootWim -BootableWims $wims
@@ -2269,6 +2435,7 @@ function Write-AppPxeBootMenuFiles {
             [void]$bootMenuLines.Add('goto start')
             [void]$bootMenuLines.Add('')
         }
+        foreach ($line in @(Get-AppPxeBootLinuxMenuHandlerLines -Entries $linuxEntries)) { [void]$bootMenuLines.Add([string]$line) }
         foreach ($line in @(Get-AppPxeBootIpxeLocalDiskHandlerLines)) { [void]$bootMenuLines.Add([string]$line) }
         [void]$bootMenuLines.Add(':retry')
         [void]$bootMenuLines.Add('chain ${http_base}/boot.ipxe?t=${buildsign} || chain ${http_base}/boot.ipxe || goto start')
@@ -2282,7 +2449,7 @@ function Write-AppPxeBootMenuFiles {
         } else {
             Write-SidecarLog "PXE boot: boot.ipxe menu-first - default $directBootWim highlighted (autoBootDefault off)"
         }
-    } elseif ($wims.Count -gt 0) {
+    } elseif ($wims.Count -gt 0 -or $linuxEntries.Count -gt 0) {
         [void]$bootMenuLines.Add("# Netboot field PXE - local menu - generated $generated")
         [void]$bootMenuLines.Add('goto start')
         [void]$bootMenuLines.Add('')
@@ -2296,9 +2463,10 @@ function Write-AppPxeBootMenuFiles {
             $id = Get-AppPxeBootMenuItemId -FileName $name
             [void]$bootMenuLines.Add("item $id`t$name")
         }
+        foreach ($line in @(Get-AppPxeBootLinuxMenuItemLines -Entries $linuxEntries)) { [void]$bootMenuLines.Add([string]$line) }
         [void]$bootMenuLines.Add('item --gap -- ------------------------------')
         foreach ($line in @(Get-AppPxeBootIpxeMenuUtilityItemLines)) { [void]$bootMenuLines.Add([string]$line) }
-        $defaultTarget = Get-AppPxeBootMenuDefaultChooseTarget -DirectBootWim $null -BootableWims $wims
+        $defaultTarget = Get-AppPxeBootMenuDefaultChooseTarget -DirectBootWim $null -BootableWims $wims -LinuxEntries $linuxEntries
         [void]$bootMenuLines.Add("choose --default $defaultTarget target || goto start")
         [void]$bootMenuLines.Add('goto ${target}')
         [void]$bootMenuLines.Add('')
@@ -2314,6 +2482,7 @@ function Write-AppPxeBootMenuFiles {
             [void]$bootMenuLines.Add('goto start')
             [void]$bootMenuLines.Add('')
         }
+        foreach ($line in @(Get-AppPxeBootLinuxMenuHandlerLines -Entries $linuxEntries)) { [void]$bootMenuLines.Add([string]$line) }
         foreach ($line in @(Get-AppPxeBootIpxeLocalDiskHandlerLines)) { [void]$bootMenuLines.Add([string]$line) }
         [void]$bootMenuLines.Add(':retry')
         [void]$bootMenuLines.Add('chain ${http_base}/boot.ipxe?t=${buildsign} || chain ${http_base}/boot.ipxe || goto start')
@@ -2321,7 +2490,7 @@ function Write-AppPxeBootMenuFiles {
         [void]$bootMenuLines.Add(':shell')
         [void]$bootMenuLines.Add('shell')
         [void]$bootMenuLines.Add('goto start')
-        Write-SidecarLog "PXE boot: boot.ipxe local menu ($($wims.Count) WIM(s))"
+        Write-SidecarLog "PXE boot: boot.ipxe local menu ($($wims.Count) WIM(s), $($linuxEntries.Count) Linux ISO(s))"
     } else {
         if ($wanDeployEnabled) {
             [void]$bootMenuLines.Add("# Netboot field PXE - deploy chain - generated $generated")
@@ -2333,8 +2502,8 @@ function Write-AppPxeBootMenuFiles {
             Write-SidecarLog "PXE boot: boot.ipxe chains deploy server ($deployBase)"
         } else {
             [void]$bootMenuLines.Add("# Netboot field PXE - no local boot assets - generated $generated")
-            [void]$bootMenuLines.Add('echo No boot WIM on this workstation.')
-            [void]$bootMenuLines.Add("echo Open Netboot in $(Get-AppProductDisplayName) and add a boot WIM (import from a Windows ISO).")
+            [void]$bootMenuLines.Add('echo No boot WIM or Linux ISO on this workstation.')
+            [void]$bootMenuLines.Add("echo Open Netboot in $(Get-AppProductDisplayName) and add a boot WIM (import from a Windows ISO) or a Linux ISO.")
             [void]$bootMenuLines.Add('echo Enable HTTP + TFTP, then reboot the client.')
             [void]$bootMenuLines.Add('shell')
             Write-SidecarLog 'PXE boot: boot.ipxe has no local menu assets (add a boot WIM in Netboot)'
@@ -3947,16 +4116,34 @@ function Download-AppPxeBootOptionalAsset {
 function Get-AppPxeBootIsoInventory {
     $paths = Get-AppPxeBootLayoutPaths
     $files = @(Get-ChildItem -LiteralPath $paths.isoDir -Filter '*.iso' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+    # bootKind/bootLabel come from the live mount map: 'windows' (install.wim served),
+    # 'linux' (kernel + initrd served, menu entry present), or $null when the ISO is not
+    # mounted right now (services stopped, or media nothing recognises).
+    $mounts = $script:AppPxeBootState.IsoMounts
     @($files | ForEach-Object {
         $name = $_.Name
+        $token = Get-AppPxeBootIsoMountToken -IsoFileName $name
+        $mount = if ($mounts.ContainsKey($token)) { $mounts[$token] } else { $null }
         @{
             fileName   = $name
             sizeBytes  = [long]$_.Length
             modifiedAt = $_.LastWriteTimeUtc.ToString('o')
             httpPath   = "iso/$name"
             label      = ([IO.Path]::GetFileNameWithoutExtension($name) -replace '_', ' ')
+            bootKind   = if ($mount) { [string]$mount.kind } else { $null }
+            bootLabel  = if ($mount -and $mount.linux) { [string]$mount.linux.label } else { $null }
+            bootNote   = if ($mount -and $mount.linux) { Get-AppPxeBootLinuxInstallNote -Linux $mount.linux } else { $null }
         }
     })
+}
+
+function Get-AppPxeBootLinuxInstallNote {
+    # One line for the ISO list: what booting this entry will actually do.
+    param([Parameter(Mandatory)]$Linux)
+    $netboot = $Linux.netboot
+    if (-not $netboot) { return $null }
+    if ($netboot.ready) { return "installs from this ISO (netboot initrd d-i $([string]$netboot.diVersion))" }
+    return "boots to the installer only - netboot initrd not fetched: $([string]$netboot.reason)"
 }
 
 function Test-AppPxeBootLayout {
@@ -4019,12 +4206,20 @@ function Test-AppPxeBootLayoutUncached {
             # Mount-and-serve only: install.wim is exposed live from the mounted ISO
             # once imaging services run - warn only when services are up but the
             # mount failed. (Extraction removed 2026-08-18: duplicated multi-GB WIMs.)
-            $isoBase = [IO.Path]::GetFileNameWithoutExtension((Get-AppPxeBootSafeIsoFileName -FileName $iso.Name))
-            $mount = $script:AppPxeBootState.IsoMounts[$isoBase]
+            # Mounts are keyed by token, not by the bare stem (the stem lookup never
+            # matched, so this warned for every ISO whenever HTTP was up). livePath is
+            # install.wim for Windows media and the kernel for a Linux ISO.
+            $token = Get-AppPxeBootIsoMountToken -IsoFileName $iso.Name
+            $mount = if ($script:AppPxeBootState.IsoMounts.ContainsKey($token)) { $script:AppPxeBootState.IsoMounts[$token] } else { $null }
             $httpRunning = $script:AppPxeBootState.HttpProcess -and -not $script:AppPxeBootState.HttpProcess.HasExited
-            if ($httpRunning -and (-not $mount -or -not (Test-Path -LiteralPath $mount.installWim))) {
+            $mountLive = $false
+            if ($mount) {
+                $probe = [string]$mount.livePath
+                $mountLive = [bool]($probe -and (Test-Path -LiteralPath $probe))
+            }
+            if ($httpRunning -and -not $mountLive) {
                 [void]$warnings.Add(
-                    "iso-wim/$isoBase/install.wim - ISO not mounted (check the ISO contains sources/install.wim; Stop then Start Imaging Services)"
+                    "iso/$($iso.Name) - ISO not mounted (needs sources/install.wim, or a Linux installer layout such as install.amd/; Stop then Start Imaging Services)"
                 )
             }
         }
@@ -4848,6 +5043,23 @@ function Write-AppPxeBootCaddyfile {
         $routeLines += @(
             "    handle_path /iso-wim/$baseEsc/* {"
             "        root * `"$srcNorm`""
+            '        file_server'
+            '    }'
+        )
+    }
+
+    # Every mount also serves its whole tree at /iso-mount/<token>/. A Linux ISO's kernel
+    # and initrd boot straight from here (Get-AppPxeBootLinuxIpxeBlock), and a Debian
+    # tree doubles as an apt mirror for the installer later. Read-only, same files the
+    # Deploy$ share already exposes under .mounts/.
+    foreach ($mount in @($script:AppPxeBootState.IsoMounts.Values)) {
+        $mountRoot = [string]$mount.mountRoot
+        if (-not $mountRoot -or -not (Test-Path -LiteralPath $mountRoot -PathType Container)) { continue }
+        $mountNorm = ($mountRoot -replace '\\', '/')
+        $baseEsc = [string]$mount.base
+        $routeLines += @(
+            "    handle_path /iso-mount/$baseEsc/* {"
+            "        root * `"$mountNorm`""
             '        file_server'
             '    }'
         )
@@ -7823,10 +8035,9 @@ function Start-AppPxeBootServices {
             throw ('PXE boot: missing required files: ' + ($layout.missing -join ', '))
         }
 
-    Write-AppPxeBootMenuFiles
-
-    # Mount ISOs before HTTP so Start-AppPxeBootHttpServer's Caddyfile picks up the
-    # per-mount /iso-wim/<base> routes that serve install.wim in place (no extraction).
+    # Mount ISOs before the menu and before HTTP: the menu's Linux entries come from the
+    # mount map, and Start-AppPxeBootHttpServer's Caddyfile picks up the per-mount
+    # /iso-wim/<token> and /iso-mount/<token> routes that serve them in place (no extraction).
     if ($startHttp -and -not $Minimal) {
         try {
             Mount-AppPxeBootInstallWimIsos | Out-Null
@@ -7834,6 +8045,8 @@ function Start-AppPxeBootServices {
             Write-SidecarLog "PXE boot: ISO mount-serve error - $($_.Exception.Message)"
         }
     }
+
+    Write-AppPxeBootMenuFiles
 
     if ($startHttp) {
         try {
@@ -8218,6 +8431,90 @@ function ConvertFrom-AppPxeBootHdiutilInfo {
     $rows
 }
 
+function Get-AppPxeBootMacCd9660MountDevice {
+    <#
+    .SYNOPSIS
+        The device a directory is mounted from when it is one of OUR cd9660 mounts, else $null.
+    .NOTES
+        `mount` prints "<dev> on <path> (cd9660, local, ...)". hdiutil reports the mount
+        point too, but it never learns the filesystem, and only this path is safe to
+        umount by hand.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not ($IsMacOS -or $IsDarwin)) { return $null }
+    $norm = (($Path -replace '/+$', '') -replace '^/private', '')
+    $lines = @()
+    try { $lines = @(& mount 2>$null) } catch { $lines = @() }
+    foreach ($line in $lines) {
+        if ([string]$line -notmatch '^(\S+) on (.+) \((cd9660|udf)[,)]') { continue }
+        $at = (($Matches[2] -replace '/+$', '') -replace '^/private', '')
+        if ($at -eq $norm) { return [string]$Matches[1] }
+    }
+    return $null
+}
+
+function Dismount-AppPxeBootMacCd9660Path {
+    <#
+    .SYNOPSIS
+        umount a cd9660 volume we mounted by hand, then detach its image device. $true
+        when the path is no longer a cd9660 mount. No-op (and $true) for anything else.
+    .NOTES
+        `hdiutil detach -force` refuses ("Resource busy") while the volume is mounted -
+        the kernel mount is ours, not hdiutil's. Verified 2026-09-04 on
+        debian-13.6.0-amd64-netinst.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $dev = Get-AppPxeBootMacCd9660MountDevice -Path $Path
+    if (-not $dev) { return $true }
+    & umount $Path 2>&1 | Out-Null
+    if (Get-AppPxeBootMacCd9660MountDevice -Path $Path) {
+        & umount -f $Path 2>&1 | Out-Null
+    }
+    $gone = -not (Get-AppPxeBootMacCd9660MountDevice -Path $Path)
+    if ($gone) { & hdiutil detach $dev -force 2>&1 | Out-Null }
+    return $gone
+}
+
+function Mount-AppPxeBootIsoCd9660 {
+    <#
+    .SYNOPSIS
+        Attach an ISO without letting hdiutil pick a filesystem, then mount its ISO 9660
+        volume ourselves. Returns the /dev/diskN the image is attached as.
+    .NOTES
+        Debian's (and most distros') hybrid ISOs carry an Apple partition map for Mac
+        EFI boot. hdiutil sees that map, finds a 4 MB HFS stub and nothing else it
+        likes, and gives up with "no mountable file systems" - the ISO 9660 volume
+        underneath is fine. -nomount attaches the raw image; mount -t cd9660 reads the
+        volume the way a CD drive would. No elevation: the attach and the mount are
+        both ours, and hdiutil info still reports the mount point, so the borrow logic
+        (Get-AppPxeBootAttachedIsoMountPoint) sees it like any other. Verified
+        2026-09-04, debian-13.6.0-amd64-netinst.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$IsoPath,
+        [Parameter(Mandatory)][string]$MountDir
+    )
+    $attachOut = [string](& hdiutil attach -nomount -readonly $IsoPath 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        $reason = [string](@($attachOut -split "`n" | Where-Object { $_.Trim() }) | Select-Object -Last 1)
+        throw "PXE boot: failed to attach ISO (hdiutil -nomount: $($reason.Trim()))"
+    }
+    $device = $null
+    foreach ($line in ($attachOut -split "`n")) {
+        $first = [string](($line.Trim() -split '\s+')[0])
+        if ($first -match '^/dev/disk\d+$') { $device = $first; break }
+    }
+    if (-not $device) { throw 'PXE boot: hdiutil attached the ISO but reported no whole-disk device.' }
+    $mountOut = [string](& mount -t cd9660 -o rdonly $device $MountDir 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0) {
+        & hdiutil detach $device -force 2>&1 | Out-Null
+        # First use loads the cd9660 kext and says so on stderr; that line is not the error.
+        $reason = [string](@($mountOut -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch 'kmutil' }) | Select-Object -Last 1)
+        throw "PXE boot: failed to mount ISO 9660 volume (mount_cd9660: $($reason.Trim()))"
+    }
+    return $device
+}
+
 function Get-AppPxeBootAttachedIsoEntities {
     # Every hdiutil entity for this image (dev entry + mount point, either may be empty).
     param([Parameter(Mandatory)][string]$IsoPath)
@@ -8242,6 +8539,9 @@ function Disconnect-AppPxeBootAttachedIso {
     #>
     param([Parameter(Mandatory)][string]$IsoPath)
     foreach ($e in @(Get-AppPxeBootAttachedIsoEntities -IsoPath $IsoPath)) {
+        # A volume WE mounted (cd9660 path) is not hdiutil's to drop - detach fails
+        # "Resource busy" until it is unmounted.
+        if ($e.mountPoint) { Dismount-AppPxeBootMacCd9660Path -Path $e.mountPoint | Out-Null }
         $target = if ($e.devEntry) { $e.devEntry } else { $e.mountPoint }
         if (-not $target) { continue }
         & hdiutil detach $target -force 2>&1 | Out-Null
@@ -8298,7 +8598,10 @@ function Mount-AppPxeBootIsoReadOnly {
             $sameSpot = $MountPath -and ((($existing -replace '/+$', '') -eq ($MountPath -replace '/+$', '')) -or
                     (($existing -replace '^/private', '') -eq ($MountPath -replace '^/private', '')))
             if (-not $MountPath -or $sameSpot) {
-                return @{ platform = 'macos'; mountPath = $existing; borrowed = $true; isoPath = $IsoPath }
+                # Same keys as a fresh mount record: a borrowed hybrid ISO is still a cd9660
+                # volume, and readers must not have to guess which shape they got.
+                $borrowedDev = Get-AppPxeBootMacCd9660MountDevice -Path $existing
+                return @{ platform = 'macos'; mountPath = $existing; borrowed = $true; isoPath = $IsoPath; cd9660 = [bool]$borrowedDev; device = $borrowedDev }
             }
             # A caller that needs the mount AT a specific path (mount-and-serve: inside
             # the Deploy$ share) cannot use one that lives elsewhere - SMB clients would
@@ -8314,17 +8617,29 @@ function Mount-AppPxeBootIsoReadOnly {
             Join-Path ([IO.Path]::GetTempPath()) ("sm-pxe-iso-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
         }
         if (Test-Path -LiteralPath $mountDir) {
+            Dismount-AppPxeBootMacCd9660Path -Path $mountDir | Out-Null
             & hdiutil detach $mountDir -force 2>&1 | Out-Null
             Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue
         }
         $null = New-Item -Path $mountDir -ItemType Directory -Force
         $attachOut = (& hdiutil attach -nobrowse -readonly -mountpoint $mountDir $IsoPath 2>&1 | Out-String).Trim()
         if ($LASTEXITCODE -ne 0) {
+            if ($attachOut -match 'no mountable file systems') {
+                # Hybrid Linux ISO (Debian and friends) - hdiutil trips over its Apple
+                # partition map. Mount the ISO 9660 volume ourselves; see Mount-AppPxeBootIsoCd9660.
+                try {
+                    $device = Mount-AppPxeBootIsoCd9660 -IsoPath $IsoPath -MountDir $mountDir
+                } catch {
+                    Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue
+                    throw
+                }
+                return @{ platform = 'macos'; mountPath = $mountDir; isoPath = $IsoPath; borrowed = $false; cd9660 = $true; device = $device }
+            }
             Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue
             $reason = if ($attachOut) { ($attachOut -split "`n" | Select-Object -Last 1).Trim() } else { "exit $LASTEXITCODE" }
             throw "PXE boot: failed to mount ISO (hdiutil: $reason)"
         }
-        return @{ platform = 'macos'; mountPath = $mountDir; isoPath = $IsoPath; borrowed = $false }
+        return @{ platform = 'macos'; mountPath = $mountDir; isoPath = $IsoPath; borrowed = $false; cd9660 = $false; device = $null }
     }
     if (Get-Command -Name Mount-DiskImage -ErrorAction SilentlyContinue) {
         $img = Mount-DiskImage -ImagePath $IsoPath -PassThru -ErrorAction Stop
@@ -8334,7 +8649,7 @@ function Mount-AppPxeBootIsoReadOnly {
             Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue | Out-Null
             throw 'PXE boot: ISO mounted but no drive letter was assigned.'
         }
-        return @{ platform = 'windows'; mountPath = "$($letter):\"; isoPath = $IsoPath; borrowed = $false }
+        return @{ platform = 'windows'; mountPath = "$($letter):\"; isoPath = $IsoPath; borrowed = $false; cd9660 = $false; device = $null }
     }
     throw 'PXE boot: cannot mount ISO on this platform without 7-Zip.'
 }
@@ -8349,6 +8664,7 @@ function Dismount-AppPxeBootIso {
             if ($MountInfo.isoPath) {
                 $gone = Disconnect-AppPxeBootAttachedIso -IsoPath $MountInfo.isoPath
             } else {
+                Dismount-AppPxeBootMacCd9660Path -Path $MountInfo.mountPath | Out-Null
                 & hdiutil detach $MountInfo.mountPath -force 2>&1 | Out-Null
                 $gone = -not (Test-Path -LiteralPath (Join-Path $MountInfo.mountPath 'sources'))
             }
@@ -8406,6 +8722,266 @@ function Resolve-AppPxeBootMountInstallWim {
     $null
 }
 
+# Linux ISOs we can boot straight off the mount. One row per layout; the first row whose
+# kernel and initrd both exist wins, so the graphical Debian installer outranks the text
+# one. Debian installer media are the tested rows (2026-09-04, debian-13.6.0-amd64-netinst
+# in the QEMU boot test); the live row follows live-boot's documented fetch= contract but
+# no live ISO has been through the VM yet. kernelArgs is emitted verbatim on the iPXE
+# kernel line - ${http_base} is iPXE's variable, {token} is ours.
+$script:AppPxeBootLinuxIsoLayouts = @(
+    @{ id = 'debian-installer-amd64-gtk'; arch = 'amd64'; kernel = 'install.amd/vmlinuz'; initrd = 'install.amd/gtk/initrd.gz'; suffix = 'amd64 installer';        kernelArgs = 'vga=788 --- quiet' }
+    @{ id = 'debian-installer-amd64';     arch = 'amd64'; kernel = 'install.amd/vmlinuz'; initrd = 'install.amd/initrd.gz';     suffix = 'amd64 installer (text)'; kernelArgs = 'vga=788 --- quiet' }
+    @{ id = 'debian-installer-arm64-gtk'; arch = 'arm64'; kernel = 'install.a64/vmlinuz'; initrd = 'install.a64/gtk/initrd.gz'; suffix = 'arm64 installer';        kernelArgs = '--- quiet' }
+    @{ id = 'debian-installer-arm64';     arch = 'arm64'; kernel = 'install.a64/vmlinuz'; initrd = 'install.a64/initrd.gz';     suffix = 'arm64 installer (text)'; kernelArgs = '--- quiet' }
+    @{ id = 'debian-live';                arch = '';      kernel = 'live/vmlinuz';        initrd = 'live/initrd.img';           suffix = 'live';                   kernelArgs = 'boot=live components fetch=${http_base}/iso-mount/{token}/live/filesystem.squashfs' }
+)
+
+function Get-AppPxeBootLinuxIsoLabel {
+    param(
+        [Parameter(Mandatory)][string]$MountPath,
+        [Parameter(Mandatory)][string]$IsoFileName,
+        [string]$Suffix
+    )
+    # Debian media carry their own name in .disk/info, e.g.
+    #   Debian GNU/Linux 13.6.0 "Trixie" - Official amd64 NETINST with firmware 20260711-09:42
+    # Keep the part before ' - ' (the product), drop the quotes (iPXE's parser eats them)
+    # and fall back to the file stem. Menu text is ASCII-only: iPXE draws it raw.
+    $base = ''
+    $infoPath = Join-Path $MountPath '.disk/info'
+    if (Test-Path -LiteralPath $infoPath -PathType Leaf) {
+        try {
+            $info = [string](Get-Content -LiteralPath $infoPath -Raw -ErrorAction Stop)
+            $firstLine = [string](@($info -split "`n") | Select-Object -First 1)
+            $base = [string](@($firstLine.Trim() -split ' - ', 2) | Select-Object -First 1)
+        } catch { $base = '' }
+    }
+    if ([string]::IsNullOrWhiteSpace($base)) {
+        $base = ([IO.Path]::GetFileNameWithoutExtension($IsoFileName) -replace '[_-]+', ' ')
+    }
+    $text = ("$base $Suffix" -replace '"', '')
+    $text = [regex]::Replace($text, '[^\x20-\x7E]', '')
+    $text = ($text -replace '\s+', ' ').Trim()
+    if ($text.Length -gt 70) { $text = $text.Substring(0, 70).TrimEnd() }
+    return $text
+}
+
+function Resolve-AppPxeBootMountLinuxBoot {
+    <#
+    .SYNOPSIS
+        The kernel + initrd a mounted Linux ISO boots with, or $null when no layout matches.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$MountPath,
+        [Parameter(Mandatory)][string]$IsoFileName
+    )
+    foreach ($layout in $script:AppPxeBootLinuxIsoLayouts) {
+        $kernel = Join-Path $MountPath ([string]$layout.kernel)
+        $initrd = Join-Path $MountPath ([string]$layout.initrd)
+        if (-not (Test-Path -LiteralPath $kernel -PathType Leaf)) { continue }
+        if (-not (Test-Path -LiteralPath $initrd -PathType Leaf)) { continue }
+        $token = Get-AppPxeBootIsoMountToken -IsoFileName $IsoFileName
+        return @{
+            layoutId   = [string]$layout.id
+            arch       = [string]$layout.arch
+            label      = (Get-AppPxeBootLinuxIsoLabel -MountPath $MountPath -IsoFileName $IsoFileName -Suffix ([string]$layout.suffix))
+            kernelRel  = [string]$layout.kernel
+            initrdRel  = [string]$layout.initrd
+            kernelPath = $kernel
+            initrdPath = $initrd
+            kernelArgs = ([string]$layout.kernelArgs).Replace('{token}', $token)
+            # Filled in by the mount pass for Debian installer media (codename from the ISO's
+            # dists/ tree, netboot = the companion initrd record). Same keys for every layout.
+            codename   = $null
+            netboot    = $null
+        }
+    }
+    return $null
+}
+
+# --- Debian installer media: the netboot initrd companion ----------------------------------
+# A Debian CD/netinst initrd is the CD-ROM flavour (cdrom-detect, no net-retriever, no NIC
+# modules): PXE-booted, it stops at "detect and mount installation media". Debian's answer
+# is the netboot initrd from the mirror. The kernel shipped with a d-i build is the same
+# file in the ISO (install.amd/vmlinuz) and on the mirror (netboot/.../linux), so hashing
+# the ISO's kernel and matching it against the mirror's SHA256SUMS proves which d-i build
+# the ISO came from - no version parsing, no cpio listing. Only that build's initrd.gz is
+# downloaded (text ~40 MB, gtk ~85 MB), into http/linux/debian/<codename>-<arch>-<sha8>/.
+# The kernel still boots off the mounted ISO and the ISO tree is the installer's mirror.
+
+$script:AppPxeBootDebianMirrorBaseDefault = 'https://deb.debian.org/debian'
+
+function Get-AppPxeBootDebianMirrorBase {
+    if ($env:APP_DEBIAN_MIRROR -and -not [string]::IsNullOrWhiteSpace($env:APP_DEBIAN_MIRROR)) {
+        return ([string]$env:APP_DEBIAN_MIRROR).Trim().TrimEnd('/')
+    }
+    return $script:AppPxeBootDebianMirrorBaseDefault
+}
+
+function Get-AppPxeBootDebianNetbootRoot {
+    $paths = Get-AppPxeBootLayoutPaths
+    return (Join-Path $paths.httpRoot 'linux/debian')
+}
+
+function Get-AppPxeBootDebianCodename {
+    # dists/<codename>/Release carries "Codename: trixie". CD trees also have a
+    # stable -> trixie symlink; the real directory is the one whose Release names itself.
+    param([Parameter(Mandatory)][string]$MountPath)
+    $dists = Join-Path $MountPath 'dists'
+    if (-not (Test-Path -LiteralPath $dists -PathType Container)) { return $null }
+    foreach ($dir in @(Get-ChildItem -LiteralPath $dists -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        $release = Join-Path $dir.FullName 'Release'
+        if (-not (Test-Path -LiteralPath $release -PathType Leaf)) { continue }
+        try {
+            foreach ($line in @(Get-Content -LiteralPath $release -ErrorAction Stop | Select-Object -First 20)) {
+                if ([string]$line -match '^Codename:\s*(\S+)') {
+                    $codename = [string]$Matches[1]
+                    if ($codename -eq $dir.Name) { return $codename }
+                }
+            }
+        } catch { }
+    }
+    return $null
+}
+
+function Get-AppPxeBootHttpTextContent {
+    # Invoke-WebRequest hands back a byte[] for anything the server does not call text
+    # (deb.debian.org serves SHA256SUMS as octet-stream) - [string] of that is "1 2 3",
+    # not the file. Decode it ourselves.
+    param([Parameter(Mandatory)][string]$Url, [int]$TimeoutSec = 30)
+    $resp = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+    $content = $resp.Content
+    if ($content -is [byte[]]) { return [System.Text.Encoding]::UTF8.GetString($content) }
+    return [string]$content
+}
+
+function Get-AppPxeBootDebianInstallerBuildDirs {
+    # The d-i builds a mirror keeps for a suite: the dated directories (20250803+deb13u6,
+    # 20250803, ...) newest first, then current. An older ISO matches an older build.
+    param([Parameter(Mandatory)][string]$IndexUrl)
+    $dirs = [System.Collections.Generic.List[string]]::new()
+    try {
+        $html = Get-AppPxeBootHttpTextContent -Url $IndexUrl
+        foreach ($m in [regex]::Matches($html, 'href="(\d{8}[^"/]*)/"')) {
+            $name = [string]$m.Groups[1].Value
+            if (-not $dirs.Contains($name)) { [void]$dirs.Add($name) }
+        }
+    } catch {
+        Write-SidecarLogVerbose "PXE boot: d-i build index unavailable ($IndexUrl) - $($_.Exception.Message)"
+    }
+    # Dated builds first (newest first) so the manifest records a real build name;
+    # 'current' last as the fallback when the index could not be read.
+    $sorted = @($dirs | Sort-Object -Descending)
+    return $sorted + @('current')
+}
+
+function Read-AppPxeBootDebianSha256Sums {
+    # "<sha256>  ./netboot/gtk/debian-installer/amd64/initrd.gz" -> @{ './...' = sha }
+    param([Parameter(Mandatory)][string]$Url)
+    $map = @{}
+    $text = Get-AppPxeBootHttpTextContent -Url $Url
+    foreach ($line in ($text -split "`n")) {
+        if ([string]$line -match '^([0-9a-fA-F]{64})\s+\*?(\S+)\s*$') {
+            $map[[string]$Matches[2]] = ([string]$Matches[1]).ToLowerInvariant()
+        }
+    }
+    return $map
+}
+
+function Ensure-AppPxeBootDebianNetbootInitrd {
+    <#
+    .SYNOPSIS
+        The netboot initrd record for a Debian installer ISO: @{ ready; httpRel; dirName;
+        diVersion; reason }. Downloads it once per d-i build, verified against the mirror's
+        SHA256SUMS. A failed attempt is remembered for 10 minutes so an offline laptop pays
+        one DNS timeout per Start, not one per menu regen.
+    #>
+    param(
+        [string]$Codename,
+        [Parameter(Mandatory)][string]$Arch,
+        [Parameter(Mandatory)][string]$KernelPath,
+        [ValidateSet('text', 'gtk')][string]$Flavour = 'gtk'
+    )
+    $none = @{ ready = $false; httpRel = ''; dirName = ''; diVersion = ''; reason = '' }
+    if ([string]::IsNullOrWhiteSpace($Codename)) { $none.reason = 'ISO has no dists/<codename>/Release'; return $none }
+    if (-not (Test-Path -LiteralPath $KernelPath -PathType Leaf)) { $none.reason = 'kernel not readable on the mount'; return $none }
+    $kernelSha = (Get-FileHash -LiteralPath $KernelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $dirName = "$Codename-$Arch-$($kernelSha.Substring(0, 8))"
+    $root = Get-AppPxeBootDebianNetbootRoot
+    $dir = Join-Path $root $dirName
+    $initrd = Join-Path $dir 'initrd.gz'
+    $manifestPath = Join-Path $dir 'manifest.json'
+    $httpRel = "linux/debian/$dirName/initrd.gz"
+
+    if ((Test-Path -LiteralPath $initrd -PathType Leaf) -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        $diVersion = ''
+        try {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop | ConvertFrom-Json -AsHashtable
+            if ($manifest.ContainsKey('diVersion')) { $diVersion = [string]$manifest['diVersion'] }
+        } catch { }
+        return @{ ready = $true; httpRel = $httpRel; dirName = $dirName; diVersion = $diVersion; reason = '' }
+    }
+
+    $memoKey = "debian-netboot:$dirName"
+    $attempt = $script:AppPxeBootMemo[$memoKey]
+    if ($attempt -and ([DateTime]::UtcNow - $attempt.at).TotalSeconds -lt 600) {
+        $none.reason = [string]$attempt.value
+        return $none
+    }
+
+    $reason = ''
+    try {
+        $mirror = Get-AppPxeBootDebianMirrorBase
+        $suiteBase = "$mirror/dists/$Codename/main/installer-$Arch"
+        $rel = if ($Flavour -eq 'gtk') { "netboot/gtk/debian-installer/$Arch" } else { "netboot/debian-installer/$Arch" }
+        $tried = 0
+        foreach ($build in @(Get-AppPxeBootDebianInstallerBuildDirs -IndexUrl "$suiteBase/")) {
+            $sums = $null
+            try { $sums = Read-AppPxeBootDebianSha256Sums -Url "$suiteBase/$build/images/SHA256SUMS" } catch {
+                Write-SidecarLogVerbose "PXE boot: no SHA256SUMS for d-i build $build - $($_.Exception.Message)"
+                continue
+            }
+            $tried++
+            $linuxKey = "./$rel/linux"
+            $initrdKey = "./$rel/initrd.gz"
+            if (-not $sums.ContainsKey($linuxKey) -or -not $sums.ContainsKey($initrdKey)) { continue }
+            if ([string]$sums[$linuxKey] -ne $kernelSha) { continue }
+
+            $url = "$suiteBase/$build/images/$rel/initrd.gz"
+            if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
+            $tmp = Join-Path $dir 'initrd.gz.part'
+            if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+            Write-SidecarLog "PXE boot: fetching Debian netboot initrd ($Codename $Arch $Flavour, d-i build $build) from $url"
+            Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -TimeoutSec 1800 -ErrorAction Stop
+            $got = (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($got -ne [string]$sums[$initrdKey]) {
+                Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+                throw "downloaded initrd.gz failed SHA256 verification (build $build)"
+            }
+            Move-Item -LiteralPath $tmp -Destination $initrd -Force
+            $manifest = @{
+                codename     = $Codename
+                arch         = $Arch
+                flavour      = $Flavour
+                diVersion    = $build
+                kernelSha256 = $kernelSha
+                initrdSha256 = $got
+                source       = $url
+                fetchedAt    = (Get-Date).ToUniversalTime().ToString('o')
+            }
+            ($manifest | ConvertTo-Json) | Set-Content -LiteralPath $manifestPath -Encoding UTF8 -Force
+            $sizeMb = [math]::Round((Get-Item -LiteralPath $initrd).Length / 1MB, 1)
+            Write-SidecarLog "PXE boot: Debian netboot initrd ready - $httpRel ($sizeMb MB, d-i $build)"
+            return @{ ready = $true; httpRel = $httpRel; dirName = $dirName; diVersion = $build; reason = '' }
+        }
+        $reason = if ($tried -eq 0) { "mirror unreachable ($mirror)" } else { "no d-i build on the mirror matches this ISO's kernel ($tried checked)" }
+    } catch {
+        $reason = $_.Exception.Message
+    }
+    $script:AppPxeBootMemo[$memoKey] = @{ at = [DateTime]::UtcNow; value = $reason }
+    $none.reason = $reason
+    return $none
+}
+
 function Clear-AppPxeBootStaleIsoMountDirs {
     param([Parameter(Mandatory)][System.Collections.Generic.HashSet[string]]$LiveTokens)
     # Migration + housekeeping sweep. The ONLY directories that belong under .mounts are the
@@ -8421,6 +8997,7 @@ function Clear-AppPxeBootStaleIsoMountDirs {
         if ($LiveTokens.Contains($dir.Name)) { continue }
         try {
             if ($IsMacOS -or $IsDarwin) {
+                Dismount-AppPxeBootMacCd9660Path -Path $dir.FullName | Out-Null
                 & hdiutil detach $dir.FullName -force 2>&1 | Out-Null
                 Remove-Item -LiteralPath $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
             } else {
@@ -8470,12 +9047,12 @@ function Mount-AppPxeBootInstallWimIsos {
         $token = Get-AppPxeBootIsoMountToken -IsoFileName $iso.Name
         [void]$live.Add($token)
         $existing = $script:AppPxeBootState.IsoMounts[$token]
-        if ($existing -and $existing.installWim -and (Test-Path -LiteralPath $existing.installWim)) {
+        if ($existing -and $existing.livePath -and (Test-Path -LiteralPath $existing.livePath)) {
             $result.Add($existing) | Out-Null
             continue
         }
         try {
-            Write-SidecarLog "PXE boot: mounting ISO $($iso.Name) (read-only) to serve install.wim in place"
+            Write-SidecarLog "PXE boot: mounting ISO $($iso.Name) (read-only) to serve its boot files in place"
             # Expose the mount INSIDE the Deploy$ share at .mounts/<token> so SMB clients -
             # and an overlay-aware deploy client's scan of Z:\.mounts\*\sources\install.wim -
             # read the real file across the sub-mount.
@@ -8507,8 +9084,30 @@ function Mount-AppPxeBootInstallWimIsos {
                 }
             }
             $resolved = Resolve-AppPxeBootMountInstallWim -MountPath $mountInfo.mountPath
+            $linuxBoot = $null
             if (-not $resolved) {
-                Write-SidecarLog "PXE boot: $($iso.Name) has no install.wim - dismounting"
+                # Not Windows media. A Linux ISO earns its mount the same way: kernel and
+                # initrd served in place, straight off the ISO 9660 volume.
+                $linuxBoot = Resolve-AppPxeBootMountLinuxBoot -MountPath $mountInfo.mountPath -IsoFileName $iso.Name
+                if ($linuxBoot -and ([string]$linuxBoot.layoutId) -like 'debian-installer-*') {
+                    # Installer media: make sure the matching netboot initrd is in the store
+                    # (one download per Debian build; the ISO's own initrd cannot install).
+                    $linuxBoot.codename = Get-AppPxeBootDebianCodename -MountPath $mountInfo.mountPath
+                    $flavour = if (([string]$linuxBoot.layoutId) -like '*-gtk') { 'gtk' } else { 'text' }
+                    try {
+                        $linuxBoot.netboot = Ensure-AppPxeBootDebianNetbootInitrd -Codename ([string]$linuxBoot.codename) -Arch ([string]$linuxBoot.arch) -KernelPath ([string]$linuxBoot.kernelPath) -Flavour $flavour
+                    } catch {
+                        $linuxBoot.netboot = @{ ready = $false; httpRel = ''; dirName = ''; diVersion = ''; reason = $_.Exception.Message }
+                    }
+                    if ($linuxBoot.netboot.ready) {
+                        Write-SidecarLog "PXE boot: $($iso.Name) installs from the mounted ISO via netboot initrd d-i $($linuxBoot.netboot.diVersion) ($($linuxBoot.netboot.httpRel))"
+                    } else {
+                        Write-SidecarLog "PXE boot: $($iso.Name) boots to the installer only - netboot initrd not available ($($linuxBoot.netboot.reason))"
+                    }
+                }
+            }
+            if (-not $resolved -and -not $linuxBoot) {
+                Write-SidecarLog "PXE boot: $($iso.Name) has no install.wim and no recognised Linux boot layout - dismounting"
                 Dismount-AppPxeBootIso -MountInfo $mountInfo
                 continue
             }
@@ -8520,20 +9119,31 @@ function Mount-AppPxeBootInstallWimIsos {
             } catch {
                 Write-SidecarLog "PXE boot: could not write mount label for $token ($($_.Exception.Message))"
             }
+            # One shape for both kinds - every consumer reads the same keys, and under
+            # StrictMode a missing key is a throw, not a $null. livePath is the file whose
+            # disappearance means the mount is gone (install.wim, or the Linux kernel).
             $entry = @{
+                kind        = if ($resolved) { 'windows' } else { 'linux' }
                 isoFileName = $iso.Name
                 isoPath     = $iso.FullName
                 base        = $token
                 displayName = $displayName
                 mountInfo   = $mountInfo
-                sourcesDir  = $resolved.sourcesDir
-                installWim  = $resolved.wim
-                httpPath    = "iso-wim/$token/install.wim"
+                mountRoot   = [string]$mountInfo.mountPath
+                sourcesDir  = if ($resolved) { $resolved.sourcesDir } else { $null }
+                installWim  = if ($resolved) { $resolved.wim } else { $null }
+                livePath    = if ($resolved) { $resolved.wim } else { $linuxBoot.kernelPath }
+                httpPath    = if ($resolved) { "iso-wim/$token/install.wim" } else { "iso-mount/$token/$($linuxBoot.kernelRel)" }
+                linux       = $linuxBoot
             }
             $script:AppPxeBootState.IsoMounts[$token] = $entry
             $result.Add($entry) | Out-Null
-            $sizeGb = [math]::Round((Get-Item -LiteralPath $resolved.wim).Length / 1GB, 2)
-            Write-SidecarLog "PXE boot: serving install.wim for '$displayName' in place at .mounts/$token (${sizeGb} GB, no extract)"
+            if ($resolved) {
+                $sizeGb = [math]::Round((Get-Item -LiteralPath $resolved.wim).Length / 1GB, 2)
+                Write-SidecarLog "PXE boot: serving install.wim for '$displayName' in place at .mounts/$token (${sizeGb} GB, no extract)"
+            } else {
+                Write-SidecarLog "PXE boot: serving Linux boot files for '$($linuxBoot.label)' in place at .mounts/$token ($($linuxBoot.kernelRel) + $($linuxBoot.initrdRel), no extract)"
+            }
         } catch {
             Write-SidecarLog "PXE boot: failed to mount $($iso.Name) - $($_.Exception.Message)"
         }
@@ -8583,8 +9193,8 @@ function Sync-AppPxeBootInstallWimMounts {
     if ($script:AppPxeBootInstallWimMountsCheckedAt -and ($now - $script:AppPxeBootInstallWimMountsCheckedAt).TotalSeconds -lt 20) { return }
     $script:AppPxeBootInstallWimMountsCheckedAt = $now
     $lost = @($state.IsoMounts.Values | Where-Object {
-            $wim = [string]$_.installWim
-            $wim -and -not (Test-Path -LiteralPath $wim)
+            $probe = [string]$_.livePath
+            $probe -and -not (Test-Path -LiteralPath $probe)
         })
     if ($lost.Count -eq 0) { return }
     Write-SidecarLog "PXE boot: $($lost.Count) ISO mount(s) went away while serving ($((@($lost | ForEach-Object { [string]$_.isoFileName })) -join ', ')) - re-mounting"
@@ -8788,9 +9398,11 @@ function Get-AppPxeBootServiceRestartReasons {
         try {
             if (Test-Path -LiteralPath $paths.caddyfile) {
                 $caddyText = Get-Content -LiteralPath $paths.caddyfile -Raw -ErrorAction Stop
+                # Every kind of mount gets the /iso-mount/<token>/ route (Windows ones add
+                # /iso-wim/ on top), so that is the one to look for.
                 $unrouted = @($script:AppPxeBootState.IsoMounts.Values | Where-Object {
                         $base = [string]$_.base
-                        $base -and -not $caddyText.Contains("/iso-wim/$base/")
+                        $base -and -not $caddyText.Contains("/iso-mount/$base/")
                     })
                 if ($unrouted.Count -gt 0) {
                     [void]$reasons.Add("$($unrouted.Count) mounted ISO(s) have no HTTP route yet (routes are written when HTTP starts).")
@@ -8872,10 +9484,7 @@ function Update-AppPxeBootDeploymentShare {
             [void]$warnings.Add("Task sequences not published - $($_.Exception.Message)")
         }
     }
-    # boot.ipxe / menu.ipxe, the TFTP menu + autoexec, and the deploy overlay (published
-    # inside the menu pass, before the initrd lines that depend on it are built).
-    Write-AppPxeBootMenuFiles -SkipTaskSequenceSync
-
+    # Mounts first: the menu's Linux entries are read off the mount map.
     $isoMounts = 0
     if ($httpRunning) {
         try {
@@ -8884,6 +9493,10 @@ function Update-AppPxeBootDeploymentShare {
             [void]$warnings.Add("ISO mounts - $($_.Exception.Message)")
         }
     }
+
+    # boot.ipxe / menu.ipxe, the TFTP menu + autoexec, and the deploy overlay (published
+    # inside the menu pass, before the initrd lines that depend on it are built).
+    Write-AppPxeBootMenuFiles -SkipTaskSequenceSync
 
     $restartReasons = @(Get-AppPxeBootServiceRestartReasons -LanIp $lanIp -HttpRunning $httpRunning -TftpRunning $tftpRunning)
     $deployUnc = $null
@@ -8981,8 +9594,11 @@ function Get-AppPxeBootIsoMountStatus {
                 isoFileName = [string]$_.isoFileName
                 base        = [string]$_.base
                 displayName = [string]$_.displayName
+                kind        = [string]$_.kind
                 installWim  = [string]$_.installWim
                 httpPath    = [string]$_.httpPath
+                bootLabel   = if ($_.linux) { [string]$_.linux.label } else { $null }
+                bootNote    = if ($_.linux) { Get-AppPxeBootLinuxInstallNote -Linux $_.linux } else { $null }
             }
         })
     }
@@ -9202,8 +9818,10 @@ function Remove-AppPxeBootIso {
     if (-not (Test-Path -LiteralPath $dest)) {
         throw "PXE boot: ISO not found: $name"
     }
-    # Release any live mount first - the ISO file is locked while mounted.
-    $mountBase = [IO.Path]::GetFileNameWithoutExtension($name)
+    # Release any live mount first - the ISO file is locked while mounted. Mounts are
+    # keyed by token (Get-AppPxeBootIsoMountToken), not the bare stem - the stem never
+    # matched, so a removed ISO used to keep its mount until the next Start.
+    $mountBase = Get-AppPxeBootIsoMountToken -IsoFileName $name
     if ($script:AppPxeBootState.IsoMounts.ContainsKey($mountBase)) {
         Dismount-AppPxeBootInstallWimIso -Base $mountBase
     }

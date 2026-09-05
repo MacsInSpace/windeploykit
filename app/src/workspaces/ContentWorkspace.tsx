@@ -1163,6 +1163,16 @@ export function ContentWorkspace({
                 {r.fileName}
               </span>
             ) : null}
+            {r.bootKind === "linux" && r.bootLabel ? (
+              <span className="text-[10px]" style={{ color: "var(--text3)" }} title="Mounted in place; the PXE menu boots its kernel and initrd straight off the ISO">
+                PXE menu: {r.bootLabel}
+              </span>
+            ) : null}
+            {r.bootKind === "linux" && r.bootNote ? (
+              <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                {r.bootNote}
+              </span>
+            ) : null}
           </span>
         ),
       },

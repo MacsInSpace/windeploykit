@@ -192,8 +192,14 @@ export interface PxeBootIsoMountEntry {
   isoFileName: string;
   base: string;
   displayName?: string | null;
+  /** 'windows' (install.wim served in place) or 'linux' (kernel + initrd served in place). */
+  kind?: "windows" | "linux" | string;
   installWim?: string | null;
   httpPath: string;
+  /** Linux only: the PXE menu entry text, e.g. "Debian GNU/Linux 13.6.0 Trixie amd64 installer". */
+  bootLabel?: string | null;
+  /** Linux installer media: whether the entry can complete an install (netboot initrd fetched) or only boot the installer. */
+  bootNote?: string | null;
 }
 
 export interface PxeBootIsoMountStatus {
@@ -246,6 +252,12 @@ export interface PxeBootIsoEntry {
   httpPath: string;
   isoUrlRel: string;
   label?: string;
+  /** Live mount state: 'windows', 'linux', or null when not mounted right now (services stopped). */
+  bootKind?: "windows" | "linux" | string | null;
+  /** Linux only: the PXE menu entry this ISO boots as. */
+  bootLabel?: string | null;
+  /** Linux installer media: install-capable (netboot initrd fetched) or boot-only, with the reason. */
+  bootNote?: string | null;
 }
 
 export interface PxeBootOptionalAssetStatus {

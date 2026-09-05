@@ -79,3 +79,54 @@ git add vendor/binaries/pxe-mdt-boot/ sidecar/pxe/mdt-boot-x64/
 TechTools and other WIMs still extract BCD/boot.sdi from their own image when present.
 
 **Do not commit large WIM files** - technicians copy boot WIMs into the store `http/wim/` folder locally.
+
+## Linux ISOs (Debian installer media)
+
+Any library ISO without `sources/install.wim` is probed for a Linux boot layout
+(`$script:AppPxeBootLinuxIsoLayouts` in `PxeBootPlugin.ps1`: Debian `install.amd/`,
+`install.a64/`, Debian Live `live/`). A match is mounted like Windows media and served
+whole at **`/iso-mount/<token>/`**; the menu gets one `lnx_<slug>` item per ISO whose
+handler is `kernel` + `initrd` + `boot` against that route. Nothing is extracted or
+copied - the files stream off the ISO 9660 volume.
+
+macOS cannot `hdiutil attach` a Debian hybrid ISO (its Apple partition map wins and
+hdiutil reports "no mountable file systems"), so `Mount-AppPxeBootIsoReadOnly` falls
+back to `hdiutil attach -nomount` + `mount -t cd9660`, both unprivileged. Dismount has
+to `umount` first - `hdiutil detach -force` refuses with "Resource busy" while the
+volume is mounted.
+
+Boot test: `scripts/test-linux-iso-boot-qemu.sh` (Homebrew qemu, headless, ~2 min).
+
+### Installing, not just booting: the netboot initrd companion
+
+The netinst's own `initrd.gz` is the CD-ROM flavour (cdrom-detect, no net-retriever, no
+NIC modules), so over PXE it stops at "detect and mount installation media". Debian's
+answer is the `netboot` initrd from the mirror, and the mount pass fetches it
+automatically for installer media (`Ensure-AppPxeBootDebianNetbootInitrd`):
+
+- The kernel a d-i build ships is the same file on the ISO (`install.amd/vmlinuz`) and
+  on the mirror (`netboot/.../linux`). Hashing the ISO's kernel and matching it against
+  each build's `SHA256SUMS` under `dists/<codename>/main/installer-<arch>/` proves which
+  d-i build the ISO came from - no version parsing. Dated builds are tried newest first,
+  `current` last.
+- Only that build's graphical `initrd.gz` (~80 MB) is downloaded, SHA256-verified, into
+  store `http/linux/debian/<codename>-<arch>-<sha8>/` with a `manifest.json`. One
+  download per Debian build, shared by every ISO of that build.
+- The menu handler then boots the ISO's kernel with the netboot initrd and tells d-i to
+  use the served ISO tree as its mirror: `mirror/country=manual` (without it d-i
+  ignores the preseeded host and picks a country mirror), `mirror/http/hostname=<lan-ip>:8080`,
+  `mirror/http/directory=/iso-mount/<token>`, `mirror/suite=<codename>`,
+  `debian-installer/allow_unauthenticated=true` (CD trees carry an unsigned Release),
+  `netcfg/choose_interface=auto`. All of it sits BEFORE `---` so none of it leaks into
+  the installed system's bootloader config.
+- Offline, or when no build on the mirror matches the ISO's kernel, the entry falls back
+  to the ISO's own initrd (boots to the installer only) and says so in the menu and in
+  the ISO list. A failed fetch is remembered for 10 minutes so an offline laptop pays
+  one DNS timeout per Start.
+- `APP_DEBIAN_MIRROR` overrides `https://deb.debian.org/debian`.
+
+QEMU verification: `scripts/test-linux-iso-boot-qemu.sh --install` - verified 2026-09-04 with debian-13.6.0-amd64-netinst: d-i accepted the served ISO tree as its mirror (dists/trixie Release + debian-installer Packages.gz), then fetched its udebs from pool/ on the mounted ISO through Caddy.
+
+Not done yet: preseed (naming, users, partitioning), and the installed system's apt
+sources will point at this laptop's ISO tree until a preseed fixes them. Secure Boot
+must be off: the bundled shim trusts the iPXE CA, not a distro kernel key.
