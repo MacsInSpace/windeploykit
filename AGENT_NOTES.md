@@ -3,7 +3,7 @@
 **Read this first.** It is the handover for a fresh session: what this project
 is, where it came from, what is decided, what works, and what is booby-trapped.
 
-**Last updated:** 2026-08-21
+**Last updated:** 2026-09-06 (Linux task sequences merged; `CHANGELOG.md` now exists)
 
 ---
 
@@ -454,8 +454,8 @@ Four differences from the Windows path, all of them load-bearing:
 
 - **Selection happens at boot, not after it.** WinPE shows a picker and copies
   the chosen XML to Panther. d-i is told `preseed/url=` on the kernel command
-  line, so the *PXE menu entry* decides which sequence a machine gets. Nothing
-  wires that yet - see below.
+  line, so the *PXE menu entry* decides which sequence a machine gets. Wired
+  2026-09-05 as the submenu described below.
 - **There is no deploy-time client**, so the `{{SITE}}`/`{{SERIAL}}` half of the
   token model has no counterpart. Everything is concrete at publish time, and
   anything per-machine has to be shell in `late_command`.
@@ -508,9 +508,10 @@ partition recipe.
   from `Get-AppPxeBootLinuxTaskSequenceChoices`: enabled, `platform` debian, and
   the `.cfg` actually on the share. Gate: `scripts/test-linux-menu.ps1`
   (19 checks, no store, no mount). QEMU `--preseed` tier: 2026-09-05: the sequence handler booted, d-i fetched debian-qemu-test.cfg off the share, loaded its components off the ISO and asked nothing up to partitioning, where it stopped with 'No root file system is defined' - the storage-udeb gap (next item), not the menu.
-- Nothing serves the first-boot script. `runScriptUrl` is free text today; it
-  should become a file in the library served over the existing Caddy tree.
-- Ubuntu 20.04+ and RHEL are not covered. **Ubuntu is not a gap in Ubuntu** - it
+- ~~Nothing serves the first-boot script.~~ Done 2026-09-06: `<library>/Scripts/`
+  is served at `/Scripts/`, listed in the editor, and "Add..." copies one in.
+- ~~Ubuntu 20.04+ and RHEL are not covered.~~ Ubuntu done 2026-09-06 (autoinstall,
+  later in this section); RHEL is still open. **Ubuntu is not a gap in Ubuntu** - it
   has `autoinstall` YAML through cloud-init and is better documented than
   preseed. The trap is only that a preseed handed to a modern Ubuntu ISO is
   silently ignored. RHEL/Rocky want kickstart. Both are another `platform`
@@ -521,6 +522,29 @@ partition recipe.
 Gates: `scripts/test-task-sequence-debian.ps1` (22 checks) alongside the existing
 `test-task-sequence-library.ps1` and `test-task-sequence-accounts.ps1`, all green,
 plus `tsc --noEmit`.
+
+### Linux task sequences - state at merge (2026-09-06)
+
+Merged to `main` 2026-09-06 (PR from `feature/linux-task-sequences`, 15 commits).
+`CHANGELOG.md` has the user-facing list; this is the map for the next agent.
+
+| Piece | Where | Gate | Proven live |
+| --- | --- | --- | --- |
+| ISO mount (cd9660 fallback), `lnx_<slug>` entries, Debian netboot-initrd companion | `PxeBootPlugin.ps1`: `Mount-AppPxeBootIsoCd9660`, `$script:AppPxeBootLinuxIsoLayouts`, `Ensure-AppPxeBootDebianNetbootInitrd` | `test-linux-menu.ps1` | QEMU tiers 1-3 |
+| ISO-less Debian entries, Ubuntu ISO rows, catalog Add/Remove | `$script:AppPxeBootDebianNetbootCatalog`, `Add-AppPxeBootLinuxInstaller`, `Start-AppPxeBootLinuxIsoDownload`; handlers `*PxeBootLinuxNetboot` | menu gate | QEMU: ISO-less trixie entry installs |
+| Submenu + handlers with `preseed/url=` / `autoinstall ds=nocloud-net` + `cloud-config-url=` | `Get-AppPxeBootLinuxMenuHandlerLines`, `Add-AppPxeBootDebian*KernelArgs`, `Add-AppPxeBootUbuntuAutoinstallKernelArgs` | menu gate | Debian and Ubuntu tier 4 |
+| Preseed / autoinstall builders, vault first user, crypt SHA-512, Scripts folder, bash steps | `PxeBootTaskSequences.ps1`: `Build-AppPxeBootTaskSequencePreseed`, `Build-AppPxeBootTaskSequenceAutoinstall`, `Get-AppPxeBootTsLateCommandParts`, `Import-AppPxeBootTsScript` | `test-task-sequence-debian.ps1`, `-ubuntu.ps1` | Debian tier 4 with a bash marker step |
+| Windows Script by URL step, encoded-step warning | `Get-AppPxeBootTsStepCommandLine` 'script', `Get-AppPxeBootTsFirstBootScript` | `test-task-sequence-accounts.ps1` | not yet on a real Windows first boot |
+| Editor: platform gating, dropdowns, pickers, Add.../Folder, package picker | `PxeWorkspace.tsx`: `tsPlatform`/`tsIsLinux`, `TS_DEBIAN_FIELD_OPTIONS`, `TS_LINUX_PACKAGE_PICKS`, `importFirstBootScript` | `tsc` | Craig's panel review |
+
+Test leftovers in Craig's store, remove when done: sequences `debian-qemu-test` (carries
+the bash marker step) and `ubuntu-qemu-test`; `ubuntu-24.04.4-live-server-amd64.iso` in the
+library; netboot pairs `trixie-amd64` and `trixie-amd64-e7667ff9`.
+
+Open: RHEL / Rocky kickstart (another `platform`); Secure Boot for Linux entries (the
+bundled shim trusts the iPXE CA only); the Windows Script by URL step wants one real
+first boot; the Linux `cmd` step could take a script by URL too (`wget -qO- | bash`) if
+anyone asks.
 
 ### Scope sweep, 2026-08-21 - removed what is not an MDT/PXE replacement
 

@@ -176,8 +176,12 @@ added before `---`; Interactive carries neither. Interactive is preselected unle
 store's default sequence is a Debian one. A sequence whose "Linux installer" field names a
 release (`debian-<codename>-<arch>`) appears only under that release's entry; a blank one
 appears under every Debian entry. Gate: `scripts/test-linux-menu.ps1`; live:
-`scripts/test-linux-iso-boot-qemu.sh --preseed` (needs a published Debian sequence
-whose disk is `/dev/vda`) - 2026-09-05: the sequence handler booted, d-i fetched debian-qemu-test.cfg off the share, loaded its components off the ISO and asked nothing up to partitioning, where it stopped with 'No root file system is defined' - the storage-udeb gap (next item), not the menu.
+`scripts/test-linux-iso-boot-qemu.sh --preseed` (needs a published sequence whose disk
+is `/dev/vda`; `WDK_LINUX_ENTRY=<entry>` picks the menu entry, `WDK_VM_RAM=8192` for
+Ubuntu). Verified 2026-09-06: Debian (ISO-backed and ISO-less entries) installed
+unattended from deb.debian.org and rebooted, with a bash step logged from in-target;
+Ubuntu 24.04.4 installed unattended from the autoinstall seed with the ISO streamed
+from Caddy and rebooted. The d-i syslog lands in `$TMPDIR/wdk-linux-iso-boot/d-i.syslog`.
 
 First user: typed, or a vault credential whose login/full name/password are resolved at
 publish (password hashed with crypt SHA-512 in the sidecar). A typed password is hashed on

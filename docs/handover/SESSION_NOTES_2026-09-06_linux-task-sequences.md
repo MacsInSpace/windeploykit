@@ -1,43 +1,39 @@
-# Handover: `feature/linux-task-sequences`
+# Session notes - 2026-09-06 - Linux task sequences (merged)
 
-Written 2026-09-05 for the next agent. Craig is starting a fresh session so the
-work does not cross over. Read this, then `AGENT_NOTES.md` - the section
-**"Linux task sequences, 2026-09-05"** is the design record and this is only the
-state of play.
+Started 2026-09-05 as `HANDOVER.md` on `feature/linux-task-sequences` by the agent who
+added Debian task sequences; carried through the merge on 2026-09-06 by the agent who did
+the rest. `AGENT_NOTES.md` sections "Linux ISO boot, 2026-09-04", "Linux task sequences,
+2026-09-05" and "Linux task sequences - state at merge" are the design record;
+`CHANGELOG.md` has the user-facing list. This is the state of play and the traps.
 
 ---
 
 ## 1. Where you are
 
-Branch `feature/linux-task-sequences`, two commits on top of `main` (`bb28b06`):
+Merged to `main` on 2026-09-06 as one pull request from `feature/linux-task-sequences`
+(merge commit, so every commit stays attributable). The branch, oldest first:
 
 ```
-097f5f0  Task sequences know which installer reads them: Windows or Debian   <- mine
-0ff24ee  Linux ISO boot: work in progress, committed as found                <- Craig's
-bb28b06  (main) tools: bundled tools report their real version
+0ff24ee  Linux ISO boot: work in progress, committed as found                  <- Craig's working tree
+097f5f0  Task sequences know which installer reads them: Windows or Debian
+026c9f1  Handover note for the next agent on this branch
+ac31207  handover: ASCII-only, so the gate is green on the branch
+b7a7496  Debian installs from the PXE menu: task-sequence submenu, mirror on the internet, no ISO needed
+d972c05  Task Sequences: the platform decides what the editor shows; Debian fields are dropdowns
+56ca212  Debian task sequences: first user from the vault, passwords hashed, first-boot script from the library
+f95840b  Task Sequences: Vault... shortcut beside the Debian first-user picker
+5428eed  linux: Ubuntu task sequences - live-server ISO from the catalog, Subiquity autoinstall, verified in QEMU
+9e19156  linux: steps run through bash -c and read "Bash"; Extra packages gets a picker of known names
+84a93bc  linux: First-boot script "Add..." copies a script into <library>/Scripts; "Folder" opens it
+6511b43  windows: "Script by URL" first-boot step - irm '<url>' | iex; long EncodedCommand steps are flagged
 ```
 
-**`0ff24ee` is not my work.** The Linux ISO boot work - ISO mount and serve, the
-Debian netboot initrd match, `scripts/test-linux-iso-boot-qemu.sh`,
-`sidecar/pxe/README.md` and its AGENT_NOTES section - was sitting *uncommitted*
-in the working tree on `feature/linux-iso-boot` when I branched. I swept it into
-my own commit by using `git add -A`, then split it back out into its own commit
-so it stays attributable. Content untouched, but **check it is what Craig
-expects before building on it**, and note that `feature/linux-iso-boot` itself
-has no commits beyond `main` - everything was in the working tree.
+**`0ff24ee` is Craig's own uncommitted Linux ISO boot work**, swept into the first
+agent's commit by `git add -A` and split back out so it stays attributable. Check
+`git status` before `git add -A`.
 
-Nothing is pushed. There is no remote branch.
-
-Working tree is clean. All gates pass:
-
-```
-test-task-sequence-debian     22 checks
-test-task-sequence-library    32 entries
-test-task-sequence-accounts
-test-strictmode-shapes
-test-ascii                    257 files
-tsc --noEmit                  clean
-```
+Everything below section 2 was verified in QEMU on this Mac (`scripts/test-linux-iso-boot-qemu.sh`),
+not on real hardware. The Windows Script by URL step has not yet run on a real first boot.
 
 ---
 
@@ -54,6 +50,18 @@ because it is a Windows concept.
 | `app/src/lib/types.ts` | `platform?` on `PxeBootTaskSequence` |
 | `app/src/workspaces/PxeWorkspace.tsx` | Debian field labels, order and defaults; `tsPlatform` / `tsFieldOrder` / `tsFieldLabel`; a platform select on the create row; the list shows the platform for a preseed |
 | `scripts/test-task-sequence-debian.ps1` | New gate, 22 checks |
+
+Added after the handover (2026-09-05 to 2026-09-06), all on the same branch:
+
+| Where | What changed |
+| --- | --- |
+| `sidecar/lib/PxeBootPlugin.ps1` | Linux menu submenu and handlers; mirror kernel args; ISO-less Debian entries and the Linux installers catalog (Debian netboot pairs, Ubuntu ISO rows); Ubuntu casper layout; `cloud-config-none`; Caddy `/Scripts/` (text/plain) and `/iso-mount/` routes |
+| `sidecar/lib/PxeBootTaskSequences.ps1` | `platform: ubuntu` and the autoinstall builder; vault first user + crypt SHA-512; Scripts folder (`Import-/Remove-AppPxeBootTsScript`, `Open-AppPxeBootTsScriptsFolder`); bash steps; Windows `script` step and the batch line-limit warning |
+| `sidecar/handlers/Plugin.PxeBoot.ps1` | `List/Add/RemovePxeBootLinuxNetboot`, `Import/RemovePxeBootTsScript`, `OpenPxeBootTsScriptsFolder` |
+| `app/src/workspaces/PxeWorkspace.tsx` | Platform gating, Linux dropdowns, installer/vault/script pickers with Add... and Folder, package picker, End-of-install steps / Bash, Script by URL step, encoded-length warning |
+| `app/src/workspaces/ContentWorkspace.tsx` | Linux installers table under Operating Systems |
+| `scripts/test-linux-iso-boot-qemu.sh` | Tiers 1-4, entry override, Ubuntu mode, syslog capture, `WDK_VM_RAM` |
+| `scripts/test-linux-menu.ps1`, `test-task-sequence-ubuntu.ps1`, `-debian.ps1`, `-accounts.ps1` | 32 / 22 / 38 / +2 checks |
 
 The worked example throughout is **CampusCast** - Craig's other project, a
 Debian digital-signage receiver that installs unattended and then runs one
