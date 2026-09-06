@@ -87,6 +87,17 @@ export function listGroups(): string[] {
   return out;
 }
 
+/** Window close hides to the menu bar (macOS) / tray (Windows) instead of quitting, so
+ *  PXE and the deployment share keep serving in the background. Tauri host only. */
+export const SETTING_CLOSE_TO_TRAY = defineSetting<boolean>({
+  id: "window.closeToTray",
+  group: "Window",
+  label: "Close to menu bar / tray",
+  description: "Closing the window keeps WinDeployKit running; use File > Exit or the tray menu to quit.",
+  type: "boolean",
+  defaultValue: true,
+});
+
 // ---------- storage layer ----------
 
 const STORAGE_KEY = "windeploykit.settings.v1";

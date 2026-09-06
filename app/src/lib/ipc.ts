@@ -12,6 +12,7 @@ import type {
   SidecarEvent,
   SidecarErrorCode,
 } from "./types";
+import { isTauri } from "./tauriEnv";
 
 const SIDECAR_INVOKE_CMD = "sidecar_invoke";
 const SIDECAR_RESTART_CMD = "sidecar_restart";
@@ -140,6 +141,37 @@ export function onSidecarEvent(handler: SidecarEventHandler): Promise<UnlistenFn
 
 export function onSidecarLog(handler: SidecarLogHandler): Promise<UnlistenFn> {
   return listen<string>(SIDECAR_LOG_CHANNEL, (e) => handler(e.payload));
+}
+
+// -- tray / window (Rust host; no-ops outside Tauri) --------------------------------
+
+export type TrayAction = "open" | "quit" | string;
+
+/** Push the close-to-tray preference to the host (lib/tray.ts does this at boot and on change). */
+export async function setCloseToTray(enabled: boolean): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("set_close_to_tray", { enabled });
+}
+
+/** Tray tooltip: the product name, with the PXE server URL while it runs. */
+export async function setTrayTooltip(text: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("set_tray_tooltip", { text });
+}
+
+/** Real exit (bypasses close-to-tray). The host stops the sidecar on the way out. */
+export async function appExit(): Promise<void> {
+  if (!isTauri()) {
+    window.close();
+    return;
+  }
+  await invoke<void>("app_exit");
+}
+
+/** The tray menu's verbs reach the webview here (Open is handled by the host itself). */
+export function onTrayAction(handler: (action: TrayAction) => void): Promise<UnlistenFn> {
+  if (!isTauri()) return Promise.resolve(() => undefined);
+  return listen<{ action: string }>("tray://action", (e) => handler(e.payload?.action ?? ""));
 }
 
 export const sidecar = {

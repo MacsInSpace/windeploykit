@@ -27,6 +27,8 @@ export interface MenuItem {
   isHeading?: boolean;
   /** Accelerator shown right-aligned, MMC style - "F5", "Alt+Enter". */
   accel?: string;
+  /** A toggle: set to render a check column (x when on), as in AdobeUpdateKit. */
+  checked?: boolean;
   /** Nested items ("New >"). */
   children?: MenuItem[];
 }
@@ -178,7 +180,8 @@ export function MenuSurface({
             <button
               key={`${item.label}-${i}`}
               type="button"
-              role="menuitem"
+              role={item.checked !== undefined ? "menuitemcheckbox" : "menuitem"}
+              aria-checked={item.checked}
               className={[
                 "ctx-item",
                 item.isDefault ? "is-default" : "",
@@ -210,6 +213,11 @@ export function MenuSurface({
                 }
               }}
             >
+              {item.checked !== undefined && (
+                <span className="ctx-check mono" aria-hidden="true">
+                  {item.checked ? "x" : ""}
+                </span>
+              )}
               <span>{item.label}</span>
               {item.accel && !item.children && <span className="ctx-accel">{item.accel}</span>}
               {item.children && (

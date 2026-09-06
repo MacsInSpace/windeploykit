@@ -25,6 +25,7 @@ import { SETTING_SETUP_COMPLETED } from "./lib/setupSettings";
 import { getSetting } from "./lib/settings";
 import { pushImageLibraryRoot } from "./lib/imageLibrary";
 import { ensureSidecarStarted } from "./lib/sidecarBoot";
+import { startTrayIntegration } from "./lib/tray";
 
 export default function App() {
   const [setupOpen, setSetupOpen] = useState(() => !getSetting(SETTING_SETUP_COMPLETED));
@@ -32,6 +33,8 @@ export default function App() {
   // Start the sidecar. The Rust host waits for this call; nothing else makes it.
   useEffect(() => {
     void ensureSidecarStarted();
+    // Tray / menu-bar icon: push the close-to-tray preference and answer its Quit.
+    startTrayIntegration();
   }, []);
 
   // The sidecar keys promote, import, Caddy routes and the SMB share off the

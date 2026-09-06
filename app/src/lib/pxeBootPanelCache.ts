@@ -4,6 +4,7 @@ import type {
   PxeBootWimLibraryResponse,
 } from "./types";
 import { getCached, setCached } from "./queryCache";
+import { pushTrayTooltip } from "./tray";
 
 /** In-memory cache key - survives Netboot panel unmount/remount. */
 export const PXE_BOOT_CONFIG_CACHE_KEY = "pxe-boot:config";
@@ -18,6 +19,9 @@ export function setPxeBootPanelData(data: PxeBootPluginConfigResponse): void {
     data,
     fetchedAt: Date.now(),
   });
+  // Every status that lands here (load, Start, Stop, the housekeeping refresh) also
+  // sets the tray tooltip, so it shows the serving URL without the panel being open.
+  pushTrayTooltip(data.status);
 }
 
 export function patchPxeBootPanelData(

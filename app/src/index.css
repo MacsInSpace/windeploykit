@@ -1561,6 +1561,17 @@ body.is-resizing {
   padding-left: 14px;
 }
 
+/* Check column of a toggle item ("Close to menu bar"): fixed width so labels line up
+   whether or not the item is on. */
+.ctx-check {
+  display: inline-block;
+  width: 12px;
+  margin-right: 4px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text2);
+}
+
 .ctx-item:hover:not(:disabled) .ctx-accel,
 .ctx-item:hover:not(:disabled) .ctx-submenu-marker {
   color: inherit;
