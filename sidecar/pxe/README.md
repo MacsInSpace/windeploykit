@@ -79,3 +79,124 @@ git add vendor/binaries/pxe-mdt-boot/ sidecar/pxe/mdt-boot-x64/
 TechTools and other WIMs still extract BCD/boot.sdi from their own image when present.
 
 **Do not commit large WIM files** - technicians copy boot WIMs into the store `http/wim/` folder locally.
+
+## Linux ISOs (Debian installer media)
+
+Any library ISO without `sources/install.wim` is probed for a Linux boot layout
+(`$script:AppPxeBootLinuxIsoLayouts` in `PxeBootPlugin.ps1`: Debian `install.amd/`,
+`install.a64/`, Debian Live `live/`). A match is mounted like Windows media and served
+whole at **`/iso-mount/<token>/`**; the menu gets one `lnx_<slug>` item per ISO whose
+handler is `kernel` + `initrd` + `boot` against that route. Nothing is extracted or
+copied - the files stream off the ISO 9660 volume.
+
+macOS cannot `hdiutil attach` a Debian hybrid ISO (its Apple partition map wins and
+hdiutil reports "no mountable file systems"), so `Mount-AppPxeBootIsoReadOnly` falls
+back to `hdiutil attach -nomount` + `mount -t cd9660`, both unprivileged. Dismount has
+to `umount` first - `hdiutil detach -force` refuses with "Resource busy" while the
+volume is mounted.
+
+Boot test: `scripts/test-linux-iso-boot-qemu.sh` (Homebrew qemu, headless, ~2 min).
+
+### Installing, not just booting: the netboot initrd companion
+
+The netinst's own `initrd.gz` is the CD-ROM flavour (cdrom-detect, no net-retriever, no
+NIC modules), so over PXE it stops at "detect and mount installation media". Debian's
+answer is the `netboot` initrd from the mirror, and the mount pass fetches it
+automatically for installer media (`Ensure-AppPxeBootDebianNetbootInitrd`):
+
+- The kernel a d-i build ships is the same file on the ISO (`install.amd/vmlinuz`) and
+  on the mirror (`netboot/.../linux`). Hashing the ISO's kernel and matching it against
+  each build's `SHA256SUMS` under `dists/<codename>/main/installer-<arch>/` proves which
+  d-i build the ISO came from - no version parsing. Dated builds are tried newest first,
+  `current` last.
+- Only that build's graphical `initrd.gz` (~80 MB) is downloaded, SHA256-verified, into
+  store `http/linux/debian/<codename>-<arch>-<sha8>/` with a `manifest.json`. One
+  download per Debian build, shared by every ISO of that build.
+- The menu handler then boots the ISO's kernel with the netboot initrd and tells d-i to
+  use the Debian mirror: `mirror/country=manual` (without it d-i ignores the preseeded
+  host and picks a country mirror), `mirror/http/hostname=deb.debian.org`,
+  `mirror/http/directory=/debian`, `mirror/suite=<codename>`,
+  `netcfg/choose_interface=auto`. All of it sits BEFORE `---` so none of it leaks into
+  the installed system's bootloader config. Not the ISO tree: a netinst omits the
+  storage-driver udebs the netboot initrd needs (2026-09-06), and the internet mirror
+  is signed and always current. `APP_DEBIAN_MIRROR` overrides the mirror base.
+- Offline, or when no build on the mirror matches the ISO's kernel, the entry falls back
+  to the ISO's own initrd (boots to the installer only) and says so in the menu and in
+  the ISO list. A failed fetch is remembered for 10 minutes so an offline laptop pays
+  one DNS timeout per Start.
+- `APP_DEBIAN_MIRROR` overrides `https://deb.debian.org/debian`.
+
+QEMU verification: `scripts/test-linux-iso-boot-qemu.sh --install` - verified 2026-09-04 with debian-13.6.0-amd64-netinst: d-i accepted the served ISO tree as its mirror (dists/trixie Release + debian-installer Packages.gz), then fetched its udebs from pool/ on the mounted ISO through Caddy.
+
+### No ISO at all: Linux network installers
+
+Since the mirror supplies drivers and packages, a Debian install needs only the netboot
+kernel and initrd. Operating Systems > **Linux network installers** lists Debian 13 and 12
+for amd64 and arm64; **Add** fetches the mirror's current gtk `linux` + `initrd.gz`
+(about 95 MB) into store `http/linux/debian/<codename>-<arch>/` with a `manifest.json`
+(SHA256SUMS-verified, dated d-i build recorded), and the PXE menu gets
+`Debian 13 (trixie) amd64 installer (network)` with the task-sequence submenu. **Remove**
+drops the directory and the entry. Add on an already-current pair downloads nothing.
+
+### Ubuntu: the ISO is the installer
+
+Ubuntu 22.04+ has no d-i and no netboot installer. The Linux installers catalog offers
+Ubuntu 24.04 and 22.04 Server; **Add** downloads the current live-server ISO into the
+library through Transfers (SHA256SUMS-verified). Mounted, its `casper/vmlinuz` and
+`casper/initrd` boot straight off the mount with `ip=dhcp url=<the ISO over Caddy>`;
+casper fetches the whole ISO into RAM and runs Subiquity from it, and packages come from
+the Ubuntu archive. An Ubuntu task sequence compiles to a Subiquity autoinstall published
+as `TaskSequences/autoinstall/<id>/user-data` + `meta-data`; its handler adds
+`autoinstall ds=nocloud-net;s=<seed directory>/ cloud-config-url=<seed>/user-data`. The
+`cloud-config-url=` is load-bearing: cloud-init also treats a kernel `url=` as its
+cloud-config and would otherwise read the whole ISO into memory (OOM, seen 2026-09-06);
+the Interactive entry points it at an empty cloud-config the menu regen writes. Debian and Ubuntu sequences only ever
+appear under entries of their own platform.
+
+### Windows: a Script by URL step
+
+A Windows sequence's first-boot steps run from `<id>.firstboot.cmd`, one cmd line each,
+and cmd refuses a line over 8191 characters - so a whole script as an `-EncodedCommand`
+step (8/3 of its length in base64) fails past about 3 KB. The **Script by URL** step is
+the fix: pick a `.ps1` from `<library>/Scripts/` (**Add...** copies one in) or give a URL,
+and the batch line is `powershell -Command "irm '<url>' | iex"` - the script streams from
+Caddy's `/Scripts/` (served as `text/plain`) at first boot, as SYSTEM, any length. The
+panel flags an encoded step that is over the limit. The Scripts folder is shared: the
+Linux First-boot script picker hides `.ps1`, the Windows step shows only `.ps1`.
+
+### Task sequences reach the installer through the menu
+
+d-i reads `preseed/url=` off the kernel command line, so the menu entry decides which
+task sequence a machine gets (there is no WinPE-style picker after boot). An
+install-capable Debian entry with published Debian sequences (`platform: debian`,
+enabled, `<id>.cfg` on the share) is a submenu: one item per sequence, `Interactive
+install (no task sequence)`, `Back`. A sequence handler boots the same kernel and
+netboot initrd with `auto=true priority=critical preseed/url=${http_base}/TaskSequences/<id>.cfg`
+added before `---`; Interactive carries neither. Interactive is preselected unless the
+store's default sequence is a Debian one. A sequence whose "Linux installer" field names a
+release (`debian-<codename>-<arch>`) appears only under that release's entry; a blank one
+appears under every Debian entry. Gate: `scripts/test-linux-menu.ps1`; live:
+`scripts/test-linux-iso-boot-qemu.sh --preseed` (needs a published sequence whose disk
+is `/dev/vda`; `WDK_LINUX_ENTRY=<entry>` picks the menu entry, `WDK_VM_RAM=8192` for
+Ubuntu). Verified 2026-09-06: Debian (ISO-backed and ISO-less entries) installed
+unattended from deb.debian.org and rebooted, with a bash step logged from in-target;
+Ubuntu 24.04.4 installed unattended from the autoinstall seed with the ISO streamed
+from Caddy and rebooted. The d-i syslog lands in `$TMPDIR/wdk-linux-iso-boot/d-i.syslog`.
+
+First user: typed, or a vault credential whose login/full name/password are resolved at
+publish (password hashed with crypt SHA-512 in the sidecar). A typed password is hashed on
+save; only the hash is stored or published. First-boot script: a file in
+`<library>/Scripts/` (served at `/Scripts/`, listed in the panel; **Add...** copies one in
+from this machine, checking for a `#!` first line and fixing CRLF, **Folder** opens the
+folder) or a custom URL. Nothing is copied at publish: the installer fetches the script
+over HTTP at the end of the install into `/usr/local/sbin/wdk-run` in the target; it runs
+on the first boot of the installed system through a one-shot systemd unit, with the
+network up. Steps (the panel calls them "End-of-install steps" on Linux) are different:
+each is `bash -c '<command>'` run in-target as root at the end of the install, before
+the reboot, with no services running - d-i's late_command, or a curtin in-target
+late-command under Subiquity. Extra packages: free text plus a picker of known names
+that exist in both the Debian and Ubuntu archives.
+
+Still open: Secure Boot must be off (the bundled shim trusts the iPXE CA, not a distro
+kernel key). With the mirror on the internet the installed system's apt sources are the
+normal Debian ones.

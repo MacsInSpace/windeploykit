@@ -25,6 +25,8 @@ import type {
   Aria2TrackerDriverRow,
   Aria2TrackerOemIsoRow,
   PxeBootIsoEntry,
+  PxeBootLinuxNetbootEntry,
+  PxeBootLinuxNetbootResponse,
   EvalIsoCatalogResponse,
   EvalIsoDownloadAllResponse,
   EvalIsoEntry,
@@ -223,6 +225,9 @@ export function ContentWorkspace({
   // What is actually in the ISO store: downloaded evaluation media and anything imported
   // by hand. This is the list that answers "where did my ISO go".
   const [storeIsos, setStoreIsos] = useState<PxeBootIsoEntry[]>([]);
+  // Debian network installers: no ISO, kernel + initrd from the mirror kept in the store.
+  const [linuxNetboot, setLinuxNetboot] = useState<PxeBootLinuxNetbootResponse | null>(null);
+  const [linuxNetbootBusy, setLinuxNetbootBusy] = useState<string | null>(null);
   const [isoBusy, setIsoBusy] = useState(false);
   const [imageRootPreview, setImageRootPreview] = useState("");
   const [imageFreeBytes, setImageFreeBytes] = useState<number | null>(null);
@@ -329,6 +334,65 @@ export function ContentWorkspace({
       }
     },
     [loadStoreIsos],
+  );
+
+  const loadLinuxNetboot = useCallback(async () => {
+    try {
+      const data = await sidecar.invoke<PxeBootLinuxNetbootResponse>("ListPxeBootLinuxNetboot", await aria2SidecarParams());
+      setLinuxNetboot(data ?? null);
+    } catch (e) {
+      toast.error("Linux installers", e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  // Add fetches the current netboot kernel + initrd (about 95 MB) from the Debian mirror
+  // and verifies them against its SHA256SUMS; the PXE menu gets the entry on return.
+  const addLinuxNetboot = useCallback(
+    async (row: PxeBootLinuxNetbootEntry) => {
+      setLinuxNetbootBusy(row.id);
+      try {
+        toast.info("Linux installers", `Fetching ${row.label} ${row.arch} netboot files from the Debian mirror...`);
+        const data = await sidecar.invoke<PxeBootLinuxNetbootResponse & { updated?: boolean; queued?: boolean; fileName?: string }>(
+          "AddPxeBootLinuxNetboot",
+          await aria2SidecarParams({ id: row.id, codename: row.codename, arch: row.arch }),
+        );
+        setLinuxNetboot(data ?? null);
+        if (data?.queued) {
+          toast.info("Linux installers", `${data.fileName ?? "ISO"} is downloading - see Transfers. The menu entry appears when it lands.`);
+          void refreshDownloads();
+        } else {
+          toast.success(
+            "Linux installers",
+            data?.updated ? `${row.label} ${row.arch} is on the PXE menu.` : `${row.label} ${row.arch} was already current.`,
+          );
+        }
+      } catch (e) {
+        toast.error("Linux installers", e instanceof Error ? e.message : String(e));
+      } finally {
+        setLinuxNetbootBusy(null);
+      }
+    },
+    [],
+  );
+
+  const removeLinuxNetboot = useCallback(
+    async (row: PxeBootLinuxNetbootEntry) => {
+      setLinuxNetbootBusy(row.id);
+      try {
+        const data = await sidecar.invoke<PxeBootLinuxNetbootResponse>(
+          "RemovePxeBootLinuxNetboot",
+          await aria2SidecarParams({ id: row.id, codename: row.codename, arch: row.arch }),
+        );
+        void loadStoreIsos();
+        setLinuxNetboot(data ?? null);
+        toast.info("Linux installers", `${row.label} ${row.arch} removed from the PXE menu.`);
+      } catch (e) {
+        toast.error("Linux installers", e instanceof Error ? e.message : String(e));
+      } finally {
+        setLinuxNetbootBusy(null);
+      }
+    },
+    [],
   );
 
   const refreshEvalIso = useCallback(async () => {
@@ -507,8 +571,9 @@ export function ContentWorkspace({
     void loadTracker();
     void loadEvalIso();
     void loadStoreIsos();
+    void loadLinuxNetboot();
     void refreshImageDestination();
-  }, [loadConfig, loadEvalIso, loadStoreIsos, loadTracker, refreshImageDestination]);
+  }, [loadConfig, loadEvalIso, loadLinuxNetboot, loadStoreIsos, loadTracker, refreshImageDestination]);
 
   const ensureBinary = useCallback(async () => {
     setInstallBusy(true);
@@ -629,6 +694,7 @@ export function ContentWorkspace({
           void loadTracker();
           void loadEvalIso();
           void loadStoreIsos();
+          void loadLinuxNetboot();
           void refreshImageDestination();
         } else if (data?.message) {
           toast.error("aria2 promote", data.message);
@@ -1163,6 +1229,16 @@ export function ContentWorkspace({
                 {r.fileName}
               </span>
             ) : null}
+            {r.bootKind === "linux" && r.bootLabel ? (
+              <span className="text-[10px]" style={{ color: "var(--text3)" }} title="Mounted in place; the PXE menu boots its kernel and initrd straight off the ISO">
+                PXE menu: {r.bootLabel}
+              </span>
+            ) : null}
+            {r.bootKind === "linux" && r.bootNote ? (
+              <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                {r.bootNote}
+              </span>
+            ) : null}
           </span>
         ),
       },
@@ -1186,6 +1262,67 @@ export function ContentWorkspace({
       },
     ],
     [isoBusy, removeIso],
+  );
+
+  // Debian network installers: one row per release x arch the app offers. Ready rows are
+  // on the PXE menu (with the task-sequence submenu); Add fetches the pair, Remove drops it.
+  const linuxNetbootColumns: DataTableColumn<PxeBootLinuxNetbootEntry>[] = useMemo(
+    () => [
+      {
+        key: "release",
+        label: "Linux installer",
+        sortValue: (r) => `${r.label} ${r.arch}`,
+        render: (r) => (
+          <span className="flex flex-col">
+            <span>
+              {r.label} {r.arch}
+            </span>
+            <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+              {r.kind === "iso"
+                ? r.ready
+                  ? `on the PXE menu - ${r.isoFileName ?? "ISO"} (${formatBytes(r.sizeBytes)}) in the library`
+                  : "not fetched - Add downloads the installer ISO (a few GB) into the library through Transfers"
+                : r.ready
+                  ? `on the PXE menu - netboot d-i ${r.diVersion || "current"}, ${formatBytes(r.sizeBytes)} in the store`
+                  : "not fetched - Add downloads the kernel and initrd from the mirror"}
+            </span>
+          </span>
+        ),
+      },
+      {
+        key: "state",
+        label: "State",
+        width: 90,
+        sortValue: (r) => (r.ready ? 1 : 0),
+        render: (r) => (r.ready ? "Ready" : "-"),
+      },
+      {
+        key: "actions",
+        label: "",
+        width: 80,
+        sortValue: () => "",
+        render: (r) => (
+          <button
+            type="button"
+            className="table-action"
+            disabled={linuxNetbootBusy !== null}
+            title={
+              r.ready
+                ? r.kind === "iso"
+                  ? "Remove the ISO from the library and the menu entry"
+                  : "Remove the netboot files and the menu entry"
+                : r.kind === "iso"
+                  ? "Download the current installer ISO into the library (progress under Transfers); the menu entry appears when it lands"
+                  : "Fetch the current netboot kernel and initrd (about 95 MB) and add the menu entry"
+            }
+            onClick={() => void (r.ready ? removeLinuxNetboot(r) : addLinuxNetboot(r))}
+          >
+            {linuxNetbootBusy === r.id ? "Working..." : r.ready ? "Remove" : "Add"}
+          </button>
+        ),
+      },
+    ],
+    [addLinuxNetboot, linuxNetbootBusy, removeLinuxNetboot],
   );
 
   // Microsoft Evaluation Center rows. Progress rides the same driver-download-progress
@@ -1800,6 +1937,23 @@ export function ContentWorkspace({
               ) : (
                 <DataTable columns={isoColumns} rows={isoRows} rowKey={(r) => r.fileName} />
               )}
+              <div className="mt-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="mono text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text3)" }}>
+                    Linux installers ({(linuxNetboot?.entries ?? []).filter((r) => r.ready).length}/{linuxNetboot?.entries?.length ?? 0})
+                  </h3>
+                  <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                    Debian: kernel and initrd from {linuxNetboot?.mirror ?? "the Debian mirror"}, no ISO. Ubuntu: the live-server ISO, downloaded into the library. Packages install straight from each distro&apos;s archive
+                  </span>
+                </div>
+                {(linuxNetboot?.entries?.length ?? 0) > 0 ? (
+                  <DataTable columns={linuxNetbootColumns} rows={linuxNetboot?.entries ?? []} rowKey={(r) => r.id} />
+                ) : (
+                  <p className="text-[11px]" style={{ color: "var(--text2)" }}>
+                    Waiting for the sidecar...
+                  </p>
+                )}
+              </div>
               {oemRows.length > 0 && (
                 <div className="mt-2">
                   <h3 className="mono mb-2 text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text3)" }}>

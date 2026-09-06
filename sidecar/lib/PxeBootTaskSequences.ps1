@@ -194,6 +194,14 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
     # Sections replaced kinds (Craig, 2026-08-19): only the client/server role
     # remains; the old OOBE variant is simply a client with no join domain.
     if ($kind -notin @('client', 'server')) { $kind = 'client' }
+    # Which installer consumes this sequence. Windows means unattend.xml; debian
+    # means a d-i preseed. Absent means windows, so every sequence written before
+    # this existed keeps working untouched.
+    $platform = ([string](Get-AppPxeBootTsProp -Item $Item -Name 'platform')).Trim().ToLowerInvariant()
+    if ($platform -notin @('windows', 'debian', 'ubuntu')) { $platform = 'windows' }
+    # kind is a Windows role. A preseed has no client/server split, and leaving a
+    # stale 'server' on it would show the wrong fields in the panel.
+    if ($platform -ne 'windows') { $kind = '' }
     $fieldsIn = Get-AppPxeBootTsProp -Item $Item -Name 'fields'
     $fields = [ordered]@{}
     if ($fieldsIn) {
@@ -203,6 +211,16 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         foreach ($n in $names) {
             $fields[[string]$n] = [string](Get-AppPxeBootTsProp -Item $fieldsIn -Name ([string]$n))
         }
+    }
+    # Debian: a password typed in the panel arrives as fields.userPassword and is hashed
+    # here - only userPasswordCrypted is ever stored or published. A blank one keeps the
+    # hash already saved.
+    if ($platform -in @('debian', 'ubuntu') -and $fields.Contains('userPassword')) {
+        $plainPw = [string]$fields['userPassword']
+        if (-not [string]::IsNullOrEmpty($plainPw)) {
+            $fields['userPasswordCrypted'] = ConvertTo-AppPxeBootTsSha512Crypt -Password $plainPw
+        }
+        $fields.Remove('userPassword')
     }
     # Heal the wrapper leak (pre-2026-08-20 the payload stringified the raw
     # override object into the dropdown, and it could get saved):
@@ -218,12 +236,20 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         # pwshEncoded carries a whole script as one step (the Server evaluation
         # conversion is one). Leaving it off this list silently deleted that step on
         # the first save - caught 2026-08-22.
-        if ($type -notin @('reg', 'cmd', 'pwsh', 'pwshencoded')) { continue }
+        # script (2026-09-06): a library .ps1 or a URL, streamed at first boot with
+        # irm | iex - Craig: long EncodedCommand steps fail (cmd's 8191-char line).
+        if ($type -notin @('reg', 'cmd', 'pwsh', 'pwshencoded', 'script')) { continue }
         $step = [ordered]@{
             type        = if ($type -eq 'pwshencoded') { 'pwshEncoded' } else { $type }
             description = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'description')).Trim()
         }
-        if ($type -eq 'reg') {
+        if ($type -eq 'script') {
+            $file = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'file')).Trim()
+            $url = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'url')).Trim()
+            $step.file = if ($file -and (Test-AppPxeBootTsScriptFileName -Name $file)) { $file } else { '' }
+            $step.url = if (-not $step.file -and $url -match '^https?://\S+$') { $url } else { '' }
+            if (-not $step.file -and -not $step.url) { continue }
+        } elseif ($type -eq 'reg') {
             $op = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'op')).Trim().ToLowerInvariant()
             $step.op = if ($op -eq 'delete') { 'delete' } else { 'add' }
             $step.path = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'path')).Trim()
@@ -320,6 +346,7 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         enabled     = [bool](Get-AppPxeBootTsProp -Item $Item -Name 'enabled')
         fields      = $fields
         adminGroups = $adminGroups
+        platform    = $platform
         steps       = $steps
     }
     if ($localAccount) { $record['localAccount'] = $localAccount }
@@ -563,6 +590,18 @@ function Get-AppPxeBootTsStepCommandLine {
             }
         }
         'pwsh' { "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"$(([string]$Step.command) -replace '"', '\"')`"" }
+        # A script by URL, streamed and run in one go (Craig, 2026-09-06: "irm ... | iex").
+        # Nothing is embedded, so there is no line-length limit - the reason this exists.
+        # Runs from firstboot.cmd, a batch file: % would expand (and %2 in %20 is an
+        # argument), so it is doubled; quotes and spaces cannot be in a usable URL.
+        'script' {
+            $u = Resolve-AppPxeBootTsScriptStepUrl -Step $Step
+            if (-not $u) { "rem script step skipped - no library script or URL" }
+            else {
+                $u = (($u -replace '["'' ]', '') -replace '%', '%%')
+                "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm '$u' | iex`""
+            }
+        }
         # A whole script as one step: base64 (UTF-16LE, what -EncodedCommand wants) so
         # quoting cannot break the generated line, however long or nested the script is.
         # The step still stores readable text, so the panel can show and edit it.
@@ -573,6 +612,21 @@ function Get-AppPxeBootTsStepCommandLine {
         default { "cmd /c $([string]$Step.command)" }
     }
 }
+
+function Resolve-AppPxeBootTsScriptStepUrl {
+    # Where a script step fetches from: a library file under this machine's /Scripts/
+    # (resolved at publish, like the Linux first-boot script) or the step's own URL.
+    param([Parameter(Mandatory)]$Step)
+    $file = [string](Get-AppPxeBootTsProp -Item $Step -Name 'file')
+    if ($file -and (Test-AppPxeBootTsScriptFileName -Name $file)) { return "$(Get-AppPxeBootTsScriptsBaseUrl)/$file" }
+    $url = ([string](Get-AppPxeBootTsProp -Item $Step -Name 'url')).Trim()
+    if ($url -match '^https?://\S+$') { return $url }
+    return ''
+}
+
+# cmd.exe reads a batch file one line at a time and refuses a line over this; an
+# -EncodedCommand step is 8/3 of its script's length, so a 3 KB script is already over.
+$script:AppPxeBootTsBatchLineLimit = 8191
 
 function Test-AppPxeBootTsIsEvalConversionStep {
     # The eval->licensed conversion no longer rides in the unattend: it is a 9KB
@@ -619,7 +673,15 @@ function Get-AppPxeBootTsFirstBootScript {
         # A one-line echo of the step name, then the step itself, both logged. The step
         # line is the same one the unattend used to carry (reg/cmd/pwsh/encoded).
         [void]$lines.Add("echo %DATE% %TIME% [$n] $($desc -replace '[<>|&%]', ' ')>>`"%LOG%`"")
-        [void]$lines.Add((Get-AppPxeBootTsStepCommandLine -Step $step) + ' >>"%LOG%" 2>&1')
+        $stepLine = (Get-AppPxeBootTsStepCommandLine -Step $step) + ' >>"%LOG%" 2>&1'
+        if ($stepLine.Length -gt $script:AppPxeBootTsBatchLineLimit) {
+            # Emitted anyway (the sequence is the user's), but flagged in the batch, the
+            # log and the sidecar log: cmd silently mangles a line this long.
+            Write-SidecarLog "Task sequences: step [$n] '$desc' is $($stepLine.Length) characters - over cmd's $($script:AppPxeBootTsBatchLineLimit)-character line limit; put the script in the Scripts folder and use a Script step"
+            [void]$lines.Add("echo %DATE% %TIME% [$n] WARNING: step line is $($stepLine.Length) characters, over cmd's $($script:AppPxeBootTsBatchLineLimit) limit - use a Script step>>`"%LOG%`"")
+            [void]$lines.Add("rem WARNING: the next line is over cmd's line limit and will not run as written")
+        }
+        [void]$lines.Add($stepLine)
     }
     [void]$lines.Add('echo %DATE% %TIME% first-boot steps done>>"%LOG%"')
     ($lines -join "`r`n") + "`r`n"
@@ -1364,9 +1426,15 @@ function Sync-AppPxeBootTaskSequenceStore {
     $dir = Get-AppPxeBootTaskSequenceLibraryDir
     if (-not $dir) { return @{ published = 0; dir = $null } }
     if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
+    # <library>/Scripts: first-boot scripts a Linux sequence can name; served by Caddy.
+    try { $null = Initialize-AppPxeBootTsScriptsDir } catch {
+        Write-SidecarLogVerbose "Task sequences: Scripts folder not created - $($_.Exception.Message)"
+    }
 
     $published = 0
     $keep = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    # autoinstall/<id>/ directories that belong to enabled Ubuntu sequences.
+    $keepDirs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $indexRows = @()
     # One cheap catalog read for the whole publish (cached edition lists, no mounting).
     $catalog = $null
@@ -1385,16 +1453,55 @@ function Sync-AppPxeBootTaskSequenceStore {
     foreach ($seq in @(Read-AppPxeBootTaskSequences)) {
         $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq
         if ($null -eq $rec -or -not [bool]$rec.enabled) { continue }
-        $xml = Build-AppPxeBootTaskSequenceUnattendXml -Sequence $rec
-        if (-not $xml) { continue }
-        $file = Join-Path $dir "$($rec.id).xml"
-        # CRLF for Windows-side consumers; idempotent write (skip when unchanged).
-        $body = ($xml -replace "`r`n", "`n") -replace "`n", "`r`n"
+        # Ubuntu: cloud-init NoCloud wants a DIRECTORY - user-data + meta-data - fetched
+        # from .../autoinstall/<id>/ (the trailing slash matters to cloud-init). LF only,
+        # like the preseed. The keep sentinel <id>.autoinstall never matches a flat file.
+        if ([string]$rec.platform -eq 'ubuntu') {
+            $rendered = Build-AppPxeBootTaskSequenceAutoinstall -Sequence $rec
+            if (-not $rendered) { continue }
+            $aiDir = Join-Path (Join-Path $dir 'autoinstall') $rec.id
+            if (-not (Test-Path -LiteralPath $aiDir)) { $null = New-Item -Path $aiDir -ItemType Directory -Force }
+            $utf8 = New-Object System.Text.UTF8Encoding $false
+            foreach ($pair in @(@{ name = 'user-data'; body = ($rendered -replace "`r`n", "`n") }, @{ name = 'meta-data'; body = "instance-id: wdk-$($rec.id)`n" })) {
+                $target = Join-Path $aiDir $pair.name
+                $have = if (Test-Path -LiteralPath $target) { Get-Content -LiteralPath $target -Raw -ErrorAction SilentlyContinue } else { $null }
+                if ($have -ne $pair.body) { [System.IO.File]::WriteAllText($target, $pair.body, $utf8) }
+            }
+            [void]$keepDirs.Add([string]$rec.id)
+            [void]$keep.Add("$($rec.id).autoinstall")
+            $published++
+            $indexRows += , [ordered]@{
+                id              = [string]$rec.id
+                name            = [string]$rec.name
+                kind            = ''
+                platform        = 'ubuntu'
+                file            = "autoinstall/$($rec.id)/user-data"
+                firstBootAction = ''
+                image           = $null
+            }
+            continue
+        }
+        # Which answer file this sequence compiles to. Windows wants CRLF for
+        # its own consumers; a preseed is read by the Debian installer and LF is
+        # not optional there - d-i takes the CR as part of the value and a
+        # trailing "\r" turns a hostname into one nobody can resolve.
+        if ([string]$rec.platform -eq 'debian') {
+            $rendered = Build-AppPxeBootTaskSequencePreseed -Sequence $rec
+            $ext = 'cfg'
+            $body = ($rendered -replace "`r`n", "`n")
+        } else {
+            $rendered = Build-AppPxeBootTaskSequenceUnattendXml -Sequence $rec
+            $ext = 'xml'
+            $body = ($rendered -replace "`r`n", "`n") -replace "`n", "`r`n"
+        }
+        if (-not $rendered) { continue }
+        $file = Join-Path $dir "$($rec.id).$ext"
+        # idempotent write (skip when unchanged)
         $have = if (Test-Path -LiteralPath $file) { Get-Content -LiteralPath $file -Raw -ErrorAction SilentlyContinue } else { $null }
         if ($have -ne $body) {
             [System.IO.File]::WriteAllText($file, $body, (New-Object System.Text.UTF8Encoding $false))
         }
-        [void]$keep.Add("$($rec.id).xml")
+        [void]$keep.Add("$($rec.id).$ext")
         $published++
 
         # index.json row: what the client needs BEFORE it applies anything. A row with
@@ -1403,7 +1510,8 @@ function Sync-AppPxeBootTaskSequenceStore {
             id              = [string]$rec.id
             name            = [string]$rec.name
             kind            = [string]$rec.kind
-            file            = "$($rec.id).xml"
+            platform        = [string]$rec.platform
+            file            = "$($rec.id).$ext"
             firstBootAction = (Get-AppPxeBootTsFirstBootAction -Sequence $rec)
             image           = $null
         }
@@ -1465,10 +1573,22 @@ function Sync-AppPxeBootTaskSequenceStore {
             [void]$keep.Add("$($rec.id).firstboot.cmd")
         }
     }
-    foreach ($pattern in @('*.xml', '*.env', '*.firstboot.cmd')) {
+    # .cfg belongs here too, or a preseed for a deleted sequence would be left
+    # on the share for ever, and a machine booted from a stale menu entry would
+    # still install from it.
+    foreach ($pattern in @('*.xml', '*.cfg', '*.env', '*.firstboot.cmd')) {
         foreach ($existing in @(Get-ChildItem -LiteralPath $dir -File -Filter $pattern -ErrorAction SilentlyContinue)) {
             if (-not $keep.Contains($existing.Name)) {
                 Remove-Item -LiteralPath $existing.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    # autoinstall/<id>/ for a removed or disabled Ubuntu sequence goes the same way.
+    $aiRoot = Join-Path $dir 'autoinstall'
+    if (Test-Path -LiteralPath $aiRoot -PathType Container) {
+        foreach ($existingDir in @(Get-ChildItem -LiteralPath $aiRoot -Directory -ErrorAction SilentlyContinue)) {
+            if (-not $keepDirs.Contains($existingDir.Name)) {
+                Remove-Item -LiteralPath $existingDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
     }
@@ -1516,7 +1636,7 @@ function Sync-AppPxeBootTaskSequenceStore {
     # pruned rather than preselecting a missing sequence (no marker = None item).
     $marker = Join-Path $dir '_default.txt'
     $default = Get-AppPxeBootTaskSequenceDefaultId
-    $defaultValid = [bool]($default -and $keep.Contains("$default.xml"))
+    $defaultValid = [bool]($default -and ($keep.Contains("$default.xml") -or $keep.Contains("$default.cfg") -or $keep.Contains("$default.autoinstall")))
     if ($defaultValid) {
         $want = $default + "`r`n"
         $have = if (Test-Path -LiteralPath $marker) { Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue } else { $null }
@@ -1529,12 +1649,635 @@ function Sync-AppPxeBootTaskSequenceStore {
     @{ published = $published; dir = $dir }
 }
 
+# --- Debian preseed -----------------------------------------------------------
+#
+# A preseed is the direct equivalent of unattend.xml: the answer file the
+# installer reads so nobody stands at the machine. The differences from the
+# Windows path are worth knowing before editing this.
+#
+#   * Selection happens at BOOT, not after it. WinPE shows a picker and copies
+#     the chosen XML to Panther; d-i is told `preseed/url=` on the kernel command
+#     line, so the PXE menu entry decides which sequence a machine gets.
+#   * There is no deploy-time client, so the {{SITE}}/{{SERIAL}} half of the
+#     Windows token model has no counterpart. Anything that must be computed per
+#     machine is shell in late_command, which is why the hostname can be derived
+#     from the MAC there rather than substituted here.
+#   * SECRETS CANNOT BE WITHHELD. The Windows publisher deliberately leaves
+#     {{JoinPw}} in the file for the client to fill, so a join password never
+#     lands on the share. An unauthenticated installer fetching a preseed over
+#     HTTP cannot do that: everything in this file is readable by anything that
+#     can reach the URL. Passwords go in as crypt(3) hashes and nothing else
+#     sensitive goes in at all.
+#   * The mirror is deliberately absent. The PXE menu already points d-i at the
+#     mounted ISO with mirror/http/*; repeating it here would fight those kernel
+#     arguments and send the installer to the internet instead of the ISO.
+#
+# late_command is the SetupComplete.cmd of this world: it runs late in the
+# install with the new system at /target, and `in-target` runs a command inside
+# it. The pattern below - drop a script, register a one-shot systemd unit that
+# disables itself - is the one CampusCast's own preseed uses in production.
+
+function New-AppPxeBootTsCryptSalt {
+    # 16 characters from crypt's alphabet, from the platform CSPRNG.
+    $alphabet = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    $bytes = New-Object byte[] 16
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return (-join ($bytes | ForEach-Object { $alphabet[$_ % 64] }))
+}
+
+function ConvertTo-AppPxeBootTsSha512Crypt {
+    <#
+    .SYNOPSIS
+        crypt(3) SHA-512 ("$6$..."), the form d-i's passwd/user-password-crypted takes.
+        Drepper's algorithm at the default 5000 rounds, in pure .NET so it runs the same
+        on macOS and Windows (openssl passwd -6 is not on Windows).
+    .NOTES
+        Verified against the specification's reference vector and LibreSSL's
+        openssl passwd -6 in test-task-sequence-debian.ps1.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Password,
+        [string]$Salt
+    )
+    if ([string]::IsNullOrEmpty($Salt)) { $Salt = New-AppPxeBootTsCryptSalt }
+    $Salt = ($Salt -replace '[^./0-9A-Za-z]', '')
+    if ($Salt.Length -gt 16) { $Salt = $Salt.Substring(0, 16) }
+    # $keyBytes/$saltBytes, never $keyBytes/$saltBytes: variable names are case-insensitive, and
+    # assigning bytes to the [string] parameter $Salt would stringify them.
+    $keyBytes = [System.Text.Encoding]::UTF8.GetBytes($Password)
+    $saltBytes = [System.Text.Encoding]::UTF8.GetBytes($Salt)
+    $join = {
+        param($parts)
+        $ms = New-Object System.IO.MemoryStream
+        foreach ($p in $parts) { $b = [byte[]]$p; if ($b.Length -gt 0) { $ms.Write($b, 0, $b.Length) } }
+        , $ms.ToArray()
+    }
+    $stretch = {
+        # D repeated to exactly $len bytes.
+        param([byte[]]$D, [int]$len)
+        $out = New-Object byte[] $len
+        for ($i = 0; $i -lt $len; $i++) { $out[$i] = $D[$i % 64] }
+        , $out
+    }
+    $sha = [System.Security.Cryptography.SHA512]::Create()
+    try {
+        # B = H(key salt key)
+        $B = $sha.ComputeHash((& $join @($keyBytes, $saltBytes, $keyBytes)))
+        # A = H(key salt B-by-keylen <B or key per keylen bits>)
+        $aParts = [System.Collections.Generic.List[byte[]]]::new()
+        $aParts.Add($keyBytes); $aParts.Add($saltBytes)
+        $n = $keyBytes.Length
+        while ($n -gt 64) { $aParts.Add($B); $n -= 64 }
+        if ($n -gt 0) { $aParts.Add([byte[]]$B[0..($n - 1)]) }
+        for ($cnt = $keyBytes.Length; $cnt -gt 0; $cnt = $cnt -shr 1) {
+            if ($cnt -band 1) { $aParts.Add($B) } else { $aParts.Add($keyBytes) }
+        }
+        $A = $sha.ComputeHash((& $join $aParts.ToArray()))
+        # DP = H(key x keylen), P = DP stretched to keylen
+        $dpParts = [System.Collections.Generic.List[byte[]]]::new()
+        for ($i = 0; $i -lt $keyBytes.Length; $i++) { $dpParts.Add($keyBytes) }
+        $DP = $sha.ComputeHash((& $join $dpParts.ToArray()))
+        $P = & $stretch $DP $keyBytes.Length
+        # DS = H(salt x (16 + A[0])), S = DS stretched to saltlen
+        $dsParts = [System.Collections.Generic.List[byte[]]]::new()
+        for ($i = 0; $i -lt (16 + [int]$A[0]); $i++) { $dsParts.Add($saltBytes) }
+        $DS = $sha.ComputeHash((& $join $dsParts.ToArray()))
+        $S = & $stretch $DS $saltBytes.Length
+        $C = $A
+        for ($i = 0; $i -lt 5000; $i++) {
+            $parts = [System.Collections.Generic.List[byte[]]]::new()
+            if ($i -band 1) { $parts.Add($P) } else { $parts.Add($C) }
+            if ($i % 3) { $parts.Add($S) }
+            if ($i % 7) { $parts.Add($P) }
+            if ($i -band 1) { $parts.Add($C) } else { $parts.Add($P) }
+            $C = $sha.ComputeHash((& $join $parts.ToArray()))
+        }
+    } finally {
+        $sha.Dispose()
+    }
+    $alphabet = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    $sb = [System.Text.StringBuilder]::new()
+    $emit = {
+        param([int]$b2, [int]$b1, [int]$b0, [int]$count)
+        $w = ($b2 -shl 16) -bor ($b1 -shl 8) -bor $b0
+        for ($k = 0; $k -lt $count; $k++) { [void]$sb.Append($alphabet[$w -band 63]); $w = $w -shr 6 }
+    }
+    foreach ($t in @(@(0, 21, 42), @(22, 43, 1), @(44, 2, 23), @(3, 24, 45), @(25, 46, 4), @(47, 5, 26), @(6, 27, 48),
+            @(28, 49, 7), @(50, 8, 29), @(9, 30, 51), @(31, 52, 10), @(53, 11, 32), @(12, 33, 54), @(34, 55, 13),
+            @(56, 14, 35), @(15, 36, 57), @(37, 58, 16), @(59, 17, 38), @(18, 39, 60), @(40, 61, 19), @(62, 20, 41))) {
+        & $emit ([int]$C[$t[0]]) ([int]$C[$t[1]]) ([int]$C[$t[2]]) 4
+    }
+    & $emit 0 0 ([int]$C[63]) 2
+    return ('$6$' + $Salt + '$' + $sb.ToString())
+}
+
+function ConvertTo-AppPxeBootTsLinuxUserName {
+    # user-setup accepts ^[a-z][-a-z0-9_]*$ - a vault login like CORP\Local.Admin becomes localadmin.
+    param([string]$Name)
+    $n = [string]$Name
+    if ($n -match '^(.+)\\(.+)$') { $n = $matches[2] }
+    if ($n -match '^(.+)@(.+)$') { $n = $matches[1] }
+    $n = ($n.ToLowerInvariant() -replace '[^a-z0-9_-]', '')
+    $n = $n.TrimStart('-', '_', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9')
+    return $n
+}
+
+function Resolve-AppPxeBootTsDebianVaultUser {
+    <#
+    .SYNOPSIS
+        The first user from a vault credential: @{ username; fullName; crypted }, or $null.
+        The password is hashed here, at publish; nothing in clear reaches the share.
+    #>
+    param([string]$SecretName)
+    if ([string]::IsNullOrWhiteSpace($SecretName)) { return $null }
+    if (-not (Test-AppSidecarCommand Get-AppVaultCredential) -or -not (Test-AppSidecarCommand Get-AppVaultPlainSecret)) { return $null }
+    $cred = Get-AppVaultCredential -Name $SecretName
+    if (-not $cred) {
+        Write-SidecarLog "Task sequences: vault credential '$SecretName' is missing - Debian first user not set, the installer will ask"
+        return $null
+    }
+    $login = [string](Get-AppPxeBootTsProp -Item $cred -Name 'UserName')
+    $username = ConvertTo-AppPxeBootTsLinuxUserName -Name $login
+    $plain = [string](Get-AppVaultPlainSecret -Name $SecretName)
+    if ([string]::IsNullOrWhiteSpace($username) -or [string]::IsNullOrEmpty($plain)) {
+        Write-SidecarLog "Task sequences: vault credential '$SecretName' has no usable user/password - Debian first user not set"
+        return $null
+    }
+    $fullName = ''
+    try {
+        if (Test-AppSidecarCommand Get-AppVaultSecretInfo) {
+            $info = Get-AppVaultSecretInfo -Name $SecretName
+            $fullName = [string](Get-AppPxeBootTsProp -Item $info -Name 'fullName')
+            if ([string]::IsNullOrWhiteSpace($fullName)) { $fullName = [string](Get-AppPxeBootTsProp -Item $info -Name 'label') }
+        }
+    } catch { $fullName = '' }
+    if ([string]::IsNullOrWhiteSpace($fullName)) { $fullName = $username }
+    if ($username -ne $login) { Write-SidecarLogVerbose "Task sequences: vault login '$login' becomes Linux user '$username'" }
+    return @{ username = $username; fullName = $fullName; crypted = (ConvertTo-AppPxeBootTsSha512Crypt -Password $plain) }
+}
+
+function Get-AppPxeBootTsScriptsDir {
+    # <library>/Scripts: first-boot scripts, served by Caddy at /Scripts/ and visible on Deploy$.
+    try {
+        $root = Get-AppImageLibraryRoot -NoCreate
+        if ($root) { return (Join-Path $root 'Scripts') }
+    } catch { }
+    return $null
+}
+
+function Get-AppPxeBootTsFirstBootScripts {
+    # File names the panel offers for "First-boot script". Anything regular except the README.
+    $dir = Get-AppPxeBootTsScriptsDir
+    if (-not $dir -or -not (Test-Path -LiteralPath $dir -PathType Container)) { return @() }
+    return @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch '^(README|readme)' -and $_.Name -notmatch '^\.' } |
+        Sort-Object Name | ForEach-Object { $_.Name })
+}
+
+function Initialize-AppPxeBootTsScriptsDir {
+    # <library>/Scripts, created with its README on first use. Null without a library root.
+    $dir = Get-AppPxeBootTsScriptsDir
+    if (-not $dir) { return $null }
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+        $null = New-Item -Path $dir -ItemType Directory -Force
+        $readme = Join-Path $dir 'README.txt'
+        [System.IO.File]::WriteAllText($readme, ("First-boot scripts for Linux task sequences.`n" +
+            "Add one from the sequence editor (First-boot script > Add...) or drop it here (for example firstboot.sh)`n" +
+            "and pick it as the sequence's First-boot script. It needs a #! first line - systemd runs it directly.`n" +
+            "The installer fetches it from this machine over HTTP (/Scripts/<name>) at the end of the install`n" +
+            "and runs it once at first boot through a one-shot systemd unit, as root, with the network up.`n"), (New-Object System.Text.UTF8Encoding $false))
+    }
+    return $dir
+}
+
+function Test-AppPxeBootTsScriptFileName {
+    # The name the compiler accepts for runScriptFile, minus the README and dotfiles the
+    # listing hides: a wrong name here would be offered by the panel and skipped at publish.
+    param([string]$Name)
+    $n = [string]$Name
+    ($n -match '^[A-Za-z0-9][A-Za-z0-9._-]*$') -and ($n -notmatch '^(README|readme)') -and ($n.Length -le 120)
+}
+
+function Import-AppPxeBootTsScript {
+    <#
+        .SYNOPSIS
+        Copy a script from this machine into <library>/Scripts so a Linux sequence can
+        name it. The copy is checked the way the target will read it: a #! first line
+        (systemd execs the file - without one the first boot silently does nothing),
+        text not binary, and LF line endings (a CRLF shebang is "bash\r: not found").
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [string]$TargetFileName,
+        [switch]$ReplaceExisting
+    )
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw 'Task sequences: source script not found.' }
+    $src = Get-Item -LiteralPath $SourcePath
+    $name = if ($TargetFileName) { ([string]$TargetFileName).Trim() } else { $src.Name }
+    if (-not (Test-AppPxeBootTsScriptFileName -Name $name)) {
+        throw "Task sequences: script name '$name' - letters, digits, dot, dash and underscore only, no spaces, not README."
+    }
+    if ($src.Length -gt 8MB) { throw "Task sequences: $name is over 8 MB - that is not a script; host it and use a custom URL." }
+    $bytes = [System.IO.File]::ReadAllBytes($SourcePath)
+    if ([Array]::IndexOf($bytes, [byte]0) -ge 0) { throw "Task sequences: $name is a binary file, not a script." }
+    $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+    $normalized = $false
+    if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1); $normalized = $true }
+    if ($text.Contains("`r")) { $text = ($text -replace "`r`n", "`n") -replace "`r", "`n"; $normalized = $true }
+    if (-not $text.StartsWith('#!')) {
+        throw "Task sequences: $name has no #! first line. systemd runs the script directly, so it needs one - for example #!/bin/bash."
+    }
+    $dir = Initialize-AppPxeBootTsScriptsDir
+    if (-not $dir) { throw 'Task sequences: no image library root is set, so there is no Scripts folder yet.' }
+    $dest = Join-Path $dir $name
+    $existed = Test-Path -LiteralPath $dest -PathType Leaf
+    if ($existed -and -not $ReplaceExisting) { throw "Task sequences: $name is already in the Scripts folder." }
+    [System.IO.File]::WriteAllText($dest, $text, (New-Object System.Text.UTF8Encoding $false))
+    $url = try { "$(Get-AppPxeBootTsScriptsBaseUrl)/$name" } catch { '' }
+    Write-SidecarLog ("Task sequences: first-boot script $name ($($bytes.Length) bytes) copied into the Scripts folder" +
+        $(if ($normalized) { ' (BOM/CRLF normalised to plain LF)' } else { '' }))
+    @{
+        fileName   = $name
+        path       = $dest
+        url        = $url
+        sizeBytes  = (Get-Item -LiteralPath $dest).Length
+        replaced   = [bool]$existed
+        normalized = $normalized
+        scripts    = @(Get-AppPxeBootTsFirstBootScripts)
+        scriptsDir = $dir
+    }
+}
+
+function Remove-AppPxeBootTsScript {
+    # Delete a library first-boot script. A sequence still naming it shows "missing" in
+    # the panel and publishes without a fetch line (the compiler refuses unknown names).
+    param([Parameter(Mandatory)][string]$FileName)
+    if (-not (Test-AppPxeBootTsScriptFileName -Name $FileName)) { throw "Task sequences: '$FileName' is not a library script name." }
+    $dir = Get-AppPxeBootTsScriptsDir
+    $removed = $false
+    if ($dir) {
+        $path = Join-Path $dir $FileName
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Remove-Item -LiteralPath $path -Force
+            $removed = $true
+            Write-SidecarLog "Task sequences: first-boot script $FileName removed from the Scripts folder"
+        }
+    }
+    @{ fileName = $FileName; removed = $removed; scripts = @(Get-AppPxeBootTsFirstBootScripts); scriptsDir = $dir }
+}
+
+function Open-AppPxeBootTsScriptsFolder {
+    $path = Initialize-AppPxeBootTsScriptsDir
+    if (-not $path) { throw 'Task sequences: no image library root is set, so there is no Scripts folder yet.' }
+    if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
+        Start-Process -FilePath 'explorer.exe' -ArgumentList (Format-AppProcessArgumentList -Arguments @($path))
+    } elseif ($IsMacOS) {
+        Start-Process -FilePath 'open' -ArgumentList (Format-AppProcessArgumentList -Arguments @($path))
+    } else {
+        Start-Process -FilePath 'xdg-open' -ArgumentList (Format-AppProcessArgumentList -Arguments @($path)) -ErrorAction SilentlyContinue
+    }
+    @{ opened = $true; path = $path }
+}
+
+function Get-AppPxeBootTsScriptsBaseUrl {
+    # Where a target fetches a library script from: this laptop's Caddy. Resolved at
+    # publish, and publish runs on every Start / menu regen, so the LAN IP stays current.
+    if (Test-AppSidecarCommand Get-AppPxeBootLocalHttpBaseUrl) {
+        return ((Get-AppPxeBootLocalHttpBaseUrl) + '/Scripts')
+    }
+    return 'http://localhost:8080/Scripts'
+}
+
+function ConvertTo-AppPxeBootTsShellSingleQuoted {
+    <#
+        .SYNOPSIS
+        Quote a value for POSIX sh. Single quotes, with the close-reopen dance
+        for embedded single quotes, so a value can never end the string early.
+    #>
+    param([string]$Value)
+    "'" + ([string]$Value -replace "'", "'\''") + "'"
+}
+
+function Get-AppPxeBootTsLateCommandParts {
+    <#
+        .SYNOPSIS
+        The sequence's steps and run script as one d-i late_command.
+
+        .DESCRIPTION
+        Only cmd steps make sense here: reg, pwsh and script are Windows verbs and
+        are skipped rather than silently mistranslated (a Linux sequence has the
+        First-boot script field for a script by URL). Every command runs in-target,
+        so it sees the installed system and not the installer's ramdisk, and
+        through bash -c (Craig, 2026-09-06): bash is Essential on Debian and in the
+        Ubuntu server base, so it is always in /target by late_command time, people
+        type bash syntax, and every sh one-liner runs unchanged under it. The fetch
+        line above stays sh: it is ours and POSIX.
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+
+    $parts = @()
+    $flds = $Sequence.fields
+    $runUrl = if ($flds -and $flds.Contains('runScriptUrl')) { ([string]$flds['runScriptUrl']).Trim() } else { '' }
+    # runScriptFile: '' = none (a legacy runScriptUrl alone still counts), 'url' = the
+    # free URL in runScriptUrl, anything else = a file in <library>/Scripts served by Caddy.
+    $runFile = if ($flds -and $flds.Contains('runScriptFile')) { ([string]$flds['runScriptFile']).Trim() } else { '' }
+    if ($runFile -and $runFile -ne 'url') {
+        if ($runFile -match '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            $runUrl = "$(Get-AppPxeBootTsScriptsBaseUrl)/$runFile"
+        } else {
+            Write-SidecarLog "Task sequences: first-boot script name '$runFile' is not a plain file name - skipped"
+            $runUrl = ''
+        }
+    }
+    if ($runUrl) {
+        # Fetched at install time rather than embedded, so the script can change
+        # without republishing every sequence that uses it. Failure is loud: a
+        # first-boot script that silently did not run is the worst outcome.
+        #
+        # Quote the WHOLE inner command once, never the URL separately. Quoting a
+        # value inside an already single-quoted sh -c string closes that string
+        # early, and the result still contains every substring a naive test looks
+        # for while being a different command entirely.
+        # Two levels of quoting, both needed. The URL is quoted for the shell that
+        # runs inside sh -c, and the whole payload is quoted again for the shell
+        # that reads the late_command line. Getting only the outer level right
+        # leaves an ampersand in a URL backgrounding half the command.
+        $fetch = "set -e; wget -qO /usr/local/sbin/wdk-run " +
+                 (ConvertTo-AppPxeBootTsShellSingleQuoted $runUrl) +
+                 "; chmod 0755 /usr/local/sbin/wdk-run"
+        $parts += "in-target sh -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $fetch)"
+        $parts += @'
+printf '[Unit]\nDescription=WinDeployKit first boot\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=/usr/local/sbin/wdk-run\n\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/wdk-run\nExecStartPost=/bin/systemctl disable wdk-firstboot.service\nRemainAfterExit=yes\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n' > /target/etc/systemd/system/wdk-firstboot.service
+'@
+        $parts += 'in-target systemctl enable wdk-firstboot.service'
+    }
+    foreach ($step in @($Sequence.steps)) {
+        if ([string]$step.type -ne 'cmd') { continue }
+        $cmd = ([string]$step.command).Trim()
+        if (-not $cmd) { continue }
+        $parts += "in-target bash -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $cmd)"
+    }
+    # Emitted, not wrapped: a `, $parts` here reaches a caller @() as ONE nested array.
+    return $parts
+}
+
+function Build-AppPxeBootTaskSequencePreseedLateCommand {
+    # d-i takes one logical line.
+    param([Parameter(Mandatory)]$Sequence)
+    $parts = @(Get-AppPxeBootTsLateCommandParts -Sequence $Sequence)
+    if ($parts.Count -eq 0) { return '' }
+    ($parts -join '; ')
+}
+
+function ConvertTo-AppPxeBootTsYamlSingleQuoted {
+    # YAML single-quoted scalar: the only escape is '' for a literal quote, so a shell
+    # payload full of quotes and backslashes survives untouched.
+    param([string]$Value)
+    "'" + ([string]$Value -replace "'", "''") + "'"
+}
+
+function Build-AppPxeBootTaskSequenceAutoinstallLateCommands {
+    <#
+    .SYNOPSIS
+        The same first-boot parts as the Debian late_command, one per Subiquity
+        late-command. d-i's in-target is curtin's `curtin in-target --target=/target --`;
+        a part that writes to /target/... directly works unchanged (Subiquity mounts the
+        new system there too).
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+    $out = @()
+    foreach ($part in @(Get-AppPxeBootTsLateCommandParts -Sequence $Sequence)) {
+        $p = [string]$part
+        if ($p -match '^in-target (.*)$') { $p = 'curtin in-target --target=/target -- ' + $matches[1] }
+        $out += $p
+    }
+    return $out
+}
+
+function Build-AppPxeBootTaskSequenceAutoinstall {
+    <#
+    .SYNOPSIS
+        Render a Subiquity autoinstall (cloud-init NoCloud user-data) for one sequence.
+    .DESCRIPTION
+        Ubuntu 22.04+ has no d-i: the live-server ISO's installer reads an autoinstall
+        YAML from the NoCloud seed named on the kernel line (ds=nocloud-net;s=<url>/).
+        Same rules as the preseed: publish-time values only, the password is a crypt
+        hash, no apt mirror block (the installer's default archive is the point), and
+        nothing sensitive beyond the hash.
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+    if ([string]$Sequence.platform -ne 'ubuntu') { return '' }
+    $flds = $Sequence.fields
+    $f = {
+        param($n, $d = '')
+        $v = if ($flds -and $flds.Contains($n)) { ([string]$flds[$n]).Trim() } else { '' }
+        if ($v) { $v } else { $d }
+    }
+    $q = { param($v) ConvertTo-AppPxeBootTsYamlSingleQuoted ([string]$v) }
+
+    $hostname  = & $f 'hostname'   'ubuntu'
+    $locale    = & $f 'locale'     'en_AU.UTF-8'
+    $keymap    = & $f 'keymap'     'us'
+    $timezone  = & $f 'timezone'   'Australia/Melbourne'
+    $username  = & $f 'username'   'localadmin'
+    $fullName  = & $f 'userFullName' 'Local Administrator'
+    $pwCrypt   = & $f 'userPasswordCrypted'
+    if ((& $f 'userSource' 'manual') -eq 'vault') {
+        $vaultUser = Resolve-AppPxeBootTsDebianVaultUser -SecretName (& $f 'userVaultSecret')
+        if ($vaultUser) {
+            $username = [string]$vaultUser.username
+            $fullName = [string]$vaultUser.fullName
+            $pwCrypt  = [string]$vaultUser.crypted
+        } else {
+            $pwCrypt = ''
+        }
+    }
+    $disk      = & $f 'disk'       '/dev/nvme0n1 /dev/sda /dev/mmcblk0'
+    $layout    = & $f 'storageLayout' 'direct'
+    if ($layout -notin @('direct', 'lvm')) { $layout = 'direct' }
+    $packages  = @(((& $f 'packages' '') -split '\s+') | Where-Object { $_ })
+    $sshServer = (& $f 'sshServer' '1') -ne '0'
+    $late      = @(Build-AppPxeBootTaskSequenceAutoinstallLateCommands -Sequence $Sequence)
+    # The Debian disk field is an ordered list of candidates; Subiquity's match takes one
+    # path, so a single device becomes path: and a list becomes the largest disk.
+    $disks = @(($disk -split '\s+') | Where-Object { $_ })
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $add = { param($t) [void]$lines.Add($t) }
+    & $add '#cloud-config'
+    & $add "# WinDeployKit task sequence: $($Sequence.name)"
+    & $add '# Generated - edit the sequence, not this file.'
+    & $add 'autoinstall:'
+    & $add '  version: 1'
+    & $add '  refresh-installer:'
+    & $add '    update: false'
+    & $add "  locale: $(& $q $locale)"
+    & $add '  keyboard:'
+    & $add "    layout: $(& $q $keymap)"
+    & $add "  timezone: $(& $q $timezone)"
+    if ($pwCrypt) {
+        & $add '  identity:'
+        & $add "    hostname: $(& $q $hostname)"
+        & $add "    username: $(& $q $username)"
+        & $add "    realname: $(& $q $fullName)"
+        & $add "    password: $(& $q $pwCrypt)"
+    } else {
+        & $add '  # No password hash set on this sequence: the installer asks for the user.'
+        & $add '  interactive-sections:'
+        & $add '    - identity'
+    }
+    & $add '  ssh:'
+    & $add "    install-server: $(if ($sshServer) { 'true' } else { 'false' })"
+    & $add '    allow-pw: true'
+    & $add '  storage:'
+    & $add '    layout:'
+    & $add "      name: $layout"
+    & $add '      match:'
+    if ($disks.Count -eq 1) {
+        & $add "        path: $(& $q $disks[0])"
+    } else {
+        & $add '        size: largest'
+    }
+    if ($packages.Count -gt 0) {
+        & $add '  packages:'
+        foreach ($p in $packages) { & $add "    - $(& $q $p)" }
+    }
+    & $add '  updates: security'
+    if ($late.Count -gt 0) {
+        & $add '  late-commands:'
+        foreach ($c in $late) { & $add "    - $(& $q $c)" }
+    }
+    & $add '  shutdown: reboot'
+    ($lines -join "`n") + "`n"
+}
+
+function Build-AppPxeBootTaskSequencePreseed {
+    <#
+        .SYNOPSIS
+        Render a Debian preseed for one sequence.
+
+        .DESCRIPTION
+        Publish-time only. Every value is concrete by the time this is written to
+        the library, because there is nothing downstream to substitute tokens.
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+
+    if ([string]$Sequence.platform -ne 'debian') { return '' }
+    $flds = $Sequence.fields
+    $f = {
+        param($n, $d = '')
+        $v = if ($flds -and $flds.Contains($n)) { ([string]$flds[$n]).Trim() } else { '' }
+        if ($v) { $v } else { $d }
+    }
+
+    $hostname  = & $f 'hostname'   'debian'
+    $domain    = & $f 'domain'     'local'
+    $locale    = & $f 'locale'     'en_AU.UTF-8'
+    $keymap    = & $f 'keymap'     'us'
+    $timezone  = & $f 'timezone'   'Australia/Melbourne'
+    $username  = & $f 'username'   'localadmin'
+    $fullName  = & $f 'userFullName' 'Local Administrator'
+    $pwCrypt   = & $f 'userPasswordCrypted'
+    # First user from the vault (Craig, 2026-09-06): the credential's login becomes the
+    # user, its full name the GECOS, and its password is hashed at publish. A vault
+    # entry that cannot be resolved leaves the password out, so the installer asks
+    # rather than creating a user nobody can log in as.
+    if ((& $f 'userSource' 'manual') -eq 'vault') {
+        $vaultUser = Resolve-AppPxeBootTsDebianVaultUser -SecretName (& $f 'userVaultSecret')
+        if ($vaultUser) {
+            $username = [string]$vaultUser.username
+            $fullName = [string]$vaultUser.fullName
+            $pwCrypt  = [string]$vaultUser.crypted
+        } else {
+            $pwCrypt = ''
+        }
+    }
+    $disk      = & $f 'disk'       '/dev/nvme0n1 /dev/sda /dev/mmcblk0'
+    $recipe    = & $f 'partitionRecipe' 'atomic'
+    $packages  = & $f 'packages'   ''
+    $late      = Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $Sequence
+
+    # partman-auto's built-in recipes. trixie added server and small_disk; atomic there
+    # needs about 10 GB (768 MB EFI + 768 MB /boot + 8 GB / + swap) - a smaller disk fails
+    # with "Unable to satisfy all constraints", which is what small_disk is for.
+    if ($recipe -notin @('atomic', 'home', 'multi', 'server', 'small_disk')) { $recipe = 'atomic' }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $add = { param($t) [void]$lines.Add($t) }
+    & $add "# WinDeployKit task sequence: $($Sequence.name)"
+    & $add "# Generated - edit the sequence, not this file."
+    & $add ''
+    & $add "d-i debian-installer/locale string $locale"
+    & $add "d-i keyboard-configuration/xkb-keymap select $keymap"
+    & $add ''
+    & $add 'd-i netcfg/choose_interface select auto'
+    & $add 'd-i netcfg/dhcp_timeout string 60'
+    & $add "d-i netcfg/get_hostname string $hostname"
+    & $add "d-i netcfg/get_domain string $domain"
+    & $add "d-i netcfg/hostname string $hostname"
+    & $add ''
+    & $add '# No mirror block on purpose: the PXE menu already points d-i at the'
+    & $add '# mounted ISO with mirror/http/*, and repeating it here would override it.'
+    & $add ''
+    & $add 'd-i passwd/root-login boolean false'
+    & $add 'd-i passwd/make-user boolean true'
+    & $add "d-i passwd/user-fullname string $fullName"
+    & $add "d-i passwd/username string $username"
+    if ($pwCrypt) {
+        & $add "d-i passwd/user-password-crypted password $pwCrypt"
+    } else {
+        & $add '# No password hash set on this sequence: the installer will ask.'
+    }
+    & $add 'd-i passwd/user-default-groups string audio cdrom video dip plugdev netdev sudo'
+    & $add ''
+    & $add 'd-i clock-setup/utc boolean true'
+    & $add "d-i time/zone string $timezone"
+    & $add 'd-i clock-setup/ntp boolean true'
+    & $add ''
+    & $add 'd-i partman-auto/method string regular'
+    & $add "d-i partman-auto/choose_recipe select $recipe"
+    & $add "d-i partman-auto/disk string $disk"
+    & $add 'd-i partman-lvm/device_remove_lvm boolean true'
+    & $add 'd-i partman-md/device_remove_md boolean true'
+    & $add 'd-i partman/default_filesystem string ext4'
+    & $add 'd-i partman-partitioning/confirm_write_new_label boolean true'
+    & $add 'd-i partman/choose_partition select finish'
+    & $add 'd-i partman/confirm boolean true'
+    & $add 'd-i partman/confirm_nooverwrite boolean true'
+    # The machine PXE-booted in UEFI mode and gets a UEFI install. Without this d-i
+    # stops to ask "Force UEFI installation?" whenever it spots another OS installed
+    # in BIOS mode on any disk (seen 2026-09-06 in the QEMU run: the iPXE boot disk).
+    & $add 'd-i partman-efi/non_efi_system boolean true'
+    & $add ''
+    & $add 'tasksel tasksel/first multiselect standard'
+    if ($packages) { & $add "d-i pkgsel/include string $packages" }
+    & $add 'popularity-contest popularity-contest/participate boolean false'
+    & $add ''
+    & $add 'd-i grub-installer/only_debian boolean true'
+    & $add 'd-i grub-installer/bootdev string default'
+    & $add ''
+    & $add 'd-i finish-install/reboot_in_progress note'
+    if ($late) {
+        & $add ''
+        & $add "d-i preseed/late_command string $late"
+    }
+    ($lines -join "`n") + "`n"
+}
+
+
 function Get-AppPxeBootTaskSequencesPayload {
     $sequences = @(Read-AppPxeBootTaskSequences | ForEach-Object { ConvertTo-AppPxeBootTaskSequenceRecord -Item $_ } | Where-Object { $_ })
     $dir = Get-AppPxeBootTaskSequenceLibraryDir
     $publishedFiles = @()
     if ($dir -and (Test-Path -LiteralPath $dir)) {
-        $publishedFiles = @(Get-ChildItem -LiteralPath $dir -File -Filter '*.xml' -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+        $publishedFiles = @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @('.xml', '.cfg') } | ForEach-Object { $_.Name })
+        $aiRoot = Join-Path $dir 'autoinstall'
+        if (Test-Path -LiteralPath $aiRoot -PathType Container) {
+            foreach ($d in @(Get-ChildItem -LiteralPath $aiRoot -Directory -ErrorAction SilentlyContinue)) {
+                if (Test-Path -LiteralPath (Join-Path $d.FullName 'user-data') -PathType Leaf) { $publishedFiles += "$($d.Name).autoinstall" }
+            }
+        }
     }
     # Join-domain options come from the Site Profile. Guard against wrapper leaks:
     # a store that wraps entries as @{value; userLocked; updatedAt} must be
@@ -1628,6 +2371,8 @@ function Get-AppPxeBootTaskSequencesPayload {
         installImages     = $installImages
         regionalDefaults  = (Get-AppPxeBootTsRegionalDefaults)
         libraryDir        = $dir
+        firstBootScripts  = @(Get-AppPxeBootTsFirstBootScripts)
+        scriptsDir        = (Get-AppPxeBootTsScriptsDir)
         publishedFiles    = $publishedFiles
         defaultSequenceId  = (Get-AppPxeBootTaskSequenceDefaultId)
         credentialOptions  = $credentialOptions

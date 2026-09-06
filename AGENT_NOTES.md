@@ -3,7 +3,7 @@
 **Read this first.** It is the handover for a fresh session: what this project
 is, where it came from, what is decided, what works, and what is booby-trapped.
 
-**Last updated:** 2026-08-21
+**Last updated:** 2026-09-06 (Linux task sequences merged; `CHANGELOG.md` now exists)
 
 ---
 
@@ -264,6 +264,287 @@ a cache description, correctly left alone.
   fails Secure Boot with no useful error.
 - **Gateway `catch { }`** in `Get-AppPxeBootNetworkAdapters` (line ~4639) now
   logs instead of discarding - the bug that cost the original "No LAN IP" hunt.
+
+### Linux ISO boot, 2026-09-04 (branch `feature/linux-iso-boot`)
+
+- A Debian installer ISO in the library is mounted read-only like Windows media,
+  served whole at `/iso-mount/<token>/`, and the PXE menu gets one `lnx_<slug>`
+  entry per ISO that boots the ISO's own kernel + initrd in place. No extraction,
+  no copy - Craig's rule for every ISO.
+- macOS cannot hdiutil-mount Debian hybrid ISOs ("no mountable file systems": the
+  Apple partition map wins). `Mount-AppPxeBootIsoReadOnly` falls back to
+  `hdiutil attach -nomount` + `mount -t cd9660`, unprivileged. Dismount must
+  `umount` before `hdiutil detach`, else "Resource busy".
+- Mount records carry `kind` (`windows` | `linux`), `mountRoot`, `livePath` and
+  `linux` (layout, label, kernel/initrd rel paths, kernel args) - same keys for
+  both kinds, StrictMode. Menu regen now runs AFTER the mount pass on Start and
+  on Update Deployment Share, because the Linux entries are read off the mount map.
+- Verified 2026-09-04 in QEMU (`scripts/test-linux-iso-boot-qemu.sh`,
+  debian-13.6.0-amd64-netinst): kernel (12.1 MB) and gtk initrd (76.6 MB) fetched
+  through Caddy, installer reached "Select a language".
+- The netinst's own initrd is the CD-ROM flavour (cdrom-detect, no net-retriever,
+  no NIC modules), so over PXE it stops at "detect and mount installation media".
+  Same day: the mount pass fetches Debian's matching netboot initrd
+  (`Ensure-AppPxeBootDebianNetbootInitrd`). Match = SHA256 of the ISO's kernel
+  equals the mirror build's `netboot/.../linux` in SHA256SUMS (the kernel is the
+  same file in both places); only that build's gtk `initrd.gz` (~80 MB) is
+  downloaded, verified, into `http/linux/debian/<codename>-<arch>-<sha8>/`. The
+  menu then boots the ISO's kernel + netboot initrd. **2026-09-06: the mirror is
+  the Debian mirror on the internet, not the ISO tree** - a netinst omits the
+  storage-driver udebs (`sata-modules`, `scsi-modules`...) the netboot initrd
+  needs, so d-i saw no disk; Craig: "drop the premise, the ISOs are freely
+  available and it is always up to date". Signed mirror, no
+  `allow_unauthenticated`. Offline or unmatched -> ISO-only boot, and the
+  menu + ISO list say so. QEMU `--install` tier (ISO-tree era): verified 2026-09-04 with debian-13.6.0-amd64-netinst: d-i accepted the served ISO tree as its mirror (dists/trixie Release + debian-installer Packages.gz), then fetched its udebs from pool/ on the mounted ISO through Caddy.
+- **ISO-less Debian (2026-09-06).** Since the mirror supplies everything, a
+  Debian install needs only the netboot kernel + initrd. Operating Systems >
+  "Linux network installers" (catalog `$script:AppPxeBootDebianNetbootCatalog`:
+  trixie/bookworm x amd64/arm64) - Add fetches the mirror's `current` gtk pair
+  into `http/linux/debian/<codename>-<arch>/` with a `manifest.json`
+  (`Add-AppPxeBootDebianNetboot`, SHA256SUMS-verified, dated d-i build name
+  recorded), Remove deletes the directory; both regenerate the menu.
+  `Get-AppPxeBootDebianNetbootPairs` enumerates complete pairs (live directory
+  state), `ConvertTo-AppPxeBootDebianNetbootInventoryRow` turns one into a menu
+  row with the same keys as an ISO row, so the submenu applies unchanged.
+  Rust `sidecar.rs` gives `AddPxeBootLinuxNetboot` a 1800 s timeout.
+- The preseed builder now forces UEFI (`partman-efi/non_efi_system boolean
+  true`): d-i otherwise stops to ask when another OS in BIOS mode sits on any
+  disk (the QEMU run's iPXE boot disk did it). It also accepts trixie's new
+  recipe names `server` and `small_disk`. **trixie's `atomic` recipe needs about
+  10 GB** (768 MB EFI + 768 MB /boot + 8 GB / + swap); a smaller disk fails with
+  "Unable to satisfy all constraints on the partition" - that is what
+  `small_disk` is for. The QEMU test disk is 16 GB for that reason.
+- **Panel, 2026-09-06 (Craig's review of the first Debian sequence):** the platform
+  decides what the editor shows. A Debian sequence no longer offers Role, Windows
+  image, Join a domain, Win 11 requirements, OOBE screens, After first-boot setup
+  or the Windows local account (its first-user fields are the account), and its
+  first-boot steps offer only `+ Command` (late_command runs shell; reg/pwsh are
+  Windows verbs the builder skips). Win 11 requirements also hide for the Windows
+  Server role. Debian fields with a right answer set are dropdowns
+  (`TS_DEBIAN_FIELD_OPTIONS`: locale, keyboard, time zone, partitioning recipe,
+  target disk presets) - a saved value outside the list still shows as
+  "(custom)". "Windows image" becomes **Linux installer** on a Debian sequence:
+  the catalog from Operating Systems > Linux network installers, saved in field
+  `linuxInstaller` as `debian-<codename>-<arch>` or '' for any. The menu honours
+  it: a bound sequence appears only under that release's entry
+  (`Get-AppPxeBootLinuxMenuHandlerLines` filters per entry by codename + arch,
+  which every inventory row now carries). The Windows local-account validation is
+  skipped for a preseed so an empty Windows account cannot block a Debian save.
+- **First user from the vault, passwords hashed (2026-09-06, Craig).** A Debian
+  sequence's first user is either typed or a vault credential (`userSource`
+  manual|vault, `userVaultSecret`). Vault: at publish the credential's login
+  becomes the Linux user (`ConvertTo-AppPxeBootTsLinuxUserName`: strip
+  DOMAIN\ or @realm, lower-case, keep [a-z0-9_-], drop leading digits), its full
+  name the GECOS, and its password is hashed with
+  `ConvertTo-AppPxeBootTsSha512Crypt` - crypt(3) SHA-512 in pure .NET (Drepper's
+  algorithm, 5000 rounds, verified against the spec vector and LibreSSL's
+  `openssl passwd -6`; ~0.4 s a hash). A typed password arrives as
+  `fields.userPassword` and is hashed in `ConvertTo-AppPxeBootTaskSequenceRecord`
+  on save - only `userPasswordCrypted` is ever stored or published, blank keeps
+  the saved hash. An unresolvable vault entry leaves the password out, so the
+  installer asks rather than creating a user nobody can log in as. Gotcha met
+  writing it: PowerShell variable names are case-insensitive, so `$salt = bytes`
+  silently assigned into the `[string]$Salt` parameter and stringified the
+  array - byte variables are `$keyBytes` / `$saltBytes`.
+- **First-boot script from the library (2026-09-06).** `<library>/Scripts/` (created
+  on publish with a README) is served by Caddy at `/Scripts/` and listed in the
+  payload as `firstBootScripts`; the panel offers it as a dropdown with "Custom
+  URL..." as the escape. Field `runScriptFile`: '' none (a legacy `runScriptUrl`
+  alone still counts), `url` = the typed URL, else a plain file name resolved at
+  publish to `http://<lan-ip>:8080/Scripts/<name>` (publish runs on every Start
+  and menu regen, so the IP stays current). Path-shaped names are refused.
+- **Ubuntu (2026-09-06, Craig: "probably Ubuntu").** Different shape from Debian
+  and the plumbing already fitted it. 22.04+ has no d-i and no netboot
+  installer: Canonical's PXE path is the live-server ISO's own `casper/vmlinuz`
+  + `casper/initrd` with `ip=dhcp url=<ISO>` - casper fetches the WHOLE ISO over
+  HTTP into RAM and boots Subiquity from its squashfs (so the VM needs ~8 GB;
+  packages still come from the Ubuntu archive). So the ISO is genuinely needed:
+  the catalog row (`kind = 'iso'`, `Start-AppPxeBootLinuxIsoDownload`) resolves
+  the current point release from releases.ubuntu.com, verifies SHA256SUMS, and
+  queues it through the aria2 direct rail into the library; once mounted (the
+  cd9660 fallback again - hdiutil cannot mount it) the `ubuntu-live-server`
+  layout row makes a menu entry with `installMode 'casper'` (install-capable, so
+  the submenu applies). `platform: ubuntu` compiles to an autoinstall
+  (`Build-AppPxeBootTaskSequenceAutoinstall`): identity with the crypt hash,
+  storage `layout: direct|lvm` with `match: path` for one disk or `size: largest`
+  for the Debian-style list, ssh, packages, `refresh-installer: update: false`,
+  late-commands = the same first-boot parts as d-i run through
+  `curtin in-target --target=/target --` (each a YAML single-quoted scalar, '' for
+  a quote). Published as `autoinstall/<id>/user-data` + `meta-data` (cloud-init
+  wants a directory; the seed URL ends in `/`); prune and the default check know
+  the directory. Sequences and entries both carry `platform`, and the submenu
+  offers only its own platform's sequences - a preseed never appears under an
+  Ubuntu entry. Gates: `test-task-sequence-ubuntu.ps1` (22 checks, including the
+  late-command executed with curtin/wget stubbed), `test-linux-menu.ps1` (32).
+  Live: verified 2026-09-06 in QEMU (8 GB RAM, 16 GB virtio disk): the Ubuntu sequence handler booted casper off the mounted ISO, casper streamed the 3.4 GB ISO from Caddy, cloud-init fetched the seed, Subiquity ran the autoinstall, curtin wrote the system, and the machine rebooted on its own. Gotchas met: `return , $parts` reaches a
+  caller's `@()` as ONE nested array - emit the array plainly. And the big one:
+  **cloud-init also reads a kernel `url=`** as "fetch this as my cloud-config" -
+  it read the whole 3.4 GB ISO named for casper into memory and was OOM-killed
+  twice, so Subiquity never got its seed. cloud-init prefers `cloud-config-url=`
+  when both are present, so every Ubuntu handler names one: the seed's
+  `user-data` on a sequence handler, `http/linux/ubuntu/cloud-config-none`
+  (`#cloud-config` + `{}`, written on menu regen) on Interactive.
+- **Linux steps run through `bash -c` (2026-09-06, Craig's call).** They were `sh -c`
+  (dash on both distros) and the panel badge said "Cmd", which reads as cmd.exe. bash is
+  Essential on Debian and in the Ubuntu server base, so it is always in /target by
+  late_command time, and every sh one-liner runs unchanged under it. The panel now says
+  "End-of-install steps" / "+ Bash" on a Linux sequence, because that is when they run:
+  in-target as root before the reboot, no systemd. The first-boot script is the other
+  phase (systemd unit, network up). The fetch line itself stays `sh -c`. "Extra
+  packages" got a picker (`TS_LINUX_PACKAGE_PICKS`, names present in both archives,
+  per-platform rows for desktops and Hyper-V tools); the text stays the record.
+- **First-boot script upload (2026-09-06, Craig: "can we allow uploading a script to the
+  local caddy").** `ImportPxeBootTsScript` copies a file from the Mac into
+  `<library>/Scripts/` (`Import-AppPxeBootTsScript`), mirroring ImportPxeBootIso's shape
+  (dialog in the panel, sidecar does the copy). It refuses what the target would choke
+  on: no `#!` first line (systemd execs the file - ENOEXEC, and the first boot silently
+  does nothing), binary, a name the compiler would not accept, README; a BOM or CRLF is
+  normalised to LF (a CRLF shebang is "bash\r: not found"). `RemovePxeBootTsScript` and
+  `OpenPxeBootTsScriptsFolder` round it out; the panel's "Add..." selects the imported
+  name straight into the sequence. Nothing is copied at publish - the installer wgets
+  the script from Caddy at the end of the install. Gate: five checks in the Debian gate
+  against a temp library root (`Get-AppImageLibraryRoot` stubbed).
+- **Windows Script by URL step (2026-09-06, Craig: "Windows fails to run long encoded
+  scripts and would work better to run irm http://(host-ip)/scripts/ps1.ps1 | iex").**
+  Root cause: firstboot.cmd is a batch file and cmd's line limit is 8191 characters;
+  an `-EncodedCommand` is 8/3 of the script's length, so ~3 KB of PowerShell is already
+  over and cmd mangles the line. New step `type: script` (`file` = a .ps1 in
+  <library>/Scripts, or `url`) compiles to `powershell.exe ... -Command "irm '<url>' |
+  iex"` (`Resolve-AppPxeBootTsScriptStepUrl`; the library URL is resolved at publish
+  like the Linux script; `%` doubled for batch). The Scripts route now sends
+  `Content-Type: text/plain` so irm hands back a string rather than guessing. Over-long
+  encoded steps get a `rem WARNING` + a log line in the batch, and the panel shows the
+  estimated encoded length in amber. Linux late_command skips script steps (it has the
+  First-boot script field). Gate: two Test-Cases in test-task-sequence-accounts.
+- Debugging an installer you cannot type at: from tier 3 the QEMU test passes
+  `log_host=10.0.2.2 log_port=5514` and listens with `nc -u -k -l 5514`, so
+  d-i's syslog lands in `$WORK/d-i.syslog` (udeb fetches, module loads, disks
+  seen). partman's own decisions are NOT in syslog (`/var/log/partman`); a
+  `partman/early_command` that pipes `list-devices disk`, `/proc/partitions` and
+  `debconf-get partman-auto/disk` into `logger` showed what it was given.
+- Gotcha found on the way: `Invoke-WebRequest` returns a byte[] for
+  octet-stream bodies (deb.debian.org's SHA256SUMS) - `[string]` of that is
+  "1 2 3". `Get-AppPxeBootHttpTextContent` decodes. And `$host` is a read-only
+  automatic variable - never assign it.
+- Gotcha for anyone testing live: `scripts/test-strictmode.ps1` spawns a real
+  sidecar, which ADOPTS a running Caddy, decides its imaging-log route points at a
+  dead listener, and restarts Caddy from its own (empty) mount map - every
+  `/iso-mount/` and `/iso-wim/` route vanishes until the next Start. Do not run
+  the gates while a boot test is in flight.
+- Secure Boot: the bundled shim trusts the iPXE CA, not Debian's kernel key.
+  Linux entries need Secure Boot off; the handler says so when `boot` fails.
+- Two adjacent fixes rode along: `Remove-AppPxeBootIso` and the layout warning
+  looked mounts up by bare ISO stem, but the map is keyed by token, so neither
+  ever matched (the warning fired for every ISO whenever HTTP was up).
+
+### Linux task sequences, 2026-09-05 (branch `feature/linux-task-sequences`)
+
+A task sequence now says which installer consumes it. `platform` is `windows`
+(unattend.xml, unchanged) or `debian` (a d-i preseed). Absent means windows, so
+every sequence saved before this keeps working untouched, and `kind` is cleared
+on a preseed because client/server is a Windows role.
+
+**A preseed is the equivalent of unattend.xml, and late_command is the
+equivalent of SetupComplete.cmd.** The worked example in the gate is CampusCast:
+a Debian receiver that installs unattended, then runs one script at first boot
+through a one-shot systemd unit that disables itself. That is the pattern
+CampusCast's own preseed uses in production.
+
+Four differences from the Windows path, all of them load-bearing:
+
+- **Selection happens at boot, not after it.** WinPE shows a picker and copies
+  the chosen XML to Panther. d-i is told `preseed/url=` on the kernel command
+  line, so the *PXE menu entry* decides which sequence a machine gets. Wired
+  2026-09-05 as the submenu described below.
+- **There is no deploy-time client**, so the `{{SITE}}`/`{{SERIAL}}` half of the
+  token model has no counterpart. Everything is concrete at publish time, and
+  anything per-machine has to be shell in `late_command`.
+- **Secrets cannot be withheld.** The Windows publisher deliberately leaves
+  `{{JoinPw}}` for the client to fill so a join password never lands on the
+  share. An unauthenticated installer fetching a preseed over HTTP cannot do
+  that: everything in the file is readable by anything on the boot VLAN.
+  Passwords go in as crypt(3) hashes and nothing else sensitive goes in at all.
+- **No mirror block in the preseed.** The menu already points d-i at the mounted
+  ISO with `mirror/http/*`; repeating it in the preseed overrides those kernel
+  arguments and sends the installer to the internet instead of the ISO.
+
+Publishing writes `<id>.cfg` beside the Windows `<id>.xml`, and both the prune
+list and the default-sequence check learned about `.cfg` - a preseed for a
+deleted sequence left on the share is one a stale menu entry would still
+install from. Preseeds are written **LF only**: d-i takes a CR as part of the
+value, so a CRLF hostname is one nobody can resolve.
+
+Gotcha worth the whole gate. The fetch line quotes at **two** levels: the URL
+for the shell inside `sh -c`, and the whole payload again for the shell reading
+the late_command line. Getting only the outer level right still produces a
+working command for an ordinary URL, because adjacent quoted strings simply
+concatenate - so `sh -n` passes, and every substring regex passes. It only comes
+apart when the value holds a space or a metacharacter, which is why
+`test-task-sequence-debian.ps1` executes the late_command with `in-target`,
+`wget`, `chmod` and `systemctl` stubbed and asserts the URL arrives as one
+argument. Two smaller ones found writing that: `in-target` cannot be a shell
+function (a hyphen is not a valid POSIX function name, so the stubs are real
+executables on PATH), and `Get-Content` on a one-line file returns a scalar,
+which has no `.Count` under StrictMode.
+
+The panel picks the platform when a sequence is created and never after, since
+the field sets do not overlap. `tsFieldOrder`/`tsFieldLabel` gate the editor, so
+a Debian sequence never offers a machine OU and a Windows one never offers a
+partition recipe.
+
+**Not done, deliberately:**
+
+- Menu wiring, 2026-09-05 (same branch): an install-capable Debian entry (netboot
+  initrd in place) with published Debian sequences is a **submenu** - one item
+  per sequence, `Interactive install (no task sequence)`, `Back` - and one
+  handler per item (`Get-AppPxeBootLinuxMenuHandlerLines`). Shape chosen over
+  flat ISO x sequence: 3 ISOs x 8 sequences is 3 top-level items, not 24. A
+  sequence handler adds `auto=true priority=critical
+  preseed/url=${http_base}/TaskSequences/<id>.cfg` before `---`
+  (`Add-AppPxeBootDebianPreseedKernelArgs`); Caddy already serves that path.
+  Interactive is preselected unless the store's default sequence is a Debian
+  one - an unattended install wipes a disk and must never be the default by
+  accident. Boot-only entries and Live media never get a submenu. Choices come
+  from `Get-AppPxeBootLinuxTaskSequenceChoices`: enabled, `platform` debian, and
+  the `.cfg` actually on the share. Gate: `scripts/test-linux-menu.ps1`
+  (19 checks, no store, no mount). QEMU `--preseed` tier: 2026-09-05: the sequence handler booted, d-i fetched debian-qemu-test.cfg off the share, loaded its components off the ISO and asked nothing up to partitioning, where it stopped with 'No root file system is defined' - the storage-udeb gap (next item), not the menu.
+- ~~Nothing serves the first-boot script.~~ Done 2026-09-06: `<library>/Scripts/`
+  is served at `/Scripts/`, listed in the editor, and "Add..." copies one in.
+- ~~Ubuntu 20.04+ and RHEL are not covered.~~ Ubuntu done 2026-09-06 (autoinstall,
+  later in this section); RHEL is still open. **Ubuntu is not a gap in Ubuntu** - it
+  has `autoinstall` YAML through cloud-init and is better documented than
+  preseed. The trap is only that a preseed handed to a modern Ubuntu ISO is
+  silently ignored. RHEL/Rocky want kickstart. Both are another `platform`
+  value and another builder; the store, publish and panel gating already take
+  one.
+- Secure Boot stays off for Linux entries, as the ISO-boot work already records.
+
+Gates: `scripts/test-task-sequence-debian.ps1` (22 checks) alongside the existing
+`test-task-sequence-library.ps1` and `test-task-sequence-accounts.ps1`, all green,
+plus `tsc --noEmit`.
+
+### Linux task sequences - state at merge (2026-09-06)
+
+Merged to `main` 2026-09-06 (PR from `feature/linux-task-sequences`, 15 commits).
+`CHANGELOG.md` has the user-facing list; this is the map for the next agent.
+
+| Piece | Where | Gate | Proven live |
+| --- | --- | --- | --- |
+| ISO mount (cd9660 fallback), `lnx_<slug>` entries, Debian netboot-initrd companion | `PxeBootPlugin.ps1`: `Mount-AppPxeBootIsoCd9660`, `$script:AppPxeBootLinuxIsoLayouts`, `Ensure-AppPxeBootDebianNetbootInitrd` | `test-linux-menu.ps1` | QEMU tiers 1-3 |
+| ISO-less Debian entries, Ubuntu ISO rows, catalog Add/Remove | `$script:AppPxeBootDebianNetbootCatalog`, `Add-AppPxeBootLinuxInstaller`, `Start-AppPxeBootLinuxIsoDownload`; handlers `*PxeBootLinuxNetboot` | menu gate | QEMU: ISO-less trixie entry installs |
+| Submenu + handlers with `preseed/url=` / `autoinstall ds=nocloud-net` + `cloud-config-url=` | `Get-AppPxeBootLinuxMenuHandlerLines`, `Add-AppPxeBootDebian*KernelArgs`, `Add-AppPxeBootUbuntuAutoinstallKernelArgs` | menu gate | Debian and Ubuntu tier 4 |
+| Preseed / autoinstall builders, vault first user, crypt SHA-512, Scripts folder, bash steps | `PxeBootTaskSequences.ps1`: `Build-AppPxeBootTaskSequencePreseed`, `Build-AppPxeBootTaskSequenceAutoinstall`, `Get-AppPxeBootTsLateCommandParts`, `Import-AppPxeBootTsScript` | `test-task-sequence-debian.ps1`, `-ubuntu.ps1` | Debian tier 4 with a bash marker step |
+| Windows Script by URL step, encoded-step warning | `Get-AppPxeBootTsStepCommandLine` 'script', `Get-AppPxeBootTsFirstBootScript` | `test-task-sequence-accounts.ps1` | not yet on a real Windows first boot |
+| Editor: platform gating, dropdowns, pickers, Add.../Folder, package picker | `PxeWorkspace.tsx`: `tsPlatform`/`tsIsLinux`, `TS_DEBIAN_FIELD_OPTIONS`, `TS_LINUX_PACKAGE_PICKS`, `importFirstBootScript` | `tsc` | Craig's panel review |
+
+Test leftovers in Craig's store, remove when done: sequences `debian-qemu-test` (carries
+the bash marker step) and `ubuntu-qemu-test`; `ubuntu-24.04.4-live-server-amd64.iso` in the
+library; netboot pairs `trixie-amd64` and `trixie-amd64-e7667ff9`.
+
+Open: RHEL / Rocky kickstart (another `platform`); Secure Boot for Linux entries (the
+bundled shim trusts the iPXE CA only); the Windows Script by URL step wants one real
+first boot; the Linux `cmd` step could take a script by URL too (`wget -qO- | bash`) if
+anyone asks.
 
 ### Scope sweep, 2026-08-21 - removed what is not an MDT/PXE replacement
 

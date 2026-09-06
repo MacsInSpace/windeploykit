@@ -56,6 +56,7 @@ fn request_timeout_secs(cmd: &str) -> u64 {
         "ImportPxeBootIso" => 1800,
         "DownloadPxeBootFieldIso" => 1800,
         "DownloadPxeBootOptionalAsset" => 7200,
+        "AddPxeBootLinuxNetboot" => 1800,
         "EnsurePxeBootCaddy" => 600,
         "EnsurePxeBootTftpd64" => 600,
         "StartPxeBootServices" | "StopPxeBootServices" => 600,

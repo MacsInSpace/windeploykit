@@ -387,6 +387,33 @@ function Handle-OpenPxeBootDriversFolder {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-ImportPxeBootTsScript {
+    param([int]$Id, $Params)
+    $sourcePath = Get-AppSidecarParam -Params $Params -Name 'sourcePath'
+    if (-not $sourcePath) { throw 'ImportPxeBootTsScript: sourcePath required.' }
+    $targetFileName = Get-AppSidecarParam -Params $Params -Name 'targetFileName'
+    $replaceExisting = Get-AppSidecarParam -Params $Params -Name 'replaceExisting'
+    $data = Import-AppPxeBootTsScript `
+        -SourcePath ([string]$sourcePath) `
+        -TargetFileName $(if ($targetFileName) { [string]$targetFileName } else { $null }) `
+        -ReplaceExisting:([bool]$replaceExisting)
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-RemovePxeBootTsScript {
+    param([int]$Id, $Params)
+    $fileName = Get-AppSidecarParam -Params $Params -Name 'fileName'
+    if (-not $fileName) { throw 'RemovePxeBootTsScript: fileName required.' }
+    $data = Remove-AppPxeBootTsScript -FileName ([string]$fileName)
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-OpenPxeBootTsScriptsFolder {
+    param([int]$Id, $Params)
+    $data = Open-AppPxeBootTsScriptsFolder
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
 function Handle-GetPxeBootOptionalAssets {
     param([int]$Id, $Params)
     $data = Get-AppPxeBootOptionalAssetsStatus
@@ -590,6 +617,58 @@ function Handle-GetTaskSequenceStepFromLibrary {
     # Substitution and validation stay server-side so the UI cannot smuggle a command in.
     $data = Get-AppTaskSequenceStepFromLibrary -Id ([string]$entryId) -Value ([string]$value)
     Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-ListPxeBootLinuxNetboot {
+    <#
+    .SYNOPSIS
+        Debian releases the app can PXE-install with no ISO: the catalog joined with what
+        is in the store. Kernel + initrd come from the Debian mirror; so do drivers and
+        packages at install time.
+    #>
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    Write-SidecarResponse -Id $Id -Data @{
+        entries = @(Get-AppPxeBootDebianNetbootCatalogStatus)
+        mirror  = (Get-AppPxeBootDebianMirrorBase)
+    }
+}
+
+function Handle-AddPxeBootLinuxNetboot {
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $installerId = Get-AppSidecarParam -Params $Params -Name 'id'
+    if (-not $installerId) {
+        $codename = Get-AppSidecarParam -Params $Params -Name 'codename'
+        $arch = Get-AppSidecarParam -Params $Params -Name 'arch'
+        if (-not $codename -or -not $arch) { throw 'AddPxeBootLinuxNetboot: id (or codename and arch) required.' }
+        $installerId = "debian-$codename-$arch"
+    }
+    $result = Add-AppPxeBootLinuxInstaller -Id ([string]$installerId)
+    Write-SidecarResponse -Id $Id -Data @{
+        updated  = [bool]$result.updated
+        queued   = [bool]$result.queued
+        fileName = [string]$result.fileName
+        entries  = @(Get-AppPxeBootDebianNetbootCatalogStatus)
+        mirror   = (Get-AppPxeBootDebianMirrorBase)
+    }
+}
+
+function Handle-RemovePxeBootLinuxNetboot {
+    param([int]$Id, $Params)
+    Set-AppImageLibraryRuntimeRootFromParams -Params $Params
+    $installerId = Get-AppSidecarParam -Params $Params -Name 'id'
+    if (-not $installerId) {
+        $codename = Get-AppSidecarParam -Params $Params -Name 'codename'
+        $arch = Get-AppSidecarParam -Params $Params -Name 'arch'
+        if (-not $codename -or -not $arch) { throw 'RemovePxeBootLinuxNetboot: id (or codename and arch) required.' }
+        $installerId = "debian-$codename-$arch"
+    }
+    Remove-AppPxeBootLinuxInstaller -Id ([string]$installerId) | Out-Null
+    Write-SidecarResponse -Id $Id -Data @{
+        entries = @(Get-AppPxeBootDebianNetbootCatalogStatus)
+        mirror  = (Get-AppPxeBootDebianMirrorBase)
+    }
 }
 
 function Handle-ListPxeBootIsos {

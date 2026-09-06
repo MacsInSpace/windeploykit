@@ -80,10 +80,14 @@ export type SidecarCommand =
   | "GetSidecarStatus"
   | "GetSiteProfile"
   | "ImportPxeBootIso"
+  | "ImportPxeBootTsScript"
   | "ImportPxeBootWim"
   | "ImportPxeBootWimBootAssets"
   | "ImportPxeBootWimFromIso"
   | "ListPxeBootIsos"
+  | "ListPxeBootLinuxNetboot"
+  | "AddPxeBootLinuxNetboot"
+  | "RemovePxeBootLinuxNetboot"
   | "ListPxeBootInstallImages"
   | "SetPxeBootBrandingImage"
   | "ClearPxeBootBrandingImage"
@@ -101,12 +105,14 @@ export type SidecarCommand =
   | "OpenPxeBootDriversFolder"
   | "OpenPxeBootIsoFolder"
   | "OpenPxeBootStoreFolder"
+  | "OpenPxeBootTsScriptsFolder"
   | "OpenPxeBootWimFolder"
   | "Ping"
   | "PrefetchMacOsAdminCredential"
   | "PrepareAppExit"
   | "RefreshVendorSccmCatalogs"
   | "RemovePxeBootIso"
+  | "RemovePxeBootTsScript"
   | "RemovePxeBootWim"
   | "RestartPxeBootServices"
   | "RevealSmbdForFullDiskAccess"
@@ -192,8 +198,14 @@ export interface PxeBootIsoMountEntry {
   isoFileName: string;
   base: string;
   displayName?: string | null;
+  /** 'windows' (install.wim served in place) or 'linux' (kernel + initrd served in place). */
+  kind?: "windows" | "linux" | string;
   installWim?: string | null;
   httpPath: string;
+  /** Linux only: the PXE menu entry text, e.g. "Debian GNU/Linux 13.6.0 Trixie amd64 installer". */
+  bootLabel?: string | null;
+  /** Linux installer media: whether the entry can complete an install (netboot initrd fetched) or only boot the installer. */
+  bootNote?: string | null;
 }
 
 export interface PxeBootIsoMountStatus {
@@ -246,6 +258,43 @@ export interface PxeBootIsoEntry {
   httpPath: string;
   isoUrlRel: string;
   label?: string;
+  /** Live mount state: 'windows', 'linux', or null when not mounted right now (services stopped). */
+  bootKind?: "windows" | "linux" | string | null;
+  /** Linux only: the PXE menu entry this ISO boots as. */
+  bootLabel?: string | null;
+  /** Linux installer media: install-capable (netboot initrd fetched) or boot-only, with the reason. */
+  bootNote?: string | null;
+}
+
+/** A Debian release the app can PXE-install with no ISO: kernel + initrd from the Debian
+ *  mirror kept in the store, drivers and packages straight from the mirror at install time. */
+export interface PxeBootLinuxNetbootEntry {
+  /** <platform>-<codename>-<arch>, e.g. debian-trixie-amd64, ubuntu-noble-amd64 */
+  id: string;
+  /** debian | ubuntu */
+  platform?: string;
+  /** netboot = kernel + initrd pair from the mirror; iso = the installer is its ISO (downloaded into the library). */
+  kind?: "netboot" | "iso" | string;
+  /** kind iso, when ready: the ISO in the library that satisfies this row. */
+  isoFileName?: string | null;
+  codename: string;
+  arch: "amd64" | "arm64" | string;
+  /** e.g. "Debian 13 (trixie)" */
+  label: string;
+  /** True when linux + initrd.gz + manifest are in the store (the menu offers it). */
+  ready: boolean;
+  /** The d-i build the pair came from, e.g. "20250803+deb13u6". */
+  diVersion?: string | null;
+  fetchedAt?: string | null;
+  sizeBytes: number;
+  kernelHttpRel?: string | null;
+  initrdHttpRel?: string | null;
+}
+
+export interface PxeBootLinuxNetbootResponse {
+  entries: PxeBootLinuxNetbootEntry[];
+  /** The mirror base the pairs (and the installer) use, e.g. https://deb.debian.org/debian */
+  mirror: string;
 }
 
 export interface PxeBootOptionalAssetStatus {
@@ -587,8 +636,9 @@ export interface PxeBootTaskSequenceStep {
   /** UI-only stable identity for React list keys (not persisted - the sidecar's
    * step normaliser drops unknown fields on save). */
   _key?: string;
-  /** pwshEncoded carries a whole script as one step (base64 into -EncodedCommand). */
-  type: "reg" | "cmd" | "pwsh" | "pwshEncoded" | string;
+  /** pwshEncoded carries a whole script as one step (base64 into -EncodedCommand) -
+   * capped by cmd's 8191-character line; script streams one by URL instead. */
+  type: "reg" | "cmd" | "pwsh" | "pwshEncoded" | "script" | string;
   description: string;
   /** reg only */
   op?: "add" | "delete" | string;
@@ -598,6 +648,9 @@ export interface PxeBootTaskSequenceStep {
   data?: string;
   /** cmd / pwsh only */
   command?: string;
+  /** script only: a .ps1 in <library>/Scripts (served at /Scripts/), or a custom URL. */
+  file?: string;
+  url?: string;
 }
 
 /** One Netboot task sequence - generates a first-boot unattend.xml on the share. */
@@ -671,6 +724,9 @@ export interface VaultSecretsResponse {
 export interface PxeBootTaskSequence {
   id: string;
   name: string;
+  /** Which installer consumes this sequence. Absent means windows. */
+  platform?: "windows" | "debian" | string;
+  /** A Windows role only; empty on other platforms. */
   kind: "client" | "server" | string;
   enabled: boolean;
   /** Publish-time template fields; deploy-time tokens ({{SITE}}, {{SERIAL}}, creds) stay literal. */
@@ -762,6 +818,20 @@ export interface PxeBootHttpAccessResponse {
   rows: PxeBootHttpFetchRow[];
 }
 
+/** ImportPxeBootTsScript / RemovePxeBootTsScript: the Scripts folder after the change. */
+export interface PxeBootTsScriptResponse {
+  fileName: string;
+  path?: string;
+  url?: string;
+  sizeBytes?: number;
+  replaced?: boolean;
+  /** A BOM or CRLF line endings were normalised to plain LF on the way in. */
+  normalized?: boolean;
+  removed?: boolean;
+  scripts: string[];
+  scriptsDir?: string | null;
+}
+
 export interface PxeBootTaskSequencesPayload {
   sequences: PxeBootTaskSequence[];
   /** Install image sources for the per-sequence image dropdown (cached editions only). */
@@ -770,6 +840,10 @@ export interface PxeBootTaskSequencesPayload {
   regionalDefaults?: { userLocale: string; inputLocale: string; timeZone: string };
   /** Absolute path of <library>/TaskSequences, null when no library root is set. */
   libraryDir?: string | null;
+  /** File names in <library>/Scripts - the "First-boot script" choices for a Debian sequence. */
+  firstBootScripts?: string[];
+  /** Absolute path of <library>/Scripts, null when no library root is set. */
+  scriptsDir?: string | null;
   publishedFiles: string[];
   /** Preselected imaging-client sequence id; '' = the None item (clean OOBE). */
   defaultSequenceId?: string;

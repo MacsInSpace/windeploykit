@@ -36,9 +36,12 @@ import type {
   PxeBootPluginStatus,
   PxeBootBrandingStatus,
   PxeBootInstallImageEntry,
+  PxeBootLinuxNetbootEntry,
+  PxeBootLinuxNetbootResponse,
   PxeBootTaskSequence,
   PxeBootTaskSequenceStep,
   PxeBootTaskSequencesPayload,
+  PxeBootTsScriptResponse,
   TaskSequenceLibraryEntry,
   TaskSequenceLibraryLists,
   VaultSecretsResponse,
@@ -99,6 +102,255 @@ const TS_FIELD_ORDER = [
   "inputLocale",
   "timeZone",
 ];
+/** Debian sequences compile to a preseed, so they answer entirely different
+ * questions. Nothing here overlaps with the Windows set on purpose: a field that
+ * means one thing under unattend and another under d-i is worse than two fields. */
+const TS_DEBIAN_FIELD_LABELS: Record<string, string> = {
+  linuxInstaller: "Linux installer",
+  hostname: "Hostname",
+  domain: "Domain",
+  locale: "Locale",
+  keymap: "Keyboard",
+  timezone: "Time zone",
+  userSource: "First user",
+  userVaultSecret: "Vault credential",
+  username: "User name",
+  userFullName: "Full name",
+  userPassword: "Password",
+  userPasswordCrypted: "Password hash (crypt)",
+  disk: "Target disk(s)",
+  partitionRecipe: "Partitioning",
+  packages: "Extra packages",
+  runScriptFile: "First-boot script",
+  runScriptUrl: "Script URL",
+  storageLayout: "Storage layout",
+  sshServer: "OpenSSH server",
+};
+const TS_DEBIAN_FIELD_ORDER = [
+  "linuxInstaller",
+  "hostname",
+  "domain",
+  "locale",
+  "keymap",
+  "timezone",
+  "userSource",
+  "userVaultSecret",
+  "username",
+  "userFullName",
+  "userPassword",
+  "disk",
+  "partitionRecipe",
+  "packages",
+  "runScriptFile",
+  "runScriptUrl",
+];
+const TS_DEBIAN_DEFAULT_FIELDS: Record<string, string> = {
+  linuxInstaller: "",
+  hostname: "debian",
+  domain: "local",
+  locale: "en_AU.UTF-8",
+  keymap: "us",
+  timezone: "Australia/Melbourne",
+  userSource: "manual",
+  userVaultSecret: "",
+  username: "localadmin",
+  userFullName: "Local Administrator",
+  userPassword: "",
+  userPasswordCrypted: "",
+  disk: "/dev/nvme0n1 /dev/sda /dev/mmcblk0",
+  partitionRecipe: "atomic",
+  packages: "",
+  runScriptFile: "",
+  runScriptUrl: "",
+};
+const TS_UBUNTU_DEFAULT_FIELDS: Record<string, string> = {
+  ...TS_DEBIAN_DEFAULT_FIELDS,
+  hostname: "ubuntu",
+  storageLayout: "direct",
+  sshServer: "1",
+};
+/** Dropdown choices for the Debian fields that have a right answer set. Free text here
+ * was where the mistakes came from (Craig, 2026-09-06): a typo in a locale or a recipe
+ * name only shows up as an installer stuck on a question. A value saved before these
+ * lists existed still shows - the select carries it as an extra option. */
+const TS_DEBIAN_FIELD_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  locale: [
+    ["en_AU.UTF-8", "English (Australia)"],
+    ["en_NZ.UTF-8", "English (New Zealand)"],
+    ["en_GB.UTF-8", "English (United Kingdom)"],
+    ["en_US.UTF-8", "English (United States)"],
+    ["en_CA.UTF-8", "English (Canada)"],
+    ["en_IE.UTF-8", "English (Ireland)"],
+    ["de_DE.UTF-8", "German"],
+    ["fr_FR.UTF-8", "French"],
+    ["es_ES.UTF-8", "Spanish"],
+    ["it_IT.UTF-8", "Italian"],
+    ["nl_NL.UTF-8", "Dutch"],
+    ["pt_BR.UTF-8", "Portuguese (Brazil)"],
+    ["sv_SE.UTF-8", "Swedish"],
+    ["ja_JP.UTF-8", "Japanese"],
+    ["zh_CN.UTF-8", "Chinese (Simplified)"],
+  ].map(([value, label]) => ({ value, label: `${label} - ${value}` })),
+  keymap: [
+    ["us", "US"],
+    ["gb", "UK"],
+    ["de", "German"],
+    ["fr", "French"],
+    ["es", "Spanish"],
+    ["it", "Italian"],
+    ["nl", "Dutch"],
+    ["br", "Portuguese (Brazil)"],
+    ["pt", "Portuguese"],
+    ["se", "Swedish"],
+    ["dk", "Danish"],
+    ["no", "Norwegian"],
+    ["fi", "Finnish"],
+    ["ch", "Swiss"],
+    ["jp", "Japanese"],
+    ["latam", "Latin American"],
+    ["dvorak", "Dvorak"],
+  ].map(([value, label]) => ({ value, label: `${label} - ${value}` })),
+  timezone: [
+    "Australia/Melbourne",
+    "Australia/Sydney",
+    "Australia/Brisbane",
+    "Australia/Adelaide",
+    "Australia/Perth",
+    "Australia/Hobart",
+    "Australia/Darwin",
+    "Pacific/Auckland",
+    "Asia/Singapore",
+    "Asia/Hong_Kong",
+    "Asia/Tokyo",
+    "Asia/Kolkata",
+    "Europe/London",
+    "Europe/Dublin",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Amsterdam",
+    "Europe/Madrid",
+    "Europe/Rome",
+    "Europe/Stockholm",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Toronto",
+    "America/Vancouver",
+    "America/Sao_Paulo",
+    "UTC",
+  ].map((value) => ({ value, label: value })),
+  storageLayout: [
+    { value: "direct", label: "Whole disk, plain partitions (direct)" },
+    { value: "lvm", label: "Whole disk with LVM (lvm)" },
+  ],
+  sshServer: [
+    { value: "1", label: "Install OpenSSH server" },
+    { value: "0", label: "No SSH server" },
+  ],
+  userSource: [
+    { value: "manual", label: "Typed here" },
+    { value: "vault", label: "From the vault - user, full name and password from a stored credential" },
+  ],
+  partitionRecipe: [
+    { value: "atomic", label: "All files in one partition (atomic) - needs about 10 GB" },
+    { value: "home", label: "Separate /home (home)" },
+    { value: "multi", label: "Separate /home, /var, /tmp (multi)" },
+    { value: "server", label: "Server layout (server)" },
+    { value: "small_disk", label: "Small disk, under 10 GB (small_disk)" },
+  ],
+  disk: [
+    { value: "/dev/nvme0n1 /dev/sda /dev/mmcblk0", label: "First of NVMe, SATA, eMMC - typical laptop or desktop" },
+    { value: "/dev/nvme0n1", label: "NVMe (/dev/nvme0n1)" },
+    { value: "/dev/sda", label: "SATA or SCSI (/dev/sda)" },
+    { value: "/dev/vda", label: "virtio disk - KVM, Proxmox, QEMU (/dev/vda)" },
+    { value: "/dev/mmcblk0", label: "eMMC (/dev/mmcblk0)" },
+  ],
+};
+/** Known extra packages for the Linux "Extra packages" field. Names are checked
+ * against both Debian 12/13 and Ubuntu 22.04/24.04 archives; a row with `platforms`
+ * only shows for those. A value may carry several names (one pick, one purpose). */
+const TS_LINUX_PACKAGE_PICKS: { group: string; value: string; label: string; platforms?: string[] }[] = [
+  { group: "Admin basics", value: "curl wget ca-certificates", label: "curl, wget, ca-certificates" },
+  { group: "Admin basics", value: "vim", label: "vim" },
+  { group: "Admin basics", value: "nano", label: "nano" },
+  { group: "Admin basics", value: "htop", label: "htop" },
+  { group: "Admin basics", value: "tmux", label: "tmux" },
+  { group: "Admin basics", value: "git", label: "git" },
+  { group: "Admin basics", value: "rsync", label: "rsync" },
+  { group: "Admin basics", value: "unzip zip", label: "unzip, zip" },
+  { group: "Admin basics", value: "jq", label: "jq" },
+  { group: "Admin basics", value: "sudo", label: "sudo" },
+  { group: "Admin basics", value: "openssh-server", label: "openssh-server (SSH access)", platforms: ["debian"] },
+  { group: "Admin basics", value: "unattended-upgrades", label: "unattended-upgrades (automatic security updates)" },
+  { group: "Network", value: "net-tools", label: "net-tools (ifconfig, netstat)" },
+  { group: "Network", value: "bind9-dnsutils", label: "bind9-dnsutils (dig, nslookup)" },
+  { group: "Network", value: "tcpdump", label: "tcpdump" },
+  { group: "Network", value: "chrony", label: "chrony (NTP time sync)" },
+  { group: "Network", value: "ufw", label: "ufw (firewall)" },
+  { group: "Network", value: "fail2ban", label: "fail2ban" },
+  { group: "Virtual machine guest", value: "open-vm-tools", label: "open-vm-tools (VMware)" },
+  { group: "Virtual machine guest", value: "qemu-guest-agent", label: "qemu-guest-agent (QEMU, Proxmox, UTM)" },
+  { group: "Virtual machine guest", value: "hyperv-daemons", label: "hyperv-daemons (Hyper-V)", platforms: ["debian"] },
+  { group: "Virtual machine guest", value: "linux-cloud-tools-virtual", label: "linux-cloud-tools-virtual (Hyper-V)", platforms: ["ubuntu"] },
+  { group: "Storage and file sharing", value: "nfs-common", label: "nfs-common (NFS client)" },
+  { group: "Storage and file sharing", value: "cifs-utils", label: "cifs-utils (SMB / Windows shares)" },
+  { group: "Storage and file sharing", value: "samba", label: "samba (file server)" },
+  { group: "Directory and identity", value: "realmd sssd sssd-tools adcli libnss-sss libpam-sss packagekit", label: "Active Directory join tools (realmd, sssd, adcli)" },
+  { group: "Services and languages", value: "docker.io", label: "docker.io (Docker engine)" },
+  { group: "Services and languages", value: "podman", label: "podman" },
+  { group: "Services and languages", value: "nginx", label: "nginx" },
+  { group: "Services and languages", value: "apache2", label: "apache2" },
+  { group: "Services and languages", value: "mariadb-server", label: "mariadb-server" },
+  { group: "Services and languages", value: "postgresql", label: "postgresql" },
+  { group: "Services and languages", value: "cockpit", label: "cockpit (web admin console)" },
+  { group: "Services and languages", value: "python3 python3-pip python3-venv", label: "Python 3 with pip and venv" },
+  { group: "Services and languages", value: "build-essential", label: "build-essential (gcc, make)" },
+  { group: "Desktop (large downloads)", value: "task-gnome-desktop", label: "GNOME desktop (task-gnome-desktop)", platforms: ["debian"] },
+  { group: "Desktop (large downloads)", value: "task-xfce-desktop", label: "Xfce desktop (task-xfce-desktop)", platforms: ["debian"] },
+  { group: "Desktop (large downloads)", value: "task-kde-desktop", label: "KDE Plasma desktop (task-kde-desktop)", platforms: ["debian"] },
+  { group: "Desktop (large downloads)", value: "ubuntu-desktop-minimal", label: "Ubuntu desktop, minimal (ubuntu-desktop-minimal)", platforms: ["ubuntu"] },
+  { group: "Desktop (large downloads)", value: "ubuntu-desktop", label: "Ubuntu desktop, full (ubuntu-desktop)", platforms: ["ubuntu"] },
+  { group: "Desktop (large downloads)", value: "xrdp", label: "xrdp (RDP into the desktop)" },
+];
+const TS_PLATFORM_LABELS: Record<string, string> = {
+  windows: "Windows",
+  debian: "Debian",
+  ubuntu: "Ubuntu",
+};
+/** A sequence's platform, defaulting to windows for anything saved before the
+ * field existed. */
+function tsPlatform(seq: { platform?: string }): string {
+  return seq.platform === "debian" || seq.platform === "ubuntu" ? seq.platform : "windows";
+}
+/** Every Linux platform shares the editor shape (no Windows sections, Command-only
+ * first-boot steps, the Linux field set); the field lists differ per platform. */
+function tsIsLinux(seq: { platform?: string }): boolean {
+  return tsPlatform(seq) !== "windows";
+}
+/** Ubuntu's Subiquity has a storage layout and an SSH switch where d-i has a partman
+ * recipe; everything else is the same question set. */
+const TS_DEBIAN_ONLY_FIELDS = ["partitionRecipe"];
+const TS_UBUNTU_ONLY_FIELDS = ["storageLayout", "sshServer"];
+function tsFieldOrder(platform: string): string[] {
+  if (platform === "windows") return TS_FIELD_ORDER;
+  if (platform === "ubuntu") {
+    const order = TS_DEBIAN_FIELD_ORDER.filter((k) => !TS_DEBIAN_ONLY_FIELDS.includes(k));
+    const at = order.indexOf("disk") + 1;
+    return [...order.slice(0, at), ...TS_UBUNTU_ONLY_FIELDS, ...order.slice(at)];
+  }
+  return TS_DEBIAN_FIELD_ORDER.filter((k) => !TS_UBUNTU_ONLY_FIELDS.includes(k));
+}
+function tsFieldLabel(platform: string, key: string): string {
+  const table = platform === "windows" ? TS_FIELD_LABELS : TS_DEBIAN_FIELD_LABELS;
+  return table[key] ?? key;
+}
+function tsDefaultFields(platform: string): Record<string, string> {
+  if (platform === "ubuntu") return TS_UBUNTU_DEFAULT_FIELDS;
+  if (platform === "debian") return TS_DEBIAN_DEFAULT_FIELDS;
+  return TS_DEFAULT_FIELDS;
+}
+
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 const IPV4_CIDR_RE = /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/;
 const TS_KIND_LABELS: Record<string, string> = {
@@ -447,7 +699,9 @@ export function PxeWorkspace({
   const [tsJoinOptIn, setTsJoinOptIn] = useState<Set<string>>(new Set());
   // Vault secrets offered as join credentials, and the editor that manages them.
   const [vaultSecrets, setVaultSecrets] = useState<VaultSecretSummary[]>([]);
-  const [vaultEditor, setVaultEditor] = useState<{ open: boolean; seqId?: string; target?: "join" | "account" }>({ open: false });
+  // target: which field the picked credential lands in - the Windows join credential,
+  // the Windows local account, or a Debian sequence's first user.
+  const [vaultEditor, setVaultEditor] = useState<{ open: boolean; seqId?: string; target?: "join" | "account" | "debianUser" }>({ open: false });
 
   const loadVaultSecrets = useCallback(async () => {
     try {
@@ -502,6 +756,13 @@ export function PxeWorkspace({
   const [tsSelectedId, setTsSelectedId] = useState<string | null>(null);
   const [tsSaving, setTsSaving] = useState(false);
   const [tsNewName, setTsNewName] = useState("");
+  /** Chosen when a sequence is created: it decides which answer file it compiles
+   * to, and therefore which fields the editor offers. Not changed afterwards,
+   * because the field sets do not overlap. */
+  const [tsNewPlatform, setTsNewPlatform] = useState("windows");
+  // The Linux installers a Debian sequence can bind to (Operating Systems > Linux
+  // network installers). Read when the node opens; the list is small and live.
+  const [tsLinuxInstallers, setTsLinuxInstallers] = useState<PxeBootLinuxNetbootEntry[]>([]);
   // Sequences whose local-domain machine OU is in "Custom..." free-text mode (the
   // select alone can't tell "custom equals the suggestion" from "picked the suggestion").
   // Preselected deploy-client menu item ("" = tech picks at the device).
@@ -762,6 +1023,22 @@ export function PxeWorkspace({
     };
   }, [tsExpanded]);
 
+  useEffect(() => {
+    if (!tsExpanded) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await sidecar.invoke<PxeBootLinuxNetbootResponse>("ListPxeBootLinuxNetboot");
+        if (!cancelled) setTsLinuxInstallers(data?.entries ?? []);
+      } catch {
+        if (!cancelled) setTsLinuxInstallers([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tsExpanded]);
+
   const tsDirty = useMemo(() => {
     if (!tsPayload || !tsEdit) return false;
     if (tsDefaultId !== (tsPayload.defaultSequenceId ?? "")) return true;
@@ -798,7 +1075,26 @@ export function PxeWorkspace({
       }
       // A local account that cannot resolve a password is silently dropped from the
       // unattend (login-less machine, Craig 2026-08-23) - catch it here instead.
-      const acct = s.localAccount;
+      if (tsIsLinux(s)) {
+        if (s.fields.userSource === "vault") {
+          if (!(s.fields.userVaultSecret ?? "").trim()) note("userVaultSecret", "pick a vault credential for the first user.");
+        } else if (!/^[a-z][-a-z0-9_]*$/.test((s.fields.username ?? "").trim())) {
+          note("username", "the first user name must be lower-case letters, digits, - or _, starting with a letter.");
+        }
+        if ((s.fields.runScriptFile ?? "") === "url" && !/^https?:\/\/\S+$/i.test((s.fields.runScriptUrl ?? "").trim())) {
+          note("runScriptUrl", "the first-boot script URL must start with http:// or https://.");
+        }
+      }
+      // A script step with nothing to fetch would be dropped by the normaliser on save.
+      (s.steps ?? []).forEach((st, i) => {
+        if (st.type !== "script") return;
+        if (!(st.file ?? "").trim() && !/^https?:\/\/\S+$/i.test((st.url ?? "").trim())) {
+          note(`step:${i}`, `step ${i + 1}: pick a script from the library or give a full http(s) URL.`);
+        }
+      });
+      // A preseed has its own first-user fields; the Windows local account never
+      // applies to it, so it must not block the save either.
+      const acct = tsIsLinux(s) ? undefined : s.localAccount;
       const acctMode = acct?.mode ?? (acct?.enabled ? (acct.passwordSource === "vault" ? "vault" : "manual") : "none");
       if (acct && acctMode === "vault") {
         if (!(acct.vaultSecret ?? "").trim()) {
@@ -1332,6 +1628,47 @@ export function PxeWorkspace({
       await sidecar.invoke("OpenPxeBootWimFolder");
     } catch (e) {
       toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  /** Copy a script from this machine into <library>/Scripts through the sidecar (which
+   * checks the #! line and fixes CRLF); resolves to the file name, or null. */
+  const importFirstBootScript = useCallback(async (kind: "linux" | "windows" = "linux"): Promise<string | null> => {
+    const picked = await open({
+      multiple: false,
+      title: kind === "windows" ? "First-boot PowerShell script" : "First-boot script",
+      filters: [
+        kind === "windows"
+          ? { name: "PowerShell script", extensions: ["ps1"] }
+          : { name: "Scripts", extensions: ["sh", "bash", "py", "pl", "rb"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    });
+    if (!picked || typeof picked !== "string") return null;
+    try {
+      const data = await sidecar.invoke<PxeBootTsScriptResponse>("ImportPxeBootTsScript", {
+        sourcePath: picked,
+        replaceExisting: true,
+      });
+      setTsPayload((prev) =>
+        prev ? { ...prev, firstBootScripts: data.scripts, scriptsDir: data.scriptsDir ?? prev.scriptsDir } : prev,
+      );
+      toast.success(
+        "Task sequences",
+        `${data.fileName} is in the Scripts folder${data.normalized ? " (line endings fixed for Linux)" : ""}. Save to publish.`,
+      );
+      return data.fileName;
+    } catch (e) {
+      toast.error("Task sequences", e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  }, []);
+
+  const openScriptsFolder = useCallback(async () => {
+    try {
+      await sidecar.invoke("OpenPxeBootTsScriptsFolder");
+    } catch (e) {
+      toast.error("Task sequences", e instanceof Error ? e.message : String(e));
     }
   }, []);
 
@@ -2698,7 +3035,9 @@ export function PxeWorkspace({
                               </button>
                             )}
                             <span className="mono text-[10px]" style={{ color: "var(--text3)" }}>
-                              {TS_KIND_LABELS[seq.kind] ?? seq.kind}
+                              {tsIsLinux(seq)
+                                ? TS_PLATFORM_LABELS[tsPlatform(seq)]
+                                : TS_KIND_LABELS[seq.kind] ?? seq.kind}
                             </span>
                             <span
                               className="mono text-[10px]"
@@ -2754,6 +3093,7 @@ export function PxeWorkspace({
                               className="grid grid-cols-[140px_1fr] items-center gap-x-3 gap-y-1.5 border-t px-3 py-2"
                               style={{ borderColor: "var(--border)" }}
                             >
+                              {!tsIsLinux(seq) ? (<>
                               <label className="text-[11px]" style={{ color: "var(--text2)" }}>
                                 Role
                               </label>
@@ -2780,6 +3120,8 @@ export function PxeWorkspace({
                                 <option value="client">Client</option>
                                 <option value="server">Server</option>
                               </select>
+                              </>) : null}
+                              {!tsIsLinux(seq) ? (<>
                               <label
                                 className="text-[11px]"
                                 style={{ color: "var(--text2)" }}
@@ -2880,9 +3222,24 @@ export function PxeWorkspace({
                                 />
                                 Join a domain
                               </label>
-                              {TS_FIELD_ORDER
-                                .filter((key) => key in seq.fields || ["registeredOrg", "registeredOwner", "userLocale", "inputLocale", "timeZone"].includes(key))
+                                </>) : null}
+                              {tsFieldOrder(tsPlatform(seq))
+                                .filter((key) => tsIsLinux(seq)
+                                  || key in seq.fields
+                                  || ["registeredOrg", "registeredOwner", "userLocale", "inputLocale", "timeZone"].includes(key))
                                 .filter((key) => {
+                                  // Every Windows-only rule below is skipped for a
+                                  // preseed, which has no join and no static-IP block.
+                                  if (tsIsLinux(seq)) {
+                                    const fromVault = seq.fields.userSource === "vault";
+                                    if (key === "userVaultSecret") return fromVault;
+                                    if (["username", "userFullName", "userPassword"].includes(key)) return !fromVault;
+                                    if (key === "runScriptUrl") {
+                                      const file = seq.fields.runScriptFile ?? "";
+                                      return file === "url" || (!file && Boolean(seq.fields.runScriptUrl));
+                                    }
+                                    return true;
+                                  }
                                   const joining = Boolean(seq.fields.joinDomain) || tsJoinOptIn.has(seq.id);
                                   if (["ipCidr", "gateway", "dns1"].includes(key))
                                     return seq.fields.network === "static";
@@ -2909,9 +3266,202 @@ export function PxeWorkspace({
                                             : undefined
                                       }
                                     >
-                                      {TS_FIELD_LABELS[key] ?? key}
+                                      {tsFieldLabel(tsPlatform(seq), key)}
                                     </label>
-                                    {key === "computerName" ? (
+                                    {tsIsLinux(seq) && key === "linuxInstaller" ? (
+                                      <select
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        value={seq.fields[key] ?? ""}
+                                        title="Which PXE menu entry offers this sequence. Any = every Debian entry. Installers are added under Operating Systems > Linux network installers."
+                                        onChange={(e) => setField(e.target.value)}
+                                      >
+                                        <option value="">Any {TS_PLATFORM_LABELS[tsPlatform(seq)]} installer on the menu</option>
+                                        {tsLinuxInstallers.filter((r) => (r.platform ?? "debian") === tsPlatform(seq)).map((r) => (
+                                          <option key={r.id} value={r.id}>
+                                            {r.label} {r.arch}
+                                            {r.ready ? "" : " - not added yet"}
+                                          </option>
+                                        ))}
+                                        {seq.fields[key] && !tsLinuxInstallers.some((r) => r.id === seq.fields[key]) ? (
+                                          <option value={seq.fields[key]}>{seq.fields[key]} (not in the catalog)</option>
+                                        ) : null}
+                                      </select>
+                                    ) : tsIsLinux(seq) && key === "userVaultSecret" ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <select
+                                          className="input-box mono h-[26px] flex-1 text-[11px]"
+                                          style={tsFieldOutline(seq.id, key)}
+                                          value={seq.fields[key] ?? ""}
+                                          title="The credential's login becomes the user (lower-cased, letters, digits, - and _), its full name the display name, and its password is hashed at publish. Nothing in clear reaches the share."
+                                          onChange={(e) => setField(e.target.value)}
+                                        >
+                                          <option value="">Choose a vault credential...</option>
+                                          {vaultSecrets.map((s) => (
+                                            <option key={s.name} value={s.name}>
+                                              {s.label || s.name}
+                                              {s.userName ? ` - ${s.userName}` : ""}
+                                            </option>
+                                          ))}
+                                          {seq.fields[key] && !vaultSecrets.some((s) => s.name === seq.fields[key]) ? (
+                                            <option value={seq.fields[key]}>{seq.fields[key]} (not in the vault)</option>
+                                          ) : null}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          className="btn px-1.5 py-0 text-[10px]"
+                                          title="Add a credential (user + password) to the vault, or pick one - it becomes this sequence's first user"
+                                          onClick={() => setVaultEditor({ open: true, seqId: seq.id, target: "debianUser" })}
+                                        >
+                                          Vault...
+                                        </button>
+                                      </div>
+                                    ) : tsIsLinux(seq) && key === "userPassword" ? (
+                                      <input
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        type="password"
+                                        value={seq.fields[key] ?? ""}
+                                        autoComplete="new-password"
+                                        placeholder={
+                                          seq.fields.userPasswordCrypted
+                                            ? "password set - type a new one to replace it"
+                                            : "hashed (crypt SHA-512) on save; blank = the installer asks"
+                                        }
+                                        title="Hashed on save and never stored or published in clear. Leave blank to keep the current hash."
+                                        onChange={(e) => setField(e.target.value)}
+                                      />
+                                    ) : tsIsLinux(seq) && key === "runScriptFile" ? (
+                                      <div className="flex items-center gap-1.5">
+                                        <select
+                                          className="input-box mono h-[26px] flex-1 text-[11px]"
+                                          value={seq.fields[key] ?? (seq.fields.runScriptUrl ? "url" : "")}
+                                          title={`Runs once at first boot through a one-shot systemd unit, as root, with the network up. Library scripts live in ${tsPayload?.scriptsDir ?? "<library>/Scripts"} and are served by Netboot's HTTP at /Scripts/.`}
+                                          onChange={(e) => setField(e.target.value)}
+                                        >
+                                          <option value="">(none)</option>
+                                          {(tsPayload?.firstBootScripts ?? [])
+                                            .filter((f) => !/\.ps1$/i.test(f))
+                                            .map((f) => (
+                                              <option key={f} value={f}>
+                                                {f} - from the library
+                                              </option>
+                                            ))}
+                                          <option value="url">Custom URL...</option>
+                                          {seq.fields[key] && seq.fields[key] !== "url" && !(tsPayload?.firstBootScripts ?? []).includes(seq.fields[key]) ? (
+                                            <option value={seq.fields[key]}>{seq.fields[key]} (missing from the library)</option>
+                                          ) : null}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          className="btn px-1.5 py-0 text-[10px]"
+                                          title="Copy a script from this machine into the Scripts folder and select it here. It needs a #! first line; CRLF line endings are fixed on the way in."
+                                          onClick={() =>
+                                            void importFirstBootScript().then((name) => {
+                                              if (name) setField(name);
+                                            })
+                                          }
+                                        >
+                                          Add...
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn px-1.5 py-0 text-[10px]"
+                                          title={`Open ${tsPayload?.scriptsDir ?? "the Scripts folder"} in the file manager`}
+                                          onClick={() => void openScriptsFolder()}
+                                        >
+                                          Folder
+                                        </button>
+                                      </div>
+                                    ) : tsIsLinux(seq) && key === "runScriptUrl" ? (
+                                      <input
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        value={seq.fields[key] ?? ""}
+                                        spellCheck={false}
+                                        placeholder="http://... - fetched by the installer at the end of the install"
+                                        onChange={(e) => setField(e.target.value.trim())}
+                                      />
+                                    ) : tsIsLinux(seq) && key === "packages" ? (
+                                      (() => {
+                                        // The text is the record; the picker only appends known names and
+                                        // the chips only remove, so nothing is typed that the archive has not got.
+                                        const current = (seq.fields[key] ?? "").split(/\s+/).filter(Boolean);
+                                        const picks = TS_LINUX_PACKAGE_PICKS.filter(
+                                          (p) => !p.platforms || p.platforms.includes(tsPlatform(seq)),
+                                        );
+                                        const groups = picks.map((p) => p.group).filter((g, i, all) => all.indexOf(g) === i);
+                                        const addPick = (value: string) => {
+                                          const add = value.split(/\s+/).filter((n) => n && !current.includes(n));
+                                          if (add.length > 0) setField([...current, ...add].join(" "));
+                                        };
+                                        return (
+                                          <div className="flex flex-col gap-1">
+                                            <div className="flex items-center gap-1.5">
+                                              <input
+                                                className="input-box mono h-[26px] flex-1 text-[11px]"
+                                                value={seq.fields[key] ?? ""}
+                                                spellCheck={false}
+                                                placeholder="space-separated package names, or pick from the list"
+                                                title="Installed from the distro's archive at the end of the install. A name the release's repositories do not have fails the package step, so prefer the list."
+                                                onChange={(e) => setField(e.target.value)}
+                                              />
+                                              <select
+                                                className="input-box mono h-[26px] w-[200px] text-[11px]"
+                                                value=""
+                                                title="Known packages for this platform - a pick is added to the list"
+                                                onChange={(e) => addPick(e.target.value)}
+                                              >
+                                                <option value="">Add a known package...</option>
+                                                {groups.map((g) => (
+                                                  <optgroup key={g} label={g}>
+                                                    {picks
+                                                      .filter((p) => p.group === g)
+                                                      .map((p) => (
+                                                        <option
+                                                          key={p.value}
+                                                          value={p.value}
+                                                          disabled={p.value.split(/\s+/).every((n) => current.includes(n))}
+                                                        >
+                                                          {p.label}
+                                                        </option>
+                                                      ))}
+                                                  </optgroup>
+                                                ))}
+                                              </select>
+                                            </div>
+                                            {current.length > 0 ? (
+                                              <span className="flex flex-wrap items-center gap-1 text-[10px]" style={{ color: "var(--text3)" }}>
+                                                Click to remove:
+                                                {current.map((n) => (
+                                                  <button
+                                                    key={n}
+                                                    type="button"
+                                                    className="btn px-1 py-0 text-[10px]"
+                                                    title={`Remove ${n} from the list`}
+                                                    onClick={() => setField(current.filter((x) => x !== n).join(" "))}
+                                                  >
+                                                    {n}
+                                                  </button>
+                                                ))}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        );
+                                      })()
+                                    ) : tsIsLinux(seq) && TS_DEBIAN_FIELD_OPTIONS[key] ? (
+                                      <select
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        value={seq.fields[key] ?? ""}
+                                        onChange={(e) => setField(e.target.value)}
+                                      >
+                                        {TS_DEBIAN_FIELD_OPTIONS[key].map((o) => (
+                                          <option key={o.value} value={o.value}>
+                                            {o.label}
+                                          </option>
+                                        ))}
+                                        {seq.fields[key] && !TS_DEBIAN_FIELD_OPTIONS[key].some((o) => o.value === seq.fields[key]) ? (
+                                          <option value={seq.fields[key]}>{seq.fields[key]} (custom)</option>
+                                        ) : null}
+                                      </select>
+                                    ) : key === "computerName" ? (
                                       <input
                                         className="input-box mono h-[26px] text-[11px]"
                                         value={seq.fields[key]}
@@ -3150,6 +3700,7 @@ export function PxeWorkspace({
                                   </Fragment>
                                 );
                               })}
+                              {!tsIsLinux(seq) && seq.kind !== "server" ? (<>
                               <label className="text-[11px]" style={{ color: "var(--text2)" }}>
                                 Win 11 requirements
                               </label>
@@ -3169,6 +3720,8 @@ export function PxeWorkspace({
                                 />
                                 Bypass TPM / Secure Boot / RAM / CPU (VMs, older hardware)
                               </label>
+                              </>) : null}
+                              {!tsIsLinux(seq) ? (<>
                               <label className="text-[11px]" style={{ color: "var(--text2)" }}>
                                 OOBE screens
                               </label>
@@ -3200,6 +3753,7 @@ export function PxeWorkspace({
                                   </label>
                                 ))}
                               </div>
+                              </>) : null}
                               <label className="text-[11px]" style={{ color: "var(--text2)" }}>
                                 After first-boot setup
                               </label>
@@ -3313,7 +3867,7 @@ export function PxeWorkspace({
                               </button>
                             </div>
                           ) : null}
-                          {selected ? (
+                          {selected && !tsIsLinux(seq) ? (
                             (() => {
                               const account = seq.localAccount ?? {
                                 enabled: false,
@@ -3470,17 +4024,31 @@ export function PxeWorkspace({
                           {selected ? (
                             <div className="border-t px-3 py-2" style={{ borderColor: "var(--border)" }}>
                               <div className="mb-1.5 flex items-center gap-2">
-                                <span className="mono text-[10px] uppercase tracking-wider" style={{ color: "var(--text3)" }}>
-                                  First-boot steps
+                                <span
+                                  className="mono text-[10px] uppercase tracking-wider"
+                                  style={{ color: "var(--text3)" }}
+                                  title={
+                                    tsIsLinux(seq)
+                                      ? "Run as root inside the installed system at the end of the install, before it reboots (no services are running yet). Anything that needs the running system goes in the first-boot script."
+                                      : undefined
+                                  }
+                                >
+                                  {tsIsLinux(seq) ? "End-of-install steps" : "First-boot steps"}
                                 </span>
                                 <span className="ml-auto flex gap-1">
                                   {(
                                     [
                                       ["reg", "+ Reg key"],
-                                      ["cmd", "+ Command"],
+                                      ["cmd", tsIsLinux(seq) ? "+ Bash" : "+ Command"],
                                       ["pwsh", "+ PowerShell"],
+                                      ["script", "+ Script by URL"],
                                     ] as const
-                                  ).map(([t, label]) => (
+                                  )
+                                    // A Linux step is one bash -c line run in-target at the end of the
+                                    // install; registry keys and PowerShell are Windows verbs and the
+                                    // builder skips them anyway.
+                                    .filter(([t]) => !tsIsLinux(seq) || t === "cmd")
+                                    .map(([t, label]) => (
                                     <button
                                       key={t}
                                       type="button"
@@ -3496,7 +4064,9 @@ export function PxeWorkspace({
                                                     ...(s.steps ?? []),
                                                     t === "reg"
                                                       ? { _key: `s${tsStepKeyCounter++}`, type: "reg", description: "", op: "add", path: "", name: "", valueType: "REG_SZ", data: "" }
-                                                      : { _key: `s${tsStepKeyCounter++}`, type: t, description: "", command: "" },
+                                                      : t === "script"
+                                                        ? { _key: `s${tsStepKeyCounter++}`, type: "script", description: "", file: "", url: "" }
+                                                        : { _key: `s${tsStepKeyCounter++}`, type: t, description: "", command: "" },
                                                   ],
                                                 }
                                               : s,
@@ -3509,7 +4079,7 @@ export function PxeWorkspace({
                                   ))}
                                 </span>
                               </div>
-                              {stepLibrary ? (
+                              {stepLibrary && !tsIsLinux(seq) ? (
                                 (() => {
                                   const pick = libraryPick[seq.id] ?? { entryId: "", value: "" };
                                   const entries = libraryFor(seq.kind);
@@ -3608,7 +4178,9 @@ export function PxeWorkspace({
                               ) : null}
                               {(seq.steps ?? []).length === 0 ? (
                                 <p className="text-[11px]" style={{ color: "var(--text3)" }}>
-                                  None - nothing runs at first boot beyond Windows setup itself.
+                                  {tsIsLinux(seq)
+                                    ? "None - nothing runs at the end of the install beyond fetching the first-boot script, if one is set."
+                                    : "None - nothing runs at first boot beyond Windows setup itself."}
                                 </p>
                               ) : (
                                 (seq.steps ?? []).map((step, idx) => {
@@ -3648,7 +4220,17 @@ export function PxeWorkspace({
                                           className="mono rounded border px-1 text-[9px] uppercase"
                                           style={{ borderColor: "var(--border)", color: "var(--text3)" }}
                                         >
-                                          {step.type === "pwsh" ? "PowerShell" : step.type === "reg" ? "Reg" : "Cmd"}
+                                          {step.type === "pwsh"
+                                            ? "PowerShell"
+                                            : step.type === "pwshEncoded"
+                                              ? "PS script"
+                                              : step.type === "script"
+                                                ? "Script"
+                                                : step.type === "reg"
+                                                  ? "Reg"
+                                                  : tsIsLinux(seq)
+                                                    ? "Bash"
+                                                    : "Cmd"}
                                         </span>
                                         <input
                                           className="input-box mono h-[22px] flex-1 text-[10px]"
@@ -3728,14 +4310,103 @@ export function PxeWorkspace({
                                             </>
                                           ) : null}
                                         </div>
+                                      ) : step.type === "script" ? (
+                                        (() => {
+                                          const ps1 = (tsPayload?.firstBootScripts ?? []).filter((f) => /\.ps1$/i.test(f));
+                                          const choice = step.file ? step.file : step.url ? "url" : "";
+                                          return (
+                                            <div className="flex flex-col gap-1">
+                                              <div className="flex items-center gap-1.5">
+                                                <select
+                                                  className="input-box mono h-[22px] flex-1 text-[10px]"
+                                                  value={choice}
+                                                  title="A .ps1 from the Scripts folder, served by Netboot's HTTP at /Scripts/, or any URL. Streamed at first boot - nothing is embedded, so the script can be any length."
+                                                  onChange={(e) =>
+                                                    updateStep(
+                                                      e.target.value === "url"
+                                                        ? { file: "", url: step.url || "http://" }
+                                                        : { file: e.target.value, url: "" },
+                                                    )
+                                                  }
+                                                >
+                                                  <option value="">Choose a script...</option>
+                                                  {ps1.map((f) => (
+                                                    <option key={f} value={f}>
+                                                      {f} - from the library
+                                                    </option>
+                                                  ))}
+                                                  <option value="url">Custom URL...</option>
+                                                  {step.file && !ps1.includes(step.file) ? (
+                                                    <option value={step.file}>{step.file} (missing from the library)</option>
+                                                  ) : null}
+                                                </select>
+                                                <button
+                                                  type="button"
+                                                  className="btn px-1.5 py-0 text-[10px]"
+                                                  title="Copy a .ps1 from this machine into the Scripts folder and select it here"
+                                                  onClick={() =>
+                                                    void importFirstBootScript("windows").then((name) => {
+                                                      if (name) updateStep({ file: name, url: "" });
+                                                    })
+                                                  }
+                                                >
+                                                  Add...
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  className="btn px-1.5 py-0 text-[10px]"
+                                                  title={`Open ${tsPayload?.scriptsDir ?? "the Scripts folder"} in the file manager`}
+                                                  onClick={() => void openScriptsFolder()}
+                                                >
+                                                  Folder
+                                                </button>
+                                              </div>
+                                              {choice === "url" ? (
+                                                <input
+                                                  className="input-box mono h-[22px] w-full text-[10px]"
+                                                  placeholder="http://... - fetched at first boot"
+                                                  value={step.url ?? ""}
+                                                  spellCheck={false}
+                                                  onChange={(e) => updateStep({ url: e.target.value.trim(), file: "" })}
+                                                />
+                                              ) : null}
+                                              <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                                Runs as SYSTEM from SetupComplete: powershell -Command &quot;irm &apos;&lt;url&gt;&apos; | iex&quot;. No $PSScriptRoot - the script is streamed, not saved.
+                                              </span>
+                                            </div>
+                                          );
+                                        })()
                                       ) : (
-                                        <input
-                                          className="input-box mono h-[22px] w-full text-[10px]"
-                                          placeholder={step.type === "pwsh" ? "PowerShell command..." : "Command..."}
-                                          value={step.command ?? ""}
-                                          spellCheck={false}
-                                          onChange={(e) => updateStep({ command: e.target.value })}
-                                        />
+                                        (() => {
+                                          // -EncodedCommand is base64 of UTF-16LE: 8/3 of the script's length,
+                                          // plus the powershell.exe prefix and the log redirect, on ONE cmd line.
+                                          const encodedLength =
+                                            step.type === "pwshEncoded" ? Math.ceil(((step.command ?? "").length * 2) / 3) * 4 + 90 : 0;
+                                          const tooLong = encodedLength > 8191;
+                                          return (
+                                            <div className="flex flex-col gap-1">
+                                              <input
+                                                className="input-box mono h-[22px] w-full text-[10px]"
+                                                style={tooLong ? { borderColor: "var(--amber)" } : undefined}
+                                                placeholder={
+                                                  step.type === "pwsh"
+                                                    ? "PowerShell command..."
+                                                    : tsIsLinux(seq)
+                                                      ? "bash -c ... as root in the installed system, end of install"
+                                                      : "Command..."
+                                                }
+                                                value={step.command ?? ""}
+                                                spellCheck={false}
+                                                onChange={(e) => updateStep({ command: e.target.value })}
+                                              />
+                                              {tooLong ? (
+                                                <span className="text-[10px]" style={{ color: "var(--amber)" }}>
+                                                  About {encodedLength} characters once encoded - over cmd&apos;s 8191-character line limit, so this step will not run at first boot. Save the script as a .ps1 in the Scripts folder and use a Script by URL step instead.
+                                                </span>
+                                              ) : null}
+                                            </div>
+                                          );
+                                        })()
                                       )}
                                     </div>
                                   );
@@ -3754,6 +4425,18 @@ export function PxeWorkspace({
                         spellCheck={false}
                         onChange={(e) => setTsNewName(e.target.value)}
                       />
+                      <div className="input-box h-[26px]">
+                        <select
+                          className="text-[11px]"
+                          value={tsNewPlatform}
+                          title="Windows compiles to unattend.xml; Debian compiles to a d-i preseed. The fields on offer differ, so this is chosen once."
+                          onChange={(e) => setTsNewPlatform(e.target.value)}
+                        >
+                          <option value="windows">Windows</option>
+                          <option value="debian">Debian</option>
+                          <option value="ubuntu">Ubuntu</option>
+                        </select>
+                      </div>
                       <button
                         type="button"
                         className="btn py-0.5 text-[10px]"
@@ -3765,9 +4448,11 @@ export function PxeWorkspace({
                             {
                               id,
                               name: tsNewName.trim() || "New sequence",
-                              kind: "client",
+                              platform: tsNewPlatform,
+                              // kind is a Windows role; a Linux sequence has none.
+                              kind: tsNewPlatform === "windows" ? "client" : "",
                               enabled: false,
-                              fields: { ...TS_DEFAULT_FIELDS },
+                              fields: { ...tsDefaultFields(tsNewPlatform) },
                               adminGroups: [],
                               steps: [],
                             },
@@ -3909,6 +4594,9 @@ export function PxeWorkspace({
               if (target === "account") {
                 const acct = s.localAccount ?? { enabled: true, name: "localadmin", mode: "vault" };
                 return { ...s, localAccount: { ...acct, mode: "vault", vaultSecret: secretName } };
+              }
+              if (target === "debianUser") {
+                return { ...s, fields: { ...s.fields, userSource: "vault", userVaultSecret: secretName } };
               }
               return { ...s, fields: { ...s.fields, joinCredential: `vault:${secretName}` } };
             }),
