@@ -173,7 +173,20 @@ enabled, `<id>.cfg` on the share) is a submenu: one item per sequence, `Interact
 install (no task sequence)`, `Back`. A sequence handler boots the same kernel and
 netboot initrd with `auto=true priority=critical preseed/url=${http_base}/TaskSequences/<id>.cfg`
 added before `---`; Interactive carries neither. Interactive is preselected unless the
-store's default sequence is a Debian one. A sequence whose "Linux installer" field names a
+store's default sequence is a Debian one. A sequence handler also carries
+`hw-detect/firmware-lookup=never`. The netboot initrd ships no firmware (only the
+regulatory database), and an unattended machine has no USB stick, yet d-i's
+check-missing-firmware still hunts for one: for every driver that asked for a blob it
+unloads and reloads the driver, mounts every partition on every disk looking for
+media, settles udev and goes round again, and at `priority=critical` its "load from
+removable media?" question is skipped and defaults to yes. A ThinkPad 11e 5th Gen sat
+on "Detect network hardware" for half an hour that way on 2026-09-06 - its wired
+RTL8168 asks for an optional `rtl_nic/rtl8168g-3.fw` - and installed in twenty minutes
+once the argument was on the line. Interactive keeps the question (it is asked at
+priority high, and "no" ends the loop). Nothing is lost: there is no firmware source
+to look up. Firmware for the installed system is a separate matter - Debian publishes
+`firmware.cpio.gz` for netboot (496 MB for trixie), and a preseed can set
+`apt-setup/non-free-firmware boolean true`; neither is wired up yet. A sequence whose "Linux installer" field names a
 release (`debian-<codename>-<arch>`) appears only under that release's entry; a blank one
 appears under every Debian entry. Gate: `scripts/test-linux-menu.ps1`; live:
 `scripts/test-linux-iso-boot-qemu.sh --preseed` (needs a published sequence whose disk

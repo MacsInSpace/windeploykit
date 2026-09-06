@@ -93,10 +93,10 @@ $tab = [char]9
 Write-Host 'Kernel arguments:'
 Check 'preseed args land before --- and keep what follows it' {
     $r = Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs 'vga=788 --- quiet' -PreseedHttpRel 'TaskSequences/x.cfg'
-    $r -eq 'vga=788 auto=true priority=critical preseed/url=${http_base}/TaskSequences/x.cfg --- quiet'
+    $r -eq 'vga=788 auto=true priority=critical hw-detect/firmware-lookup=never preseed/url=${http_base}/TaskSequences/x.cfg --- quiet'
 }
 Check 'preseed args append when there is no separator' {
-    (Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs 'vga=788' -PreseedHttpRel '/TaskSequences/x.cfg') -eq 'vga=788 auto=true priority=critical preseed/url=${http_base}/TaskSequences/x.cfg'
+    (Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs 'vga=788' -PreseedHttpRel '/TaskSequences/x.cfg') -eq 'vga=788 auto=true priority=critical hw-detect/firmware-lookup=never preseed/url=${http_base}/TaskSequences/x.cfg'
 }
 Check 'installer mirror args name the Debian mirror, the suite and the country=manual switch, before ---' {
     $r = Add-AppPxeBootDebianInstallerKernelArgs -KernelArgs 'vga=788 --- quiet' -Codename 'trixie'
@@ -143,7 +143,7 @@ Check 'sequence handler exists and boots the ISO kernel with the netboot initrd'
     ($seqBlock.Count -gt 0) -and ($seqKernel -like 'kernel ${http_base}/iso-mount/tok/install.amd/vmlinuz initrd=initrd.gz *') -and ($seqBlock -contains 'initrd ${http_base}/linux/debian/trixie-amd64-e7667ff9/initrd.gz')
 }
 Check 'sequence handler carries preseed/url for its .cfg, unattended, before ---' {
-    $seqKernel -match ' auto=true priority=critical preseed/url=\$\{http_base\}/TaskSequences/campuscast-receiver\.cfg --- quiet$'
+    $seqKernel -match ' auto=true priority=critical hw-detect/firmware-lookup=never preseed/url=\$\{http_base\}/TaskSequences/campuscast-receiver\.cfg --- quiet$'
 }
 Check 'sequence handler keeps the mirror args (the preseed has no mirror block on purpose)' {
     ($seqKernel -match ' mirror/country=manual ') -and ($seqKernel -match ' mirror/http/directory=/debian ')

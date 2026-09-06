@@ -546,6 +546,33 @@ bundled shim trusts the iPXE CA only); the Windows Script by URL step wants one 
 first boot; the Linux `cmd` step could take a script by URL too (`wget -qO- | bash`) if
 anyone asks.
 
+**First real hardware, 2026-09-06 evening (ThinkPad 11e 5th Gen, Celeron N4100, wired
+RTL8168, Intel AC 9260).** Both Debian entries sat on "Detect network hardware" with the
+mouse still moving. The syslog (Ctrl+Alt+F4 in the graphical installer; Ctrl+Alt+F2 is a
+shell) repeated `rtl_nic/rtl8168g-3.fw requested by r8169 ... failed with error -2`.
+Cause, read out of the initrd's own scripts (`usr/bin/check-missing-firmware`,
+`hw-detect`, `ethdetect`, `mountmedia`): the netboot initrd carries no firmware at all
+(4 entries under `lib/firmware`, all regulatory.db), and at `priority=critical` the
+"load missing firmware from removable media?" question is skipped with its default of
+yes, so the script unloads and reloads every driver that asked for a blob, mounts every
+partition it can find looking for media, settles udev, and repeats. Fix: sequence
+handlers carry `hw-detect/firmware-lookup=never` (`Add-AppPxeBootDebianPreseedKernelArgs`),
+which ends the loop after the first scan. Verified: same machine, same entry, installed
+and rebooted in about twenty minutes, then fetched its first-boot script and tarball.
+Two lessons for next time: (1) the menu iPXE runs is `tftp/boot.ipxe`, not
+`http/menu.ipxe` - a hand patch to the served menu must hit `tftp/boot.ipxe` and
+`http/boot.ipxe` too (the sidecar regenerates all three on publish); (2) d-i's DHCP lease
+is a different IP from iPXE's (10.0.1.45 vs .44 here), so do not filter the Caddy log on
+the iPXE address when looking for the preseed fetch.
+
+Open from that session: firmware for the *installed* system. A wired netboot install
+never loads firmware, so d-i leaves `non-free-firmware` off and a laptop reboots with no
+Wi-Fi. Options: `apt-setup/non-free-firmware boolean true` in the preseed plus
+`firmware-linux`/`firmware-iwlwifi`/`firmware-realtek`/`firmware-sof-signed` in the
+package picker (cheap, covers the installed system); Debian's netboot `firmware.cpio.gz`
+appended as a second iPXE initrd (496 MB for trixie - covers the installer too, but
+heavy). CampusCast's own first-boot script enables the component itself for now.
+
 ### Scope sweep, 2026-08-21 - removed what is not an MDT/PXE replacement
 
 Craig: *"All we are doing is MDT/WDS and PXE imaging."* Everything below was

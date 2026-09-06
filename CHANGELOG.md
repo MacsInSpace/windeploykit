@@ -3,6 +3,20 @@
 All notable changes to WinDeployKit. Dates are when the work landed on `main`.
 The format follows Keep a Changelog; the repository is ASCII-only, so are these notes.
 
+## Unreleased
+
+### Fixed
+
+- **Debian sequences no longer stall on "Detect network hardware" on real hardware.**
+  Sequence handlers now pass `hw-detect/firmware-lookup=never`. The netboot initrd has
+  no firmware and an unattended machine has no USB stick, but at `priority=critical`
+  d-i's check-missing-firmware took the default "load from removable media" answer and
+  looped: unload and reload every driver that asked for a blob, mount every partition
+  looking for media, repeat. A ThinkPad 11e 5th Gen (wired RTL8168, optional
+  `rtl8168g-3.fw`) sat there for half an hour; with the argument it installed in
+  twenty minutes. The Interactive entry is unchanged: it asks the question and "no"
+  ends the loop.
+
 ## Unreleased - Linux task sequences (merged 2026-09-06)
 
 Branch `feature/linux-task-sequences`. Design record: `AGENT_NOTES.md` sections

@@ -2339,6 +2339,13 @@ function Add-AppPxeBootDebianPreseedKernelArgs {
         auto=true defers the locale and keyboard questions until the network is up and
         the preseed fetched; priority=critical asks nothing the preseed answers. Never
         emit auto=true without a URL - d-i then stops to ask for one (seen 2026-09-04).
+        hw-detect/firmware-lookup=never: the netboot initrd carries no firmware and an
+        unattended install has no USB stick, so check-missing-firmware would otherwise
+        loop - unload and reload every driver that asked for a blob (the wired r8169
+        included), mount every partition looking for media, settle udev, repeat. At
+        priority=critical its "load from removable media?" question is skipped and
+        defaults to yes, which is how a ThinkPad 11e sat on "Detect network hardware"
+        for half an hour (2026-09-06). "never" ends the loop after the first scan.
         ${http_base} is iPXE's variable, expanded on the kernel line at boot, so the
         URL follows whatever the menu resolved (LAN IP or ${next-server}).
     #>
@@ -2346,7 +2353,7 @@ function Add-AppPxeBootDebianPreseedKernelArgs {
         [string]$KernelArgs,
         [Parameter(Mandatory)][string]$PreseedHttpRel
     )
-    $extra = 'auto=true priority=critical preseed/url=${http_base}/' + $PreseedHttpRel.TrimStart('/')
+    $extra = 'auto=true priority=critical hw-detect/firmware-lookup=never preseed/url=${http_base}/' + $PreseedHttpRel.TrimStart('/')
     return (Add-AppPxeBootKernelArgsBeforeSeparator -KernelArgs $KernelArgs -Extra $extra)
 }
 
