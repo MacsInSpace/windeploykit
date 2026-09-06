@@ -212,6 +212,16 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
             $fields[[string]$n] = [string](Get-AppPxeBootTsProp -Item $fieldsIn -Name ([string]$n))
         }
     }
+    # Debian: a password typed in the panel arrives as fields.userPassword and is hashed
+    # here - only userPasswordCrypted is ever stored or published. A blank one keeps the
+    # hash already saved.
+    if ($platform -eq 'debian' -and $fields.Contains('userPassword')) {
+        $plainPw = [string]$fields['userPassword']
+        if (-not [string]::IsNullOrEmpty($plainPw)) {
+            $fields['userPasswordCrypted'] = ConvertTo-AppPxeBootTsSha512Crypt -Password $plainPw
+        }
+        $fields.Remove('userPassword')
+    }
     # Heal the wrapper leak (pre-2026-08-20 the payload stringified the raw
     # override object into the dropdown, and it could get saved):
     # '@{value=example.local; userLocked=True; ...}' -> 'example.local'.
@@ -1373,6 +1383,20 @@ function Sync-AppPxeBootTaskSequenceStore {
     $dir = Get-AppPxeBootTaskSequenceLibraryDir
     if (-not $dir) { return @{ published = 0; dir = $null } }
     if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
+    # <library>/Scripts: first-boot scripts a Debian sequence can name; served by Caddy.
+    try {
+        $scriptsDir = Get-AppPxeBootTsScriptsDir
+        if ($scriptsDir -and -not (Test-Path -LiteralPath $scriptsDir)) {
+            $null = New-Item -Path $scriptsDir -ItemType Directory -Force
+            $readme = Join-Path $scriptsDir 'README.txt'
+            [System.IO.File]::WriteAllText($readme, ("First-boot scripts for Linux task sequences.`n" +
+                "Drop a script here (for example firstboot.sh) and pick it as the sequence's First-boot script.`n" +
+                "The installer fetches it from this machine over HTTP (/Scripts/<name>) at the end of the install`n" +
+                "and runs it once at first boot through a one-shot systemd unit.`n"), (New-Object System.Text.UTF8Encoding $false))
+        }
+    } catch {
+        Write-SidecarLogVerbose "Task sequences: Scripts folder not created - $($_.Exception.Message)"
+    }
 
     $published = 0
     $keep = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -1581,6 +1605,172 @@ function Sync-AppPxeBootTaskSequenceStore {
 # it. The pattern below - drop a script, register a one-shot systemd unit that
 # disables itself - is the one CampusCast's own preseed uses in production.
 
+function New-AppPxeBootTsCryptSalt {
+    # 16 characters from crypt's alphabet, from the platform CSPRNG.
+    $alphabet = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    $bytes = New-Object byte[] 16
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    return (-join ($bytes | ForEach-Object { $alphabet[$_ % 64] }))
+}
+
+function ConvertTo-AppPxeBootTsSha512Crypt {
+    <#
+    .SYNOPSIS
+        crypt(3) SHA-512 ("$6$..."), the form d-i's passwd/user-password-crypted takes.
+        Drepper's algorithm at the default 5000 rounds, in pure .NET so it runs the same
+        on macOS and Windows (openssl passwd -6 is not on Windows).
+    .NOTES
+        Verified against the specification's reference vector and LibreSSL's
+        openssl passwd -6 in test-task-sequence-debian.ps1.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Password,
+        [string]$Salt
+    )
+    if ([string]::IsNullOrEmpty($Salt)) { $Salt = New-AppPxeBootTsCryptSalt }
+    $Salt = ($Salt -replace '[^./0-9A-Za-z]', '')
+    if ($Salt.Length -gt 16) { $Salt = $Salt.Substring(0, 16) }
+    # $keyBytes/$saltBytes, never $keyBytes/$saltBytes: variable names are case-insensitive, and
+    # assigning bytes to the [string] parameter $Salt would stringify them.
+    $keyBytes = [System.Text.Encoding]::UTF8.GetBytes($Password)
+    $saltBytes = [System.Text.Encoding]::UTF8.GetBytes($Salt)
+    $join = {
+        param($parts)
+        $ms = New-Object System.IO.MemoryStream
+        foreach ($p in $parts) { $b = [byte[]]$p; if ($b.Length -gt 0) { $ms.Write($b, 0, $b.Length) } }
+        , $ms.ToArray()
+    }
+    $stretch = {
+        # D repeated to exactly $len bytes.
+        param([byte[]]$D, [int]$len)
+        $out = New-Object byte[] $len
+        for ($i = 0; $i -lt $len; $i++) { $out[$i] = $D[$i % 64] }
+        , $out
+    }
+    $sha = [System.Security.Cryptography.SHA512]::Create()
+    try {
+        # B = H(key salt key)
+        $B = $sha.ComputeHash((& $join @($keyBytes, $saltBytes, $keyBytes)))
+        # A = H(key salt B-by-keylen <B or key per keylen bits>)
+        $aParts = [System.Collections.Generic.List[byte[]]]::new()
+        $aParts.Add($keyBytes); $aParts.Add($saltBytes)
+        $n = $keyBytes.Length
+        while ($n -gt 64) { $aParts.Add($B); $n -= 64 }
+        if ($n -gt 0) { $aParts.Add([byte[]]$B[0..($n - 1)]) }
+        for ($cnt = $keyBytes.Length; $cnt -gt 0; $cnt = $cnt -shr 1) {
+            if ($cnt -band 1) { $aParts.Add($B) } else { $aParts.Add($keyBytes) }
+        }
+        $A = $sha.ComputeHash((& $join $aParts.ToArray()))
+        # DP = H(key x keylen), P = DP stretched to keylen
+        $dpParts = [System.Collections.Generic.List[byte[]]]::new()
+        for ($i = 0; $i -lt $keyBytes.Length; $i++) { $dpParts.Add($keyBytes) }
+        $DP = $sha.ComputeHash((& $join $dpParts.ToArray()))
+        $P = & $stretch $DP $keyBytes.Length
+        # DS = H(salt x (16 + A[0])), S = DS stretched to saltlen
+        $dsParts = [System.Collections.Generic.List[byte[]]]::new()
+        for ($i = 0; $i -lt (16 + [int]$A[0]); $i++) { $dsParts.Add($saltBytes) }
+        $DS = $sha.ComputeHash((& $join $dsParts.ToArray()))
+        $S = & $stretch $DS $saltBytes.Length
+        $C = $A
+        for ($i = 0; $i -lt 5000; $i++) {
+            $parts = [System.Collections.Generic.List[byte[]]]::new()
+            if ($i -band 1) { $parts.Add($P) } else { $parts.Add($C) }
+            if ($i % 3) { $parts.Add($S) }
+            if ($i % 7) { $parts.Add($P) }
+            if ($i -band 1) { $parts.Add($C) } else { $parts.Add($P) }
+            $C = $sha.ComputeHash((& $join $parts.ToArray()))
+        }
+    } finally {
+        $sha.Dispose()
+    }
+    $alphabet = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    $sb = [System.Text.StringBuilder]::new()
+    $emit = {
+        param([int]$b2, [int]$b1, [int]$b0, [int]$count)
+        $w = ($b2 -shl 16) -bor ($b1 -shl 8) -bor $b0
+        for ($k = 0; $k -lt $count; $k++) { [void]$sb.Append($alphabet[$w -band 63]); $w = $w -shr 6 }
+    }
+    foreach ($t in @(@(0, 21, 42), @(22, 43, 1), @(44, 2, 23), @(3, 24, 45), @(25, 46, 4), @(47, 5, 26), @(6, 27, 48),
+            @(28, 49, 7), @(50, 8, 29), @(9, 30, 51), @(31, 52, 10), @(53, 11, 32), @(12, 33, 54), @(34, 55, 13),
+            @(56, 14, 35), @(15, 36, 57), @(37, 58, 16), @(59, 17, 38), @(18, 39, 60), @(40, 61, 19), @(62, 20, 41))) {
+        & $emit ([int]$C[$t[0]]) ([int]$C[$t[1]]) ([int]$C[$t[2]]) 4
+    }
+    & $emit 0 0 ([int]$C[63]) 2
+    return ('$6$' + $Salt + '$' + $sb.ToString())
+}
+
+function ConvertTo-AppPxeBootTsLinuxUserName {
+    # user-setup accepts ^[a-z][-a-z0-9_]*$ - a vault login like CORP\Local.Admin becomes localadmin.
+    param([string]$Name)
+    $n = [string]$Name
+    if ($n -match '^(.+)\\(.+)$') { $n = $matches[2] }
+    if ($n -match '^(.+)@(.+)$') { $n = $matches[1] }
+    $n = ($n.ToLowerInvariant() -replace '[^a-z0-9_-]', '')
+    $n = $n.TrimStart('-', '_', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9')
+    return $n
+}
+
+function Resolve-AppPxeBootTsDebianVaultUser {
+    <#
+    .SYNOPSIS
+        The first user from a vault credential: @{ username; fullName; crypted }, or $null.
+        The password is hashed here, at publish; nothing in clear reaches the share.
+    #>
+    param([string]$SecretName)
+    if ([string]::IsNullOrWhiteSpace($SecretName)) { return $null }
+    if (-not (Test-AppSidecarCommand Get-AppVaultCredential) -or -not (Test-AppSidecarCommand Get-AppVaultPlainSecret)) { return $null }
+    $cred = Get-AppVaultCredential -Name $SecretName
+    if (-not $cred) {
+        Write-SidecarLog "Task sequences: vault credential '$SecretName' is missing - Debian first user not set, the installer will ask"
+        return $null
+    }
+    $login = [string](Get-AppPxeBootTsProp -Item $cred -Name 'UserName')
+    $username = ConvertTo-AppPxeBootTsLinuxUserName -Name $login
+    $plain = [string](Get-AppVaultPlainSecret -Name $SecretName)
+    if ([string]::IsNullOrWhiteSpace($username) -or [string]::IsNullOrEmpty($plain)) {
+        Write-SidecarLog "Task sequences: vault credential '$SecretName' has no usable user/password - Debian first user not set"
+        return $null
+    }
+    $fullName = ''
+    try {
+        if (Test-AppSidecarCommand Get-AppVaultSecretInfo) {
+            $info = Get-AppVaultSecretInfo -Name $SecretName
+            $fullName = [string](Get-AppPxeBootTsProp -Item $info -Name 'fullName')
+            if ([string]::IsNullOrWhiteSpace($fullName)) { $fullName = [string](Get-AppPxeBootTsProp -Item $info -Name 'label') }
+        }
+    } catch { $fullName = '' }
+    if ([string]::IsNullOrWhiteSpace($fullName)) { $fullName = $username }
+    if ($username -ne $login) { Write-SidecarLogVerbose "Task sequences: vault login '$login' becomes Linux user '$username'" }
+    return @{ username = $username; fullName = $fullName; crypted = (ConvertTo-AppPxeBootTsSha512Crypt -Password $plain) }
+}
+
+function Get-AppPxeBootTsScriptsDir {
+    # <library>/Scripts: first-boot scripts, served by Caddy at /Scripts/ and visible on Deploy$.
+    try {
+        $root = Get-AppImageLibraryRoot -NoCreate
+        if ($root) { return (Join-Path $root 'Scripts') }
+    } catch { }
+    return $null
+}
+
+function Get-AppPxeBootTsFirstBootScripts {
+    # File names the panel offers for "First-boot script". Anything regular except the README.
+    $dir = Get-AppPxeBootTsScriptsDir
+    if (-not $dir -or -not (Test-Path -LiteralPath $dir -PathType Container)) { return @() }
+    return @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notmatch '^(README|readme)' -and $_.Name -notmatch '^\.' } |
+        Sort-Object Name | ForEach-Object { $_.Name })
+}
+
+function Get-AppPxeBootTsScriptsBaseUrl {
+    # Where a target fetches a library script from: this laptop's Caddy. Resolved at
+    # publish, and publish runs on every Start / menu regen, so the LAN IP stays current.
+    if (Test-AppSidecarCommand Get-AppPxeBootLocalHttpBaseUrl) {
+        return ((Get-AppPxeBootLocalHttpBaseUrl) + '/Scripts')
+    }
+    return 'http://localhost:8080/Scripts'
+}
+
 function ConvertTo-AppPxeBootTsShellSingleQuoted {
     <#
         .SYNOPSIS
@@ -1606,6 +1796,17 @@ function Build-AppPxeBootTaskSequencePreseedLateCommand {
     $parts = @()
     $flds = $Sequence.fields
     $runUrl = if ($flds -and $flds.Contains('runScriptUrl')) { ([string]$flds['runScriptUrl']).Trim() } else { '' }
+    # runScriptFile: '' = none (a legacy runScriptUrl alone still counts), 'url' = the
+    # free URL in runScriptUrl, anything else = a file in <library>/Scripts served by Caddy.
+    $runFile = if ($flds -and $flds.Contains('runScriptFile')) { ([string]$flds['runScriptFile']).Trim() } else { '' }
+    if ($runFile -and $runFile -ne 'url') {
+        if ($runFile -match '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            $runUrl = "$(Get-AppPxeBootTsScriptsBaseUrl)/$runFile"
+        } else {
+            Write-SidecarLog "Task sequences: first-boot script name '$runFile' is not a plain file name - skipped"
+            $runUrl = ''
+        }
+    }
     if ($runUrl) {
         # Fetched at install time rather than embedded, so the script can change
         # without republishing every sequence that uses it. Failure is loud: a
@@ -1666,6 +1867,20 @@ function Build-AppPxeBootTaskSequencePreseed {
     $username  = & $f 'username'   'localadmin'
     $fullName  = & $f 'userFullName' 'Local Administrator'
     $pwCrypt   = & $f 'userPasswordCrypted'
+    # First user from the vault (Craig, 2026-09-06): the credential's login becomes the
+    # user, its full name the GECOS, and its password is hashed at publish. A vault
+    # entry that cannot be resolved leaves the password out, so the installer asks
+    # rather than creating a user nobody can log in as.
+    if ((& $f 'userSource' 'manual') -eq 'vault') {
+        $vaultUser = Resolve-AppPxeBootTsDebianVaultUser -SecretName (& $f 'userVaultSecret')
+        if ($vaultUser) {
+            $username = [string]$vaultUser.username
+            $fullName = [string]$vaultUser.fullName
+            $pwCrypt  = [string]$vaultUser.crypted
+        } else {
+            $pwCrypt = ''
+        }
+    }
     $disk      = & $f 'disk'       '/dev/nvme0n1 /dev/sda /dev/mmcblk0'
     $recipe    = & $f 'partitionRecipe' 'atomic'
     $packages  = & $f 'packages'   ''
@@ -1839,6 +2054,8 @@ function Get-AppPxeBootTaskSequencesPayload {
         installImages     = $installImages
         regionalDefaults  = (Get-AppPxeBootTsRegionalDefaults)
         libraryDir        = $dir
+        firstBootScripts  = @(Get-AppPxeBootTsFirstBootScripts)
+        scriptsDir        = (Get-AppPxeBootTsScriptsDir)
         publishedFiles    = $publishedFiles
         defaultSequenceId  = (Get-AppPxeBootTaskSequenceDefaultId)
         credentialOptions  = $credentialOptions

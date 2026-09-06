@@ -19,11 +19,15 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $root = Split-Path -Parent $PSScriptRoot
+# The lib logs on the vault path; standalone there is no sidecar to log to.
+function Write-SidecarLog { param([string]$Message, [switch]$Flush) }
+function Write-SidecarLogVerbose { param([string]$Message) }
 . (Join-Path $root 'sidecar/lib/PxeBootTaskSequences.ps1')
 
 $script:fail = 0
 function Check($label, [scriptblock]$test) {
     $ok = $false
+    $msg = ''
     try { $ok = [bool](& $test) } catch { $ok = $false; $msg = $_.Exception.Message }
     if ($ok) { Write-Host "  [OK  ] $label" }
     else {
@@ -92,6 +96,52 @@ Check 'the trixie recipes server and small_disk are accepted, anything else fall
     ((Build-AppPxeBootTaskSequencePreseed -Sequence (& $mk 'small_disk')) -match 'choose_recipe select small_disk') -and
     ((Build-AppPxeBootTaskSequencePreseed -Sequence (& $mk 'server')) -match 'choose_recipe select server') -and
     ((Build-AppPxeBootTaskSequencePreseed -Sequence (& $mk 'bogus')) -match 'choose_recipe select atomic')
+}
+Check 'crypt(3) SHA-512 matches the reference vector (and openssl passwd -6)' {
+    (ConvertTo-AppPxeBootTsSha512Crypt -Password 'Hello world!' -Salt 'saltstring') -eq '$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1'
+}
+Check 'a salt longer than 16 characters is truncated the way crypt does' {
+    (ConvertTo-AppPxeBootTsSha512Crypt -Password 'Hello world!' -Salt 'saltstringsaltstring') -like '$6$saltstringsaltst$*'
+}
+Check 'no salt given: a fresh 16-character salt from the crypt alphabet, 86-character hash' {
+    $h = ConvertTo-AppPxeBootTsSha512Crypt -Password 'wdk'
+    ($h -match '^\$6\$[./0-9A-Za-z]{16}\$[./0-9A-Za-z]{86}$') -and ($h -ne (ConvertTo-AppPxeBootTsSha512Crypt -Password 'wdk'))
+}
+Check 'a typed password is hashed on save and the clear text does not survive the record' {
+    $r = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'pw'; name = 'PW'; platform = 'debian'; fields = [pscustomobject]@{ userPassword = 'Hello world!'; username = 'wdk' } })
+    (-not $r.fields.Contains('userPassword')) -and ([string]$r.fields['userPasswordCrypted'] -match '^\$6\$') -and ((Build-AppPxeBootTaskSequencePreseed -Sequence $r) -notmatch 'Hello world')
+}
+Check 'a blank typed password keeps the saved hash' {
+    $r = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'pw2'; name = 'PW'; platform = 'debian'; fields = [pscustomobject]@{ userPassword = ''; userPasswordCrypted = '$6$keep$keep' } })
+    (-not $r.fields.Contains('userPassword')) -and ([string]$r.fields['userPasswordCrypted'] -eq '$6$keep$keep')
+}
+# Vault-backed first user: the credential's login becomes the Linux user, its password is
+# hashed at publish. Stubs stand in for the vault (the sidecar's Test-AppSidecarCommand
+# fallback finds them by name).
+function Get-AppVaultCredential { param($Name) if ($Name -eq 'lab-admin') { [pscustomobject]@{ UserName = 'CORP\Lab.Admin'; Password = $null } } }
+function Get-AppVaultPlainSecret { param($Name) if ($Name -eq 'lab-admin') { 'Hello world!' } }
+function Get-AppVaultSecretInfo { param($Name) [pscustomobject]@{ label = 'Lab admin'; fullName = 'Lab Administrator' } }
+Check 'a vault first user: login lower-cased and cleaned, full name from the vault, password hashed, nothing in clear' {
+    $v = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'v'; name = 'V'; platform = 'debian'; fields = [pscustomobject]@{ userSource = 'vault'; userVaultSecret = 'lab-admin'; username = 'ignored'; userFullName = 'Ignored' } })
+    $out = Build-AppPxeBootTaskSequencePreseed -Sequence $v
+    ($out -match 'passwd/username string labadmin') -and ($out -match 'passwd/user-fullname string Lab Administrator') -and ($out -match 'passwd/user-password-crypted password \$6\$') -and ($out -notmatch 'Hello world') -and ($out -notmatch 'ignored')
+}
+Check 'a vault credential that is missing leaves the password out so the installer asks' {
+    $v = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'v2'; name = 'V2'; platform = 'debian'; fields = [pscustomobject]@{ userSource = 'vault'; userVaultSecret = 'no-such' } })
+    (Build-AppPxeBootTaskSequencePreseed -Sequence $v) -match 'No password hash set'
+}
+Check 'a Windows login shape becomes a Linux user name' {
+    ((ConvertTo-AppPxeBootTsLinuxUserName -Name 'CORP\Local.Admin') -eq 'localadmin') -and ((ConvertTo-AppPxeBootTsLinuxUserName -Name 'ops@example.com') -eq 'ops') -and ((ConvertTo-AppPxeBootTsLinuxUserName -Name '1st-user') -eq 'st-user')
+}
+function Get-AppPxeBootLocalHttpBaseUrl { 'http://10.0.0.1:8080' }
+Check 'a library first-boot script resolves to this machine''s /Scripts/ URL in late_command' {
+    $r = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'fs'; name = 'FS'; platform = 'debian'; fields = [pscustomobject]@{ runScriptFile = 'firstboot.sh' } })
+    (Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $r) -match "wget -qO /usr/local/sbin/wdk-run .{0,6}http://10\.0\.0\.1:8080/Scripts/firstboot\.sh'"
+}
+Check 'a custom URL is used as typed, and a path-shaped script name is refused' {
+    $u = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'fu'; name = 'FU'; platform = 'debian'; fields = [pscustomobject]@{ runScriptFile = 'url'; runScriptUrl = 'https://example.org/x.sh' } })
+    $b = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'fb'; name = 'FB'; platform = 'debian'; fields = [pscustomobject]@{ runScriptFile = '../etc/passwd' } })
+    ((Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $u) -match "'https://example\.org/x\.sh'") -and ((Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $b) -eq '')
 }
 Check 'UEFI install is forced: d-i must not stop to ask when another OS sits on a disk in BIOS mode' {
     $cfg -match 'partman-efi/non_efi_system boolean true'

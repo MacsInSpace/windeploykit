@@ -330,6 +330,29 @@ a cache description, correctly left alone.
   (`Get-AppPxeBootLinuxMenuHandlerLines` filters per entry by codename + arch,
   which every inventory row now carries). The Windows local-account validation is
   skipped for a preseed so an empty Windows account cannot block a Debian save.
+- **First user from the vault, passwords hashed (2026-09-06, Craig).** A Debian
+  sequence's first user is either typed or a vault credential (`userSource`
+  manual|vault, `userVaultSecret`). Vault: at publish the credential's login
+  becomes the Linux user (`ConvertTo-AppPxeBootTsLinuxUserName`: strip
+  DOMAIN\ or @realm, lower-case, keep [a-z0-9_-], drop leading digits), its full
+  name the GECOS, and its password is hashed with
+  `ConvertTo-AppPxeBootTsSha512Crypt` - crypt(3) SHA-512 in pure .NET (Drepper's
+  algorithm, 5000 rounds, verified against the spec vector and LibreSSL's
+  `openssl passwd -6`; ~0.4 s a hash). A typed password arrives as
+  `fields.userPassword` and is hashed in `ConvertTo-AppPxeBootTaskSequenceRecord`
+  on save - only `userPasswordCrypted` is ever stored or published, blank keeps
+  the saved hash. An unresolvable vault entry leaves the password out, so the
+  installer asks rather than creating a user nobody can log in as. Gotcha met
+  writing it: PowerShell variable names are case-insensitive, so `$salt = bytes`
+  silently assigned into the `[string]$Salt` parameter and stringified the
+  array - byte variables are `$keyBytes` / `$saltBytes`.
+- **First-boot script from the library (2026-09-06).** `<library>/Scripts/` (created
+  on publish with a README) is served by Caddy at `/Scripts/` and listed in the
+  payload as `firstBootScripts`; the panel offers it as a dropdown with "Custom
+  URL..." as the escape. Field `runScriptFile`: '' none (a legacy `runScriptUrl`
+  alone still counts), `url` = the typed URL, else a plain file name resolved at
+  publish to `http://<lan-ip>:8080/Scripts/<name>` (publish runs on every Start
+  and menu regen, so the IP stays current). Path-shaped names are refused.
 - Debugging an installer you cannot type at: from tier 3 the QEMU test passes
   `log_host=10.0.2.2 log_port=5514` and listens with `nc -u -k -l 5514`, so
   d-i's syslog lands in `$WORK/d-i.syslog` (udeb fetches, module loads, disks

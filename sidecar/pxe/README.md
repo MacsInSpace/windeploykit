@@ -153,6 +153,11 @@ appears under every Debian entry. Gate: `scripts/test-linux-menu.ps1`; live:
 `scripts/test-linux-iso-boot-qemu.sh --preseed` (needs a published Debian sequence
 whose disk is `/dev/vda`) - 2026-09-05: the sequence handler booted, d-i fetched debian-qemu-test.cfg off the share, loaded its components off the ISO and asked nothing up to partitioning, where it stopped with 'No root file system is defined' - the storage-udeb gap (next item), not the menu.
 
-Still open: the installed system's apt sources point at this laptop's ISO tree until a
-preseed step fixes them, and `runScriptUrl` is free text rather than a served file.
-Secure Boot must be off: the bundled shim trusts the iPXE CA, not a distro kernel key.
+First user: typed, or a vault credential whose login/full name/password are resolved at
+publish (password hashed with crypt SHA-512 in the sidecar). A typed password is hashed on
+save; only the hash is stored or published. First-boot script: a file in
+`<library>/Scripts/` (served at `/Scripts/`, listed in the panel) or a custom URL.
+
+Still open: Secure Boot must be off (the bundled shim trusts the iPXE CA, not a distro
+kernel key). With the mirror on the internet the installed system's apt sources are the
+normal Debian ones.

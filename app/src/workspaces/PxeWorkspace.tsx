@@ -111,13 +111,17 @@ const TS_DEBIAN_FIELD_LABELS: Record<string, string> = {
   locale: "Locale",
   keymap: "Keyboard",
   timezone: "Time zone",
-  username: "First user",
+  userSource: "First user",
+  userVaultSecret: "Vault credential",
+  username: "User name",
   userFullName: "Full name",
+  userPassword: "Password",
   userPasswordCrypted: "Password hash (crypt)",
   disk: "Target disk(s)",
   partitionRecipe: "Partitioning",
   packages: "Extra packages",
-  runScriptUrl: "First-boot script URL",
+  runScriptFile: "First-boot script",
+  runScriptUrl: "Script URL",
 };
 const TS_DEBIAN_FIELD_ORDER = [
   "linuxInstaller",
@@ -126,12 +130,15 @@ const TS_DEBIAN_FIELD_ORDER = [
   "locale",
   "keymap",
   "timezone",
+  "userSource",
+  "userVaultSecret",
   "username",
   "userFullName",
-  "userPasswordCrypted",
+  "userPassword",
   "disk",
   "partitionRecipe",
   "packages",
+  "runScriptFile",
   "runScriptUrl",
 ];
 const TS_DEBIAN_DEFAULT_FIELDS: Record<string, string> = {
@@ -141,12 +148,16 @@ const TS_DEBIAN_DEFAULT_FIELDS: Record<string, string> = {
   locale: "en_AU.UTF-8",
   keymap: "us",
   timezone: "Australia/Melbourne",
+  userSource: "manual",
+  userVaultSecret: "",
   username: "localadmin",
   userFullName: "Local Administrator",
+  userPassword: "",
   userPasswordCrypted: "",
   disk: "/dev/nvme0n1 /dev/sda /dev/mmcblk0",
   partitionRecipe: "atomic",
   packages: "",
+  runScriptFile: "",
   runScriptUrl: "",
 };
 /** Dropdown choices for the Debian fields that have a right answer set. Free text here
@@ -220,6 +231,10 @@ const TS_DEBIAN_FIELD_OPTIONS: Record<string, { value: string; label: string }[]
     "America/Sao_Paulo",
     "UTC",
   ].map((value) => ({ value, label: value })),
+  userSource: [
+    { value: "manual", label: "Typed here" },
+    { value: "vault", label: "From the vault - user, full name and password from a stored credential" },
+  ],
   partitionRecipe: [
     { value: "atomic", label: "All files in one partition (atomic) - needs about 10 GB" },
     { value: "home", label: "Separate /home (home)" },
@@ -974,6 +989,16 @@ export function PxeWorkspace({
       }
       // A local account that cannot resolve a password is silently dropped from the
       // unattend (login-less machine, Craig 2026-08-23) - catch it here instead.
+      if (tsPlatform(s) === "debian") {
+        if (s.fields.userSource === "vault") {
+          if (!(s.fields.userVaultSecret ?? "").trim()) note("userVaultSecret", "pick a vault credential for the first user.");
+        } else if (!/^[a-z][-a-z0-9_]*$/.test((s.fields.username ?? "").trim())) {
+          note("username", "the first user name must be lower-case letters, digits, - or _, starting with a letter.");
+        }
+        if ((s.fields.runScriptFile ?? "") === "url" && !/^https?:\/\/\S+$/i.test((s.fields.runScriptUrl ?? "").trim())) {
+          note("runScriptUrl", "the first-boot script URL must start with http:// or https://.");
+        }
+      }
       // A preseed has its own first-user fields; the Windows local account never
       // applies to it, so it must not block the save either.
       const acct = tsPlatform(s) === "debian" ? undefined : s.localAccount;
@@ -3071,7 +3096,16 @@ export function PxeWorkspace({
                                 .filter((key) => {
                                   // Every Windows-only rule below is skipped for a
                                   // preseed, which has no join and no static-IP block.
-                                  if (tsPlatform(seq) === "debian") return true;
+                                  if (tsPlatform(seq) === "debian") {
+                                    const fromVault = seq.fields.userSource === "vault";
+                                    if (key === "userVaultSecret") return fromVault;
+                                    if (["username", "userFullName", "userPassword"].includes(key)) return !fromVault;
+                                    if (key === "runScriptUrl") {
+                                      const file = seq.fields.runScriptFile ?? "";
+                                      return file === "url" || (!file && Boolean(seq.fields.runScriptUrl));
+                                    }
+                                    return true;
+                                  }
                                   const joining = Boolean(seq.fields.joinDomain) || tsJoinOptIn.has(seq.id);
                                   if (["ipCidr", "gateway", "dns1"].includes(key))
                                     return seq.fields.network === "static";
@@ -3118,6 +3152,65 @@ export function PxeWorkspace({
                                           <option value={seq.fields[key]}>{seq.fields[key]} (not in the catalog)</option>
                                         ) : null}
                                       </select>
+                                    ) : tsPlatform(seq) === "debian" && key === "userVaultSecret" ? (
+                                      <select
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        style={tsFieldOutline(seq.id, key)}
+                                        value={seq.fields[key] ?? ""}
+                                        title="The credential's login becomes the user (lower-cased, letters, digits, - and _), its full name the display name, and its password is hashed at publish. Nothing in clear reaches the share."
+                                        onChange={(e) => setField(e.target.value)}
+                                      >
+                                        <option value="">Choose a vault credential...</option>
+                                        {vaultSecrets.map((s) => (
+                                          <option key={s.name} value={s.name}>
+                                            {s.label || s.name}
+                                            {s.userName ? ` - ${s.userName}` : ""}
+                                          </option>
+                                        ))}
+                                        {seq.fields[key] && !vaultSecrets.some((s) => s.name === seq.fields[key]) ? (
+                                          <option value={seq.fields[key]}>{seq.fields[key]} (not in the vault)</option>
+                                        ) : null}
+                                      </select>
+                                    ) : tsPlatform(seq) === "debian" && key === "userPassword" ? (
+                                      <input
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        type="password"
+                                        value={seq.fields[key] ?? ""}
+                                        autoComplete="new-password"
+                                        placeholder={
+                                          seq.fields.userPasswordCrypted
+                                            ? "password set - type a new one to replace it"
+                                            : "hashed (crypt SHA-512) on save; blank = the installer asks"
+                                        }
+                                        title="Hashed on save and never stored or published in clear. Leave blank to keep the current hash."
+                                        onChange={(e) => setField(e.target.value)}
+                                      />
+                                    ) : tsPlatform(seq) === "debian" && key === "runScriptFile" ? (
+                                      <select
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        value={seq.fields[key] ?? (seq.fields.runScriptUrl ? "url" : "")}
+                                        title={`Runs once at first boot through a one-shot systemd unit. Library scripts live in ${tsPayload?.scriptsDir ?? "<library>/Scripts"} and are served by Netboot's HTTP.`}
+                                        onChange={(e) => setField(e.target.value)}
+                                      >
+                                        <option value="">(none)</option>
+                                        {(tsPayload?.firstBootScripts ?? []).map((f) => (
+                                          <option key={f} value={f}>
+                                            {f} - from the library
+                                          </option>
+                                        ))}
+                                        <option value="url">Custom URL...</option>
+                                        {seq.fields[key] && seq.fields[key] !== "url" && !(tsPayload?.firstBootScripts ?? []).includes(seq.fields[key]) ? (
+                                          <option value={seq.fields[key]}>{seq.fields[key]} (missing from the library)</option>
+                                        ) : null}
+                                      </select>
+                                    ) : tsPlatform(seq) === "debian" && key === "runScriptUrl" ? (
+                                      <input
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        value={seq.fields[key] ?? ""}
+                                        spellCheck={false}
+                                        placeholder="http://... - fetched by the installer at the end of the install"
+                                        onChange={(e) => setField(e.target.value.trim())}
+                                      />
                                     ) : tsPlatform(seq) === "debian" && TS_DEBIAN_FIELD_OPTIONS[key] ? (
                                       <select
                                         className="input-box mono h-[26px] text-[11px]"

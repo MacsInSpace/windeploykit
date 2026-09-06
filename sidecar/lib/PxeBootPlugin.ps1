@@ -5220,7 +5220,9 @@ function Write-AppPxeBootCaddyfile {
                 @{ prefix = 'WIMs';    dir = $lib.wimsDir },
                 # TaskSequences/ so an HTTP-only client (no Deploy$ mount) can read
                 # index.json and the unattend it names. Same files the share serves.
-                @{ prefix = 'TaskSequences'; dir = (Join-Path $lib.root 'TaskSequences') }
+                @{ prefix = 'TaskSequences'; dir = (Join-Path $lib.root 'TaskSequences') },
+                # Scripts/ so a Debian install can fetch its first-boot script from here.
+                @{ prefix = 'Scripts'; dir = (Join-Path $lib.root 'Scripts') }
             )) {
             $dirNorm = ([string]$route.dir -replace '\\', '/')
             $routeLines += @(

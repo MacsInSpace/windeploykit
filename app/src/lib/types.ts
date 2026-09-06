@@ -813,6 +813,10 @@ export interface PxeBootTaskSequencesPayload {
   regionalDefaults?: { userLocale: string; inputLocale: string; timeZone: string };
   /** Absolute path of <library>/TaskSequences, null when no library root is set. */
   libraryDir?: string | null;
+  /** File names in <library>/Scripts - the "First-boot script" choices for a Debian sequence. */
+  firstBootScripts?: string[];
+  /** Absolute path of <library>/Scripts, null when no library root is set. */
+  scriptsDir?: string | null;
   publishedFiles: string[];
   /** Preselected imaging-client sequence id; '' = the None item (clean OOBE). */
   defaultSequenceId?: string;

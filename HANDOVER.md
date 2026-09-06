@@ -113,7 +113,12 @@ These are not incidental; every one of them shaped the code.
    dropdowns, Windows-only sections hide on a Debian sequence, and "Linux
    installer" binds a sequence to a release (`linuxInstaller` field; the menu
    filters the submenu by it).
-4. **Serve the first-boot script.** `runScriptUrl` is free text today. It should
+4. ~~Serve the first-boot script.~~ **Done 2026-09-06.** `<library>/Scripts/` is
+   served at `/Scripts/` and offered as a dropdown; "Custom URL..." keeps the
+   free form. Same day: the first user can come from the vault (login, full
+   name, password hashed at publish with pure-.NET crypt SHA-512), and a typed
+   password is hashed on save - nothing in clear is stored or published.
+   Original note: `runScriptUrl` is free text today. It should
    be a file in the library served over the existing Caddy tree, the way
    everything else is.
 5. **Verify end to end in QEMU.** `scripts/test-linux-iso-boot-qemu.sh` already
