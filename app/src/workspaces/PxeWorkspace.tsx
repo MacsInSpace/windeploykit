@@ -2995,7 +2995,17 @@ export function PxeWorkspace({
 
                     </div>
                     {(tsEdit ?? []).map((seq) => {
-                      const published = tsPayload?.publishedFiles.includes(`${seq.id}.xml`) ?? false;
+                      // What "published" means depends on what the sequence compiles to: an
+                      // unattend.xml, a d-i preseed (<id>.cfg) or a Subiquity autoinstall
+                      // (the sidecar lists that as <id>.autoinstall). Checking only .xml left
+                      // every Linux sequence reading "pending save" for good (seen 2026-09-06).
+                      const publishedName =
+                        tsPlatform(seq) === "ubuntu"
+                          ? `${seq.id}.autoinstall`
+                          : tsPlatform(seq) === "debian"
+                            ? `${seq.id}.cfg`
+                            : `${seq.id}.xml`;
+                      const published = tsPayload?.publishedFiles.includes(publishedName) ?? false;
                       const selected = tsSelectedId === seq.id;
                       return (
                         <div
