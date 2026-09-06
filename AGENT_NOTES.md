@@ -353,6 +353,37 @@ a cache description, correctly left alone.
   alone still counts), `url` = the typed URL, else a plain file name resolved at
   publish to `http://<lan-ip>:8080/Scripts/<name>` (publish runs on every Start
   and menu regen, so the IP stays current). Path-shaped names are refused.
+- **Ubuntu (2026-09-06, Craig: "probably Ubuntu").** Different shape from Debian
+  and the plumbing already fitted it. 22.04+ has no d-i and no netboot
+  installer: Canonical's PXE path is the live-server ISO's own `casper/vmlinuz`
+  + `casper/initrd` with `ip=dhcp url=<ISO>` - casper fetches the WHOLE ISO over
+  HTTP into RAM and boots Subiquity from its squashfs (so the VM needs ~8 GB;
+  packages still come from the Ubuntu archive). So the ISO is genuinely needed:
+  the catalog row (`kind = 'iso'`, `Start-AppPxeBootLinuxIsoDownload`) resolves
+  the current point release from releases.ubuntu.com, verifies SHA256SUMS, and
+  queues it through the aria2 direct rail into the library; once mounted (the
+  cd9660 fallback again - hdiutil cannot mount it) the `ubuntu-live-server`
+  layout row makes a menu entry with `installMode 'casper'` (install-capable, so
+  the submenu applies). `platform: ubuntu` compiles to an autoinstall
+  (`Build-AppPxeBootTaskSequenceAutoinstall`): identity with the crypt hash,
+  storage `layout: direct|lvm` with `match: path` for one disk or `size: largest`
+  for the Debian-style list, ssh, packages, `refresh-installer: update: false`,
+  late-commands = the same first-boot parts as d-i run through
+  `curtin in-target --target=/target --` (each a YAML single-quoted scalar, '' for
+  a quote). Published as `autoinstall/<id>/user-data` + `meta-data` (cloud-init
+  wants a directory; the seed URL ends in `/`); prune and the default check know
+  the directory. Sequences and entries both carry `platform`, and the submenu
+  offers only its own platform's sequences - a preseed never appears under an
+  Ubuntu entry. Gates: `test-task-sequence-ubuntu.ps1` (22 checks, including the
+  late-command executed with curtin/wget stubbed), `test-linux-menu.ps1` (32).
+  Live: verified 2026-09-06 in QEMU (8 GB RAM, 16 GB virtio disk): the Ubuntu sequence handler booted casper off the mounted ISO, casper streamed the 3.4 GB ISO from Caddy, cloud-init fetched the seed, Subiquity ran the autoinstall, curtin wrote the system, and the machine rebooted on its own. Gotchas met: `return , $parts` reaches a
+  caller's `@()` as ONE nested array - emit the array plainly. And the big one:
+  **cloud-init also reads a kernel `url=`** as "fetch this as my cloud-config" -
+  it read the whole 3.4 GB ISO named for casper into memory and was OOM-killed
+  twice, so Subiquity never got its seed. cloud-init prefers `cloud-config-url=`
+  when both are present, so every Ubuntu handler names one: the seed's
+  `user-data` on a sequence handler, `http/linux/ubuntu/cloud-config-none`
+  (`#cloud-config` + `{}`, written on menu regen) on Interactive.
 - Debugging an installer you cannot type at: from tier 3 the QEMU test passes
   `log_host=10.0.2.2 log_port=5514` and listens with `nc -u -k -l 5514`, so
   d-i's syslog lands in `$WORK/d-i.syslog` (udeb fetches, module loads, disks

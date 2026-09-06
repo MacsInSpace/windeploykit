@@ -352,15 +352,20 @@ export function ContentWorkspace({
       setLinuxNetbootBusy(row.id);
       try {
         toast.info("Linux installers", `Fetching ${row.label} ${row.arch} netboot files from the Debian mirror...`);
-        const data = await sidecar.invoke<PxeBootLinuxNetbootResponse & { updated?: boolean }>(
+        const data = await sidecar.invoke<PxeBootLinuxNetbootResponse & { updated?: boolean; queued?: boolean; fileName?: string }>(
           "AddPxeBootLinuxNetboot",
-          await aria2SidecarParams({ codename: row.codename, arch: row.arch }),
+          await aria2SidecarParams({ id: row.id, codename: row.codename, arch: row.arch }),
         );
         setLinuxNetboot(data ?? null);
-        toast.success(
-          "Linux installers",
-          data?.updated ? `${row.label} ${row.arch} is on the PXE menu.` : `${row.label} ${row.arch} was already current.`,
-        );
+        if (data?.queued) {
+          toast.info("Linux installers", `${data.fileName ?? "ISO"} is downloading - see Transfers. The menu entry appears when it lands.`);
+          void refreshDownloads();
+        } else {
+          toast.success(
+            "Linux installers",
+            data?.updated ? `${row.label} ${row.arch} is on the PXE menu.` : `${row.label} ${row.arch} was already current.`,
+          );
+        }
       } catch (e) {
         toast.error("Linux installers", e instanceof Error ? e.message : String(e));
       } finally {
@@ -376,8 +381,9 @@ export function ContentWorkspace({
       try {
         const data = await sidecar.invoke<PxeBootLinuxNetbootResponse>(
           "RemovePxeBootLinuxNetboot",
-          await aria2SidecarParams({ codename: row.codename, arch: row.arch }),
+          await aria2SidecarParams({ id: row.id, codename: row.codename, arch: row.arch }),
         );
+        void loadStoreIsos();
         setLinuxNetboot(data ?? null);
         toast.info("Linux installers", `${row.label} ${row.arch} removed from the PXE menu.`);
       } catch (e) {
@@ -688,6 +694,7 @@ export function ContentWorkspace({
           void loadTracker();
           void loadEvalIso();
           void loadStoreIsos();
+          void loadLinuxNetboot();
           void refreshImageDestination();
         } else if (data?.message) {
           toast.error("aria2 promote", data.message);
@@ -1271,9 +1278,13 @@ export function ContentWorkspace({
               {r.label} {r.arch}
             </span>
             <span className="text-[10px]" style={{ color: "var(--text3)" }}>
-              {r.ready
-                ? `on the PXE menu - netboot d-i ${r.diVersion || "current"}, ${formatBytes(r.sizeBytes)} in the store`
-                : "not fetched - Add downloads the kernel and initrd from the mirror"}
+              {r.kind === "iso"
+                ? r.ready
+                  ? `on the PXE menu - ${r.isoFileName ?? "ISO"} (${formatBytes(r.sizeBytes)}) in the library`
+                  : "not fetched - Add downloads the installer ISO (a few GB) into the library through Transfers"
+                : r.ready
+                  ? `on the PXE menu - netboot d-i ${r.diVersion || "current"}, ${formatBytes(r.sizeBytes)} in the store`
+                  : "not fetched - Add downloads the kernel and initrd from the mirror"}
             </span>
           </span>
         ),
@@ -1295,7 +1306,15 @@ export function ContentWorkspace({
             type="button"
             className="table-action"
             disabled={linuxNetbootBusy !== null}
-            title={r.ready ? "Remove the netboot files and the menu entry" : "Fetch the current netboot kernel and initrd (about 95 MB) and add the menu entry"}
+            title={
+              r.ready
+                ? r.kind === "iso"
+                  ? "Remove the ISO from the library and the menu entry"
+                  : "Remove the netboot files and the menu entry"
+                : r.kind === "iso"
+                  ? "Download the current installer ISO into the library (progress under Transfers); the menu entry appears when it lands"
+                  : "Fetch the current netboot kernel and initrd (about 95 MB) and add the menu entry"
+            }
             onClick={() => void (r.ready ? removeLinuxNetboot(r) : addLinuxNetboot(r))}
           >
             {linuxNetbootBusy === r.id ? "Working..." : r.ready ? "Remove" : "Add"}
@@ -1921,10 +1940,10 @@ export function ContentWorkspace({
               <div className="mt-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="mono text-[10px] font-medium uppercase tracking-wider" style={{ color: "var(--text3)" }}>
-                    Linux network installers ({(linuxNetboot?.entries ?? []).filter((r) => r.ready).length}/{linuxNetboot?.entries?.length ?? 0})
+                    Linux installers ({(linuxNetboot?.entries ?? []).filter((r) => r.ready).length}/{linuxNetboot?.entries?.length ?? 0})
                   </h3>
                   <span className="text-[10px]" style={{ color: "var(--text3)" }}>
-                    no ISO - kernel and initrd from {linuxNetboot?.mirror ?? "the Debian mirror"}; drivers and packages install straight from it, always current
+                    Debian: kernel and initrd from {linuxNetboot?.mirror ?? "the Debian mirror"}, no ISO. Ubuntu: the live-server ISO, downloaded into the library. Packages install straight from each distro&apos;s archive
                   </span>
                 </div>
                 {(linuxNetboot?.entries?.length ?? 0) > 0 ? (

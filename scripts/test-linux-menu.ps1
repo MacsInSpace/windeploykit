@@ -63,11 +63,30 @@ function New-Entry([string]$id, [string]$mode) {
         note          = if ($mode -eq 'netboot') { 'Installer: netboot initrd (d-i 20250803+deb13u6) + packages from the mounted ISO' } else { 'NOTE: installer files not fetched' }
         codename      = 'trixie'
         arch          = 'amd64'
+        platform      = 'debian'
+    }
+}
+function New-UbuntuEntry([string]$id) {
+    @{
+        id            = $id
+        isoFileName   = 'ubuntu-24.04.4-live-server-amd64.iso'
+        label         = 'Ubuntu-Server 24.04.4 LTS Noble Numbat amd64 installer'
+        kernelHttpRel = 'iso-mount/utok/casper/vmlinuz'
+        initrdHttpRel = 'iso-mount/utok/casper/initrd'
+        kernelArgs    = 'ip=dhcp url=${http_base}/iso/ubuntu-24.04.4-live-server-amd64.iso cloud-config-url=${http_base}/linux/ubuntu/cloud-config-none'
+        installMode   = 'casper'
+        note          = 'Installer: Ubuntu live server - the ISO streams from this machine, packages from the Ubuntu archive'
+        codename      = 'noble'
+        arch          = 'amd64'
+        platform      = 'ubuntu'
     }
 }
 $seqs = @(
-    @{ id = 'campuscast-receiver'; name = 'CampusCast receiver'; cfgHttpRel = 'TaskSequences/campuscast-receiver.cfg'; isDefault = $false; installer = '' }
-    @{ id = 'lab-desktop';         name = 'Lab desktop';         cfgHttpRel = 'TaskSequences/lab-desktop.cfg';         isDefault = $false; installer = '' }
+    @{ id = 'campuscast-receiver'; name = 'CampusCast receiver'; cfgHttpRel = 'TaskSequences/campuscast-receiver.cfg'; isDefault = $false; installer = ''; platform = 'debian' }
+    @{ id = 'lab-desktop';         name = 'Lab desktop';         cfgHttpRel = 'TaskSequences/lab-desktop.cfg';         isDefault = $false; installer = ''; platform = 'debian' }
+)
+$ubuntuSeqs = @(
+    @{ id = 'ubuntu-lab'; name = 'Ubuntu lab'; cfgHttpRel = 'TaskSequences/autoinstall/ubuntu-lab/'; isDefault = $false; installer = ''; platform = 'ubuntu' }
 )
 $tab = [char]9
 
@@ -185,6 +204,25 @@ Check 'an entry with only foreign-bound sequences is a straight boot, no submenu
     $only = @(@{ id = 'bookworm-only'; name = 'Bookworm only'; cfgHttpRel = 'TaskSequences/bookworm-only.cfg'; isDefault = $false; installer = 'debian-bookworm-amd64' })
     $l = @(Get-AppPxeBootLinuxMenuHandlerLines -Entries @((New-Entry 'lnx_deb' 'netboot')) -Sequences $only)
     ($l[0] -eq ':lnx_deb') -and -not ($l -like 'menu *')
+}
+
+Write-Host 'Ubuntu (casper) entries:'
+$ul = @(Get-AppPxeBootLinuxMenuHandlerLines -Entries @((New-UbuntuEntry 'lnx_ubuntu')) -Sequences ($seqs + $ubuntuSeqs))
+Check 'an Ubuntu casper entry is install-capable: submenu with the Ubuntu sequence, never the Debian ones' {
+    ($ul[0] -eq ':lnx_ubuntu') -and ($ul -like 'menu *') -and ($ul -contains "item lnx_ubuntu__ts_ubuntu_lab${tab}Ubuntu lab") -and -not ($ul -like 'item lnx_ubuntu__ts_campuscast*')
+}
+$uk = [string](@($ul | Where-Object { $_ -like 'kernel *' -and $_ -match 'autoinstall' }) | Select-Object -First 1)
+Check 'the Ubuntu sequence handler arms autoinstall with the NoCloud seed directory and streams the ISO' {
+    ($uk -match ' ip=dhcp url=\$\{http_base\}/iso/ubuntu-24\.04\.4-live-server-amd64\.iso') -and ($uk -match ' autoinstall ds=nocloud-net;s=\$\{http_base\}/TaskSequences/autoinstall/ubuntu-lab/ cloud-config-url=\$\{http_base\}/TaskSequences/autoinstall/ubuntu-lab/user-data$') -and ($uk -notmatch 'preseed/url') -and ($uk -notmatch 'cloud-config-none')
+}
+Check 'the Ubuntu Interactive handler has no autoinstall' {
+    $mk = [string](@($ul | Where-Object { $_ -like 'kernel *' -and $_ -notmatch 'autoinstall' }) | Select-Object -First 1)
+    # ...but it does tell cloud-init its config is empty, or cloud-init eats the ISO named by url=
+    ($mk -match 'casper/vmlinuz') -and ($mk -match ' url=') -and ($mk -match 'cloud-config-url=\$\{http_base\}/linux/ubuntu/cloud-config-none')
+}
+Check 'a Debian entry never lists an Ubuntu sequence' {
+    $dl = @(Get-AppPxeBootLinuxMenuHandlerLines -Entries @((New-Entry 'lnx_deb' 'netboot')) -Sequences ($seqs + $ubuntuSeqs))
+    ($dl -like 'menu *') -and -not ($dl -like 'item lnx_deb__ts_ubuntu*')
 }
 
 Write-Host 'ISO-less netboot pairs (store-resident kernel + initrd):'

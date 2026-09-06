@@ -266,8 +266,14 @@ export interface PxeBootIsoEntry {
 /** A Debian release the app can PXE-install with no ISO: kernel + initrd from the Debian
  *  mirror kept in the store, drivers and packages straight from the mirror at install time. */
 export interface PxeBootLinuxNetbootEntry {
-  /** debian-<codename>-<arch> */
+  /** <platform>-<codename>-<arch>, e.g. debian-trixie-amd64, ubuntu-noble-amd64 */
   id: string;
+  /** debian | ubuntu */
+  platform?: string;
+  /** netboot = kernel + initrd pair from the mirror; iso = the installer is its ISO (downloaded into the library). */
+  kind?: "netboot" | "iso" | string;
+  /** kind iso, when ready: the ISO in the library that satisfies this row. */
+  isoFileName?: string | null;
   codename: string;
   arch: "amd64" | "arm64" | string;
   /** e.g. "Debian 13 (trixie)" */

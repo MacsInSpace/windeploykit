@@ -2193,6 +2193,13 @@ function Get-AppPxeBootLinuxBootInventory {
         $kernelArgs = [string]$linux.kernelArgs
         $installMode = 'iso'
         $note = ''
+        $platform = if ([string]$linux.platform) { [string]$linux.platform } else { 'debian' }
+        if ($platform -eq 'ubuntu') {
+            # casper boots the live installer off this ISO and fetches the ISO itself over
+            # HTTP (url=) - a complete install source, so the task-sequence submenu applies.
+            $installMode = 'casper'
+            $note = 'Installer: Ubuntu live server - the ISO streams from this machine, packages from the Ubuntu archive'
+        }
         # Debian installer media: the ISO's own initrd is the CD-ROM flavour and cannot find
         # its media over PXE. With the matching netboot initrd fetched, boot THAT initrd
         # (kernel still off the ISO) and point the installer at the Debian mirror - the
@@ -2217,6 +2224,7 @@ function Get-AppPxeBootLinuxBootInventory {
                 note          = $note
                 codename      = [string]$linux.codename
                 arch          = [string]$linux.arch
+                platform      = $platform
             }) | Out-Null
     }
     # ISO-less Debian: the netboot pairs kept in the store (Add-AppPxeBootDebianNetboot).
@@ -2248,6 +2256,7 @@ function ConvertTo-AppPxeBootDebianNetbootInventoryRow {
         note          = "Installer: netboot d-i $([string]$Pair.diVersion), drivers and packages from $mirrorHost"
         codename      = $codename
         arch          = $arch
+        platform      = 'debian'
     }
 }
 
@@ -2341,6 +2350,24 @@ function Add-AppPxeBootDebianPreseedKernelArgs {
     return (Add-AppPxeBootKernelArgsBeforeSeparator -KernelArgs $KernelArgs -Extra $extra)
 }
 
+function Add-AppPxeBootUbuntuAutoinstallKernelArgs {
+    <#
+    .SYNOPSIS
+        Arm Subiquity: `autoinstall`, and the cloud-init NoCloud seed directory that holds
+        user-data + meta-data (ds=nocloud-net;s=<url>/ - the trailing slash is required).
+    #>
+    param(
+        [string]$KernelArgs,
+        [Parameter(Mandatory)][string]$SeedHttpRel
+    )
+    $seed = $SeedHttpRel.TrimStart('/')
+    if (-not $seed.EndsWith('/')) { $seed += '/' }
+    # Drop the entry's placeholder cloud-config-url: the seed's user-data is the real one.
+    $base = ([string]$KernelArgs -replace '\s*cloud-config-url=\S+', '')
+    $extra = 'autoinstall ds=nocloud-net;s=${http_base}/' + $seed + ' cloud-config-url=${http_base}/' + $seed + 'user-data'
+    return (Add-AppPxeBootKernelArgsBeforeSeparator -KernelArgs $base -Extra $extra)
+}
+
 function Get-AppPxeBootLinuxTaskSequenceChoices {
     <#
     .SYNOPSIS
@@ -2364,9 +2391,13 @@ function Get-AppPxeBootLinuxTaskSequenceChoices {
         if ($null -eq $seq) { continue }
         $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq
         if ($null -eq $rec -or -not [bool]$rec.enabled) { continue }
-        if ([string]$rec.platform -ne 'debian') { continue }
+        $platform = [string]$rec.platform
+        if ($platform -notin @('debian', 'ubuntu')) { continue }
         $id = [string]$rec.id
-        if (-not (Test-Path -LiteralPath (Join-Path $dir "$id.cfg") -PathType Leaf)) { continue }
+        # What publish wrote: a preseed file, or an autoinstall seed directory.
+        if ($platform -eq 'ubuntu') {
+            if (-not (Test-Path -LiteralPath (Join-Path (Join-Path (Join-Path $dir 'autoinstall') $id) 'user-data') -PathType Leaf)) { continue }
+        } elseif (-not (Test-Path -LiteralPath (Join-Path $dir "$id.cfg") -PathType Leaf)) { continue }
         # installer: the panel's "Linux installer" binding, debian-<codename>-<arch>, or ''
         # for "any Debian entry". Decides which entries' submenus list this sequence.
         $installer = ''
@@ -2375,7 +2406,9 @@ function Get-AppPxeBootLinuxTaskSequenceChoices {
         $rows.Add(@{
                 id         = $id
                 name       = [string]$rec.name
-                cfgHttpRel = "TaskSequences/$id.cfg"
+                platform   = $platform
+                # Debian: the preseed URL. Ubuntu: the NoCloud seed DIRECTORY (trailing slash).
+                cfgHttpRel = if ($platform -eq 'ubuntu') { "TaskSequences/autoinstall/$id/" } else { "TaskSequences/$id.cfg" }
                 isDefault  = ($default -and ($id -eq $default))
                 installer  = $installer
             }) | Out-Null
@@ -2464,11 +2497,17 @@ function Get-AppPxeBootLinuxMenuHandlerLines {
         $label = [string]$entry.label
         $entryId = [string]$entry.id
         $note = [string]$entry.note
-        # A sequence bound to a Linux installer (debian-<codename>-<arch>) appears only under
-        # that entry; an unbound one appears under every Debian entry.
-        $entryKey = "debian-$([string]$entry.codename)-$([string]$entry.arch)".ToLowerInvariant()
-        $seqsFor = @($seqs | Where-Object { -not [string]$_.installer -or ([string]$_.installer -eq $entryKey) })
-        $useSubmenu = (([string]$entry.installMode) -eq 'netboot') -and ($seqsFor.Count -gt 0)
+        # A sequence appears under entries of ITS platform (a preseed never under an Ubuntu
+        # entry); one bound to an installer (<platform>-<codename>-<arch>) only under that
+        # entry, an unbound one under every entry of the platform.
+        $entryPlatform = if ($entry.ContainsKey('platform') -and [string]$entry.platform) { [string]$entry.platform } else { 'debian' }
+        $entryKey = "$entryPlatform-$([string]$entry.codename)-$([string]$entry.arch)".ToLowerInvariant()
+        $seqsFor = @($seqs | Where-Object {
+                $seqPlatform = if ($_.ContainsKey('platform') -and [string]$_.platform) { [string]$_.platform } else { 'debian' }
+                ($seqPlatform -eq $entryPlatform) -and (-not [string]$_.installer -or ([string]$_.installer -eq $entryKey))
+            })
+        # Install-capable: a Debian entry with its netboot initrd, or an Ubuntu casper entry.
+        $useSubmenu = (([string]$entry.installMode) -in @('netboot', 'casper')) -and ($seqsFor.Count -gt 0)
         if (-not $useSubmenu) {
             [void]$lines.Add(":$entryId")
             if ($note) { [void]$lines.Add("echo $note") }
@@ -2500,7 +2539,11 @@ function Get-AppPxeBootLinuxMenuHandlerLines {
             $itemId = Get-AppPxeBootLinuxSequenceMenuItemId -EntryId $entryId -SequenceId ([string]$seq.id)
             $seqName = [string]$seq.name
             $seeded = @{} + $entry
-            $seeded.kernelArgs = Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs ([string]$entry.kernelArgs) -PreseedHttpRel ([string]$seq.cfgHttpRel)
+            $seeded.kernelArgs = if ($entryPlatform -eq 'ubuntu') {
+                Add-AppPxeBootUbuntuAutoinstallKernelArgs -KernelArgs ([string]$entry.kernelArgs) -SeedHttpRel ([string]$seq.cfgHttpRel)
+            } else {
+                Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs ([string]$entry.kernelArgs) -PreseedHttpRel ([string]$seq.cfgHttpRel)
+            }
             [void]$lines.Add(":$itemId")
             if ($note) { [void]$lines.Add("echo $note") }
             [void]$lines.Add("echo Task sequence: $seqName - unattended, the disk named in the sequence will be wiped.")
@@ -2550,6 +2593,18 @@ function Write-AppPxeBootMenuFiles {
         }
     }
     $cfg = Read-AppPxeBootConfig
+    # The empty cloud-config an Interactive Ubuntu entry hands cloud-init (see the casper
+    # layout row): without it cloud-init fetches the ISO named by url= as its config.
+    try {
+        $ccDir = Join-Path $paths.httpRoot 'linux/ubuntu'
+        if (-not (Test-Path -LiteralPath $ccDir)) { $null = New-Item -Path $ccDir -ItemType Directory -Force }
+        $ccFile = Join-Path $ccDir 'cloud-config-none'
+        $ccBody = "#cloud-config`n{}`n"
+        $ccHave = if (Test-Path -LiteralPath $ccFile) { Get-Content -LiteralPath $ccFile -Raw -ErrorAction SilentlyContinue } else { $null }
+        if ($ccHave -ne $ccBody) { [System.IO.File]::WriteAllText($ccFile, $ccBody, (New-Object System.Text.UTF8Encoding $false)) }
+    } catch {
+        Write-SidecarLog "PXE boot: cloud-config-none not written - $($_.Exception.Message)"
+    }
 
     # The deploy overlay (deploy.unc, deploy.cred, loghost, startnet.cmd, tools) is
     # decided here too: Get-AppPxeBootWimOverlayInitrdLines only injects a profile whose
@@ -4343,6 +4398,7 @@ function Get-AppPxeBootIsoInventory {
 function Get-AppPxeBootLinuxInstallNote {
     # One line for the ISO list: what booting this entry will actually do.
     param([Parameter(Mandatory)]$Linux)
+    if ([string]$Linux.platform -eq 'ubuntu') { return 'installs from this ISO (Ubuntu live server; a task sequence makes it unattended)' }
     $netboot = $Linux.netboot
     if (-not $netboot) { return $null }
     if ($netboot.ready) { return "installs from $([string](Get-AppPxeBootDebianMirrorHostDirectory).host) (netboot initrd d-i $([string]$netboot.diVersion))" }
@@ -8934,11 +8990,21 @@ function Resolve-AppPxeBootMountInstallWim {
 # no live ISO has been through the VM yet. kernelArgs is emitted verbatim on the iPXE
 # kernel line - ${http_base} is iPXE's variable, {token} is ours.
 $script:AppPxeBootLinuxIsoLayouts = @(
-    @{ id = 'debian-installer-amd64-gtk'; arch = 'amd64'; kernel = 'install.amd/vmlinuz'; initrd = 'install.amd/gtk/initrd.gz'; suffix = 'amd64 installer';        kernelArgs = 'vga=788 --- quiet' }
-    @{ id = 'debian-installer-amd64';     arch = 'amd64'; kernel = 'install.amd/vmlinuz'; initrd = 'install.amd/initrd.gz';     suffix = 'amd64 installer (text)'; kernelArgs = 'vga=788 --- quiet' }
-    @{ id = 'debian-installer-arm64-gtk'; arch = 'arm64'; kernel = 'install.a64/vmlinuz'; initrd = 'install.a64/gtk/initrd.gz'; suffix = 'arm64 installer';        kernelArgs = '--- quiet' }
-    @{ id = 'debian-installer-arm64';     arch = 'arm64'; kernel = 'install.a64/vmlinuz'; initrd = 'install.a64/initrd.gz';     suffix = 'arm64 installer (text)'; kernelArgs = '--- quiet' }
-    @{ id = 'debian-live';                arch = '';      kernel = 'live/vmlinuz';        initrd = 'live/initrd.img';           suffix = 'live';                   kernelArgs = 'boot=live components fetch=${http_base}/iso-mount/{token}/live/filesystem.squashfs' }
+    @{ id = 'debian-installer-amd64-gtk'; platform = 'debian'; arch = 'amd64'; kernel = 'install.amd/vmlinuz'; initrd = 'install.amd/gtk/initrd.gz'; suffix = 'amd64 installer';        kernelArgs = 'vga=788 --- quiet' }
+    @{ id = 'debian-installer-amd64';     platform = 'debian'; arch = 'amd64'; kernel = 'install.amd/vmlinuz'; initrd = 'install.amd/initrd.gz';     suffix = 'amd64 installer (text)'; kernelArgs = 'vga=788 --- quiet' }
+    @{ id = 'debian-installer-arm64-gtk'; platform = 'debian'; arch = 'arm64'; kernel = 'install.a64/vmlinuz'; initrd = 'install.a64/gtk/initrd.gz'; suffix = 'arm64 installer';        kernelArgs = '--- quiet' }
+    @{ id = 'debian-installer-arm64';     platform = 'debian'; arch = 'arm64'; kernel = 'install.a64/vmlinuz'; initrd = 'install.a64/initrd.gz';     suffix = 'arm64 installer (text)'; kernelArgs = '--- quiet' }
+    @{ id = 'debian-live';                platform = 'debian'; arch = '';      kernel = 'live/vmlinuz';        initrd = 'live/initrd.img';           suffix = 'live';                   kernelArgs = 'boot=live components fetch=${http_base}/iso-mount/{token}/live/filesystem.squashfs' }
+    # Ubuntu 22.04+ (Subiquity): no d-i, no netboot. Canonical's PXE path is the live-server
+    # ISO's own kernel + initrd with url= naming the ISO, which casper fetches whole over
+    # HTTP and boots the installer from. The ISO is the install source; {isoUrl} is the
+    # raw ISO Caddy already serves. Arch comes from .disk/info at resolve time.
+    # cloud-config-url= is not optional: cloud-init ALSO reads a kernel `url=` as "fetch
+    # this as my cloud-config", read the whole 3.4 GB ISO into memory and was OOM-killed
+    # (2026-09-06). It prefers cloud-config-url= when both are present, so every Ubuntu
+    # handler names one: an empty cloud-config for Interactive, the seed's user-data for
+    # a task sequence (Add-AppPxeBootUbuntuAutoinstallKernelArgs replaces it).
+    @{ id = 'ubuntu-live-server';         platform = 'ubuntu'; arch = '';      kernel = 'casper/vmlinuz';      initrd = 'casper/initrd';             suffix = 'installer';              kernelArgs = 'ip=dhcp url=${http_base}/{isoUrl} cloud-config-url=${http_base}/linux/ubuntu/cloud-config-none' }
 )
 
 function Get-AppPxeBootLinuxIsoLabel {
@@ -8985,17 +9051,34 @@ function Resolve-AppPxeBootMountLinuxBoot {
         if (-not (Test-Path -LiteralPath $kernel -PathType Leaf)) { continue }
         if (-not (Test-Path -LiteralPath $initrd -PathType Leaf)) { continue }
         $token = Get-AppPxeBootIsoMountToken -IsoFileName $IsoFileName
+        $arch = [string]$layout.arch
+        $suffix = [string]$layout.suffix
+        if (-not $arch) {
+            # Rows that serve every arch read it off .disk/info ("... Release amd64 (...)").
+            $arch = 'amd64'
+            $infoPath = Join-Path $MountPath '.disk/info'
+            try {
+                if (Test-Path -LiteralPath $infoPath -PathType Leaf) {
+                    $info = [string](Get-Content -LiteralPath $infoPath -Raw -ErrorAction Stop)
+                    if ($info -match '\b(amd64|arm64)\b') { $arch = [string]$Matches[1] }
+                }
+            } catch { }
+            $suffix = "$arch $suffix"
+        }
+        $isoUrl = 'iso/' + [Uri]::EscapeDataString($IsoFileName)
         return @{
             layoutId   = [string]$layout.id
-            arch       = [string]$layout.arch
-            label      = (Get-AppPxeBootLinuxIsoLabel -MountPath $MountPath -IsoFileName $IsoFileName -Suffix ([string]$layout.suffix))
+            platform   = [string]$layout.platform
+            arch       = $arch
+            label      = (Get-AppPxeBootLinuxIsoLabel -MountPath $MountPath -IsoFileName $IsoFileName -Suffix $suffix)
             kernelRel  = [string]$layout.kernel
             initrdRel  = [string]$layout.initrd
             kernelPath = $kernel
             initrdPath = $initrd
-            kernelArgs = ([string]$layout.kernelArgs).Replace('{token}', $token)
-            # Filled in by the mount pass for Debian installer media (codename from the ISO's
-            # dists/ tree, netboot = the companion initrd record). Same keys for every layout.
+            kernelArgs = ([string]$layout.kernelArgs).Replace('{token}', $token).Replace('{isoUrl}', $isoUrl)
+            # Filled in by the mount pass: codename from the ISO's dists/ tree (Debian and
+            # Ubuntu alike), netboot = the Debian companion initrd record. Same keys for
+            # every layout.
             codename   = $null
             netboot    = $null
         }
@@ -9100,12 +9183,101 @@ function Read-AppPxeBootDebianSha256Sums {
 # holds {linux, initrd.gz, manifest.json}, and the menu offers one entry per pair - with
 # the task-sequence submenu, exactly like an ISO-backed entry. Nothing here touches ISOs.
 
+# kind 'netboot': Debian's kernel + initrd pair from the mirror (no ISO). kind 'iso': the
+# distro's installer IS its ISO (Ubuntu 22.04+); Add downloads it from the release index
+# into the library through Transfers, and it is then mounted and booted like any Linux ISO.
 $script:AppPxeBootDebianNetbootCatalog = @(
-    @{ codename = 'trixie';   arch = 'amd64'; label = 'Debian 13 (trixie)' }
-    @{ codename = 'trixie';   arch = 'arm64'; label = 'Debian 13 (trixie)' }
-    @{ codename = 'bookworm'; arch = 'amd64'; label = 'Debian 12 (bookworm)' }
-    @{ codename = 'bookworm'; arch = 'arm64'; label = 'Debian 12 (bookworm)' }
+    @{ platform = 'debian'; kind = 'netboot'; codename = 'trixie';   arch = 'amd64'; label = 'Debian 13 (trixie)' }
+    @{ platform = 'debian'; kind = 'netboot'; codename = 'trixie';   arch = 'arm64'; label = 'Debian 13 (trixie)' }
+    @{ platform = 'debian'; kind = 'netboot'; codename = 'bookworm'; arch = 'amd64'; label = 'Debian 12 (bookworm)' }
+    @{ platform = 'debian'; kind = 'netboot'; codename = 'bookworm'; arch = 'arm64'; label = 'Debian 12 (bookworm)' }
+    @{ platform = 'ubuntu'; kind = 'iso'; codename = 'noble'; arch = 'amd64'; label = 'Ubuntu 24.04 LTS Server';
+       index = 'https://releases.ubuntu.com/24.04/'; isoPattern = 'ubuntu-24\.04(\.\d+)?-live-server-amd64\.iso' }
+    @{ platform = 'ubuntu'; kind = 'iso'; codename = 'jammy'; arch = 'amd64'; label = 'Ubuntu 22.04 LTS Server';
+       index = 'https://releases.ubuntu.com/22.04/'; isoPattern = 'ubuntu-22\.04(\.\d+)?-live-server-amd64\.iso' }
 )
+
+function Get-AppPxeBootLinuxCatalogRow {
+    param([Parameter(Mandatory)][string]$Id)
+    foreach ($row in $script:AppPxeBootDebianNetbootCatalog) {
+        if ("$([string]$row.platform)-$([string]$row.codename)-$([string]$row.arch)" -eq $Id.Trim().ToLowerInvariant()) { return $row }
+    }
+    return $null
+}
+
+function Get-AppPxeBootLinuxCatalogIsoInLibrary {
+    # The library ISO a kind='iso' catalog row is satisfied by, or $null.
+    param([Parameter(Mandatory)]$Row)
+    $paths = Get-AppPxeBootLayoutPaths
+    if (-not (Test-Path -LiteralPath $paths.isoDir -PathType Container)) { return $null }
+    $rx = '^' + [string]$Row.isoPattern + '$'
+    foreach ($f in @(Get-ChildItem -LiteralPath $paths.isoDir -Filter '*.iso' -File -ErrorAction SilentlyContinue | Sort-Object Name -Descending)) {
+        if ($f.Name -match $rx) { return $f }
+    }
+    return $null
+}
+
+function Start-AppPxeBootLinuxIsoDownload {
+    <#
+    .SYNOPSIS
+        Queue a catalog row's current ISO (resolved from its release index, SHA256 from the
+        index's SHA256SUMS) into the library over the aria2 direct rail - Transfers shows
+        the progress, and the finished file is promoted into iso/ like any other ISO.
+    #>
+    param([Parameter(Mandatory)]$Row)
+    if (-not (Test-AppSidecarCommand Add-AppAria2DirectHttpDownload)) {
+        throw 'PXE boot: the download service (aria2 integration) is not loaded.'
+    }
+    $index = [string]$Row.index
+    $html = Get-AppPxeBootHttpTextContent -Url $index
+    $m = [regex]::Match($html, [string]$Row.isoPattern)
+    if (-not $m.Success) { throw "PXE boot: no ISO matching $($Row.label) $($Row.arch) at $index" }
+    $name = $m.Value
+    $sha = ''
+    try {
+        $sums = Get-AppPxeBootHttpTextContent -Url ($index + 'SHA256SUMS')
+        foreach ($line in ($sums -split "`n")) {
+            if ($line -match '^([0-9a-fA-F]{64})\s+\*?(\S+)\s*$' -and [string]$Matches[2] -eq $name) { $sha = ([string]$Matches[1]).ToLowerInvariant() }
+        }
+    } catch { $sha = '' }
+    Write-SidecarLog "PXE boot: queueing $name from $index (sha256 $(if ($sha) { 'verified on arrival' } else { 'not published' }))"
+    $args = @{
+        Uris         = @($index + $name)
+        AssetKind    = 'iso'
+        FileNameHint = $name
+        ProgressKey  = "linux|$([string]$Row.platform)-$([string]$Row.codename)-$([string]$Row.arch)"
+        TimeoutSec   = 21600
+    }
+    if ($sha) { $args.ExpectedHash = $sha; $args.ExpectedHashAlgorithm = 'sha-256' }
+    $queued = Add-AppAria2DirectHttpDownload @args
+    return @{ fileName = $name; sha256 = $sha; download = $queued }
+}
+
+function Add-AppPxeBootLinuxInstaller {
+    param([Parameter(Mandatory)][string]$Id)
+    $row = Get-AppPxeBootLinuxCatalogRow -Id $Id
+    if (-not $row) { throw "PXE boot: '$Id' is not a Linux installer this app offers." }
+    if ([string]$row.kind -eq 'iso') {
+        $have = Get-AppPxeBootLinuxCatalogIsoInLibrary -Row $row
+        if ($have) { return @{ updated = $false; queued = $false; fileName = $have.Name } }
+        $r = Start-AppPxeBootLinuxIsoDownload -Row $row
+        return @{ updated = $false; queued = $true; fileName = [string]$r.fileName }
+    }
+    $r = Add-AppPxeBootDebianNetboot -Codename ([string]$row.codename) -Arch ([string]$row.arch)
+    return @{ updated = [bool]$r.updated; queued = $false; fileName = '' }
+}
+
+function Remove-AppPxeBootLinuxInstaller {
+    param([Parameter(Mandatory)][string]$Id)
+    $row = Get-AppPxeBootLinuxCatalogRow -Id $Id
+    if (-not $row) { throw "PXE boot: '$Id' is not a Linux installer this app offers." }
+    if ([string]$row.kind -eq 'iso') {
+        $have = Get-AppPxeBootLinuxCatalogIsoInLibrary -Row $row
+        if ($have) { Remove-AppPxeBootIso -FileName $have.Name | Out-Null }
+        return @{ removed = [bool]$have }
+    }
+    return (Remove-AppPxeBootDebianNetboot -Codename ([string]$row.codename) -Arch ([string]$row.arch))
+}
 
 function Get-AppPxeBootDebianReleaseLabel {
     param([Parameter(Mandatory)][string]$Codename)
@@ -9173,24 +9345,50 @@ function Get-AppPxeBootDebianNetbootPairs {
 }
 
 function Get-AppPxeBootDebianNetbootCatalogStatus {
-    # The catalog joined with the store: what the panel lists, with Add / Remove state.
+    # The catalog joined with the store and the library: what the panel lists, with the
+    # Add / Remove state. Debian rows are ready when their netboot pair is in the store,
+    # Ubuntu rows when their ISO is in the library.
     $rows = [System.Collections.Generic.List[object]]::new()
     foreach ($cat in $script:AppPxeBootDebianNetbootCatalog) {
+        $platform = [string]$cat.platform
         $codename = [string]$cat.codename
         $arch = [string]$cat.arch
-        $pair = Read-AppPxeBootDebianNetbootPair -DirName "$codename-$arch"
-        $rows.Add(@{
-                id            = "debian-$codename-$arch"
-                codename      = $codename
-                arch          = $arch
-                label         = [string]$cat.label
-                ready         = [bool]$pair
-                diVersion     = if ($pair) { [string]$pair.diVersion } else { $null }
-                fetchedAt     = if ($pair) { [string]$pair.fetchedAt } else { $null }
-                sizeBytes     = if ($pair) { [long]$pair.sizeBytes } else { 0 }
-                kernelHttpRel = if ($pair) { [string]$pair.linuxHttpRel } else { $null }
-                initrdHttpRel = if ($pair) { [string]$pair.initrdHttpRel } else { $null }
-            }) | Out-Null
+        $kind = [string]$cat.kind
+        $row = @{
+            id            = "$platform-$codename-$arch"
+            platform      = $platform
+            kind          = $kind
+            codename      = $codename
+            arch          = $arch
+            label         = [string]$cat.label
+            ready         = $false
+            diVersion     = $null
+            fetchedAt     = $null
+            sizeBytes     = [long]0
+            kernelHttpRel = $null
+            initrdHttpRel = $null
+            isoFileName   = $null
+        }
+        if ($kind -eq 'iso') {
+            $iso = Get-AppPxeBootLinuxCatalogIsoInLibrary -Row $cat
+            if ($iso) {
+                $row.ready = $true
+                $row.isoFileName = $iso.Name
+                $row.sizeBytes = [long]$iso.Length
+                $row.fetchedAt = $iso.LastWriteTimeUtc.ToString('o')
+            }
+        } else {
+            $pair = Read-AppPxeBootDebianNetbootPair -DirName "$codename-$arch"
+            if ($pair) {
+                $row.ready = $true
+                $row.diVersion = [string]$pair.diVersion
+                $row.fetchedAt = [string]$pair.fetchedAt
+                $row.sizeBytes = [long]$pair.sizeBytes
+                $row.kernelHttpRel = [string]$pair.linuxHttpRel
+                $row.initrdHttpRel = [string]$pair.initrdHttpRel
+            }
+        }
+        $rows.Add($row) | Out-Null
     }
     return $rows.ToArray()
 }
@@ -9501,10 +9699,10 @@ function Mount-AppPxeBootInstallWimIsos {
                 # Not Windows media. A Linux ISO earns its mount the same way: kernel and
                 # initrd served in place, straight off the ISO 9660 volume.
                 $linuxBoot = Resolve-AppPxeBootMountLinuxBoot -MountPath $mountInfo.mountPath -IsoFileName $iso.Name
+                if ($linuxBoot) { $linuxBoot.codename = Get-AppPxeBootDebianCodename -MountPath $mountInfo.mountPath }
                 if ($linuxBoot -and ([string]$linuxBoot.layoutId) -like 'debian-installer-*') {
                     # Installer media: make sure the matching netboot initrd is in the store
                     # (one download per Debian build; the ISO's own initrd cannot install).
-                    $linuxBoot.codename = Get-AppPxeBootDebianCodename -MountPath $mountInfo.mountPath
                     $flavour = if (([string]$linuxBoot.layoutId) -like '*-gtk') { 'gtk' } else { 'text' }
                     try {
                         $linuxBoot.netboot = Ensure-AppPxeBootDebianNetbootInitrd -Codename ([string]$linuxBoot.codename) -Arch ([string]$linuxBoot.arch) -KernelPath ([string]$linuxBoot.kernelPath) -Flavour $flavour

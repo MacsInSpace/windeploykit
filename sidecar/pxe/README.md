@@ -138,6 +138,21 @@ for amd64 and arm64; **Add** fetches the mirror's current gtk `linux` + `initrd.
 `Debian 13 (trixie) amd64 installer (network)` with the task-sequence submenu. **Remove**
 drops the directory and the entry. Add on an already-current pair downloads nothing.
 
+### Ubuntu: the ISO is the installer
+
+Ubuntu 22.04+ has no d-i and no netboot installer. The Linux installers catalog offers
+Ubuntu 24.04 and 22.04 Server; **Add** downloads the current live-server ISO into the
+library through Transfers (SHA256SUMS-verified). Mounted, its `casper/vmlinuz` and
+`casper/initrd` boot straight off the mount with `ip=dhcp url=<the ISO over Caddy>`;
+casper fetches the whole ISO into RAM and runs Subiquity from it, and packages come from
+the Ubuntu archive. An Ubuntu task sequence compiles to a Subiquity autoinstall published
+as `TaskSequences/autoinstall/<id>/user-data` + `meta-data`; its handler adds
+`autoinstall ds=nocloud-net;s=<seed directory>/ cloud-config-url=<seed>/user-data`. The
+`cloud-config-url=` is load-bearing: cloud-init also treats a kernel `url=` as its
+cloud-config and would otherwise read the whole ISO into memory (OOM, seen 2026-09-06);
+the Interactive entry points it at an empty cloud-config the menu regen writes. Debian and Ubuntu sequences only ever
+appear under entries of their own platform.
+
 ### Task sequences reach the installer through the menu
 
 d-i reads `preseed/url=` off the kernel command line, so the menu entry decides which

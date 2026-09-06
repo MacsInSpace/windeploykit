@@ -125,7 +125,14 @@ These are not incidental; every one of them shaped the code.
    boots a Debian netinst; the missing tier is an install that consumes a
    generated preseed and lands a working machine. Nothing here has touched real
    hardware or a real installer.
-6. **Ubuntu and RHEL**, if wanted. Each is another `platform` value and another
+6. ~~Ubuntu~~ **Done 2026-09-06.** `platform: ubuntu` compiles to a Subiquity
+   autoinstall published as `TaskSequences/autoinstall/<id>/{user-data,meta-data}`
+   (cloud-init NoCloud). The Linux installers catalog has Ubuntu 24.04 and 22.04
+   rows whose Add downloads the live-server ISO into the library through
+   Transfers (no netboot installer exists for 22.04+); the mounted ISO's
+   `casper/vmlinuz` + `casper/initrd` boot with `ip=dhcp url=<the ISO over
+   Caddy>`, and a sequence handler adds `autoinstall ds=nocloud-net;s=<seed>/`.
+   Live: verified 2026-09-06 in QEMU (8 GB RAM, 16 GB virtio disk): the Ubuntu sequence handler booted casper off the mounted ISO, casper streamed the 3.4 GB ISO from Caddy, cloud-init fetched the seed, Subiquity ran the autoinstall, curtin wrote the system, and the machine rebooted on its own. **RHEL / Rocky (kickstart)**, if wanted: another
    builder; the store, publish and panel gating already take one.
 
 ---

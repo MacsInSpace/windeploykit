@@ -198,7 +198,7 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
     # means a d-i preseed. Absent means windows, so every sequence written before
     # this existed keeps working untouched.
     $platform = ([string](Get-AppPxeBootTsProp -Item $Item -Name 'platform')).Trim().ToLowerInvariant()
-    if ($platform -notin @('windows', 'debian')) { $platform = 'windows' }
+    if ($platform -notin @('windows', 'debian', 'ubuntu')) { $platform = 'windows' }
     # kind is a Windows role. A preseed has no client/server split, and leaving a
     # stale 'server' on it would show the wrong fields in the panel.
     if ($platform -ne 'windows') { $kind = '' }
@@ -215,7 +215,7 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
     # Debian: a password typed in the panel arrives as fields.userPassword and is hashed
     # here - only userPasswordCrypted is ever stored or published. A blank one keeps the
     # hash already saved.
-    if ($platform -eq 'debian' -and $fields.Contains('userPassword')) {
+    if ($platform -in @('debian', 'ubuntu') -and $fields.Contains('userPassword')) {
         $plainPw = [string]$fields['userPassword']
         if (-not [string]::IsNullOrEmpty($plainPw)) {
             $fields['userPasswordCrypted'] = ConvertTo-AppPxeBootTsSha512Crypt -Password $plainPw
@@ -1400,6 +1400,8 @@ function Sync-AppPxeBootTaskSequenceStore {
 
     $published = 0
     $keep = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    # autoinstall/<id>/ directories that belong to enabled Ubuntu sequences.
+    $keepDirs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $indexRows = @()
     # One cheap catalog read for the whole publish (cached edition lists, no mounting).
     $catalog = $null
@@ -1418,6 +1420,34 @@ function Sync-AppPxeBootTaskSequenceStore {
     foreach ($seq in @(Read-AppPxeBootTaskSequences)) {
         $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $seq
         if ($null -eq $rec -or -not [bool]$rec.enabled) { continue }
+        # Ubuntu: cloud-init NoCloud wants a DIRECTORY - user-data + meta-data - fetched
+        # from .../autoinstall/<id>/ (the trailing slash matters to cloud-init). LF only,
+        # like the preseed. The keep sentinel <id>.autoinstall never matches a flat file.
+        if ([string]$rec.platform -eq 'ubuntu') {
+            $rendered = Build-AppPxeBootTaskSequenceAutoinstall -Sequence $rec
+            if (-not $rendered) { continue }
+            $aiDir = Join-Path (Join-Path $dir 'autoinstall') $rec.id
+            if (-not (Test-Path -LiteralPath $aiDir)) { $null = New-Item -Path $aiDir -ItemType Directory -Force }
+            $utf8 = New-Object System.Text.UTF8Encoding $false
+            foreach ($pair in @(@{ name = 'user-data'; body = ($rendered -replace "`r`n", "`n") }, @{ name = 'meta-data'; body = "instance-id: wdk-$($rec.id)`n" })) {
+                $target = Join-Path $aiDir $pair.name
+                $have = if (Test-Path -LiteralPath $target) { Get-Content -LiteralPath $target -Raw -ErrorAction SilentlyContinue } else { $null }
+                if ($have -ne $pair.body) { [System.IO.File]::WriteAllText($target, $pair.body, $utf8) }
+            }
+            [void]$keepDirs.Add([string]$rec.id)
+            [void]$keep.Add("$($rec.id).autoinstall")
+            $published++
+            $indexRows += , [ordered]@{
+                id              = [string]$rec.id
+                name            = [string]$rec.name
+                kind            = ''
+                platform        = 'ubuntu'
+                file            = "autoinstall/$($rec.id)/user-data"
+                firstBootAction = ''
+                image           = $null
+            }
+            continue
+        }
         # Which answer file this sequence compiles to. Windows wants CRLF for
         # its own consumers; a preseed is read by the Debian installer and LF is
         # not optional there - d-i takes the CR as part of the value and a
@@ -1520,6 +1550,15 @@ function Sync-AppPxeBootTaskSequenceStore {
             }
         }
     }
+    # autoinstall/<id>/ for a removed or disabled Ubuntu sequence goes the same way.
+    $aiRoot = Join-Path $dir 'autoinstall'
+    if (Test-Path -LiteralPath $aiRoot -PathType Container) {
+        foreach ($existingDir in @(Get-ChildItem -LiteralPath $aiRoot -Directory -ErrorAction SilentlyContinue)) {
+            if (-not $keepDirs.Contains($existingDir.Name)) {
+                Remove-Item -LiteralPath $existingDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
 
     # convert-eval.ps1 - the server eval->licensed script the deploy client copies into
     # C:\Windows\Setup\Scripts on a server deploy (it no-ops on a non-evaluation image).
@@ -1564,7 +1603,7 @@ function Sync-AppPxeBootTaskSequenceStore {
     # pruned rather than preselecting a missing sequence (no marker = None item).
     $marker = Join-Path $dir '_default.txt'
     $default = Get-AppPxeBootTaskSequenceDefaultId
-    $defaultValid = [bool]($default -and ($keep.Contains("$default.xml") -or $keep.Contains("$default.cfg")))
+    $defaultValid = [bool]($default -and ($keep.Contains("$default.xml") -or $keep.Contains("$default.cfg") -or $keep.Contains("$default.autoinstall")))
     if ($defaultValid) {
         $want = $default + "`r`n"
         $have = if (Test-Path -LiteralPath $marker) { Get-Content -LiteralPath $marker -Raw -ErrorAction SilentlyContinue } else { $null }
@@ -1781,7 +1820,7 @@ function ConvertTo-AppPxeBootTsShellSingleQuoted {
     "'" + ([string]$Value -replace "'", "'\''") + "'"
 }
 
-function Build-AppPxeBootTaskSequencePreseedLateCommand {
+function Get-AppPxeBootTsLateCommandParts {
     <#
         .SYNOPSIS
         The sequence's steps and run script as one d-i late_command.
@@ -1835,9 +1874,138 @@ printf '[Unit]\nDescription=WinDeployKit first boot\nAfter=network-online.target
         if (-not $cmd) { continue }
         $parts += "in-target sh -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $cmd)"
     }
+    # Emitted, not wrapped: a `, $parts` here reaches a caller @() as ONE nested array.
+    return $parts
+}
+
+function Build-AppPxeBootTaskSequencePreseedLateCommand {
+    # d-i takes one logical line.
+    param([Parameter(Mandatory)]$Sequence)
+    $parts = @(Get-AppPxeBootTsLateCommandParts -Sequence $Sequence)
     if ($parts.Count -eq 0) { return '' }
-    # d-i takes one logical line; a trailing backslash continues it.
     ($parts -join '; ')
+}
+
+function ConvertTo-AppPxeBootTsYamlSingleQuoted {
+    # YAML single-quoted scalar: the only escape is '' for a literal quote, so a shell
+    # payload full of quotes and backslashes survives untouched.
+    param([string]$Value)
+    "'" + ([string]$Value -replace "'", "''") + "'"
+}
+
+function Build-AppPxeBootTaskSequenceAutoinstallLateCommands {
+    <#
+    .SYNOPSIS
+        The same first-boot parts as the Debian late_command, one per Subiquity
+        late-command. d-i's in-target is curtin's `curtin in-target --target=/target --`;
+        a part that writes to /target/... directly works unchanged (Subiquity mounts the
+        new system there too).
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+    $out = @()
+    foreach ($part in @(Get-AppPxeBootTsLateCommandParts -Sequence $Sequence)) {
+        $p = [string]$part
+        if ($p -match '^in-target (.*)$') { $p = 'curtin in-target --target=/target -- ' + $matches[1] }
+        $out += $p
+    }
+    return $out
+}
+
+function Build-AppPxeBootTaskSequenceAutoinstall {
+    <#
+    .SYNOPSIS
+        Render a Subiquity autoinstall (cloud-init NoCloud user-data) for one sequence.
+    .DESCRIPTION
+        Ubuntu 22.04+ has no d-i: the live-server ISO's installer reads an autoinstall
+        YAML from the NoCloud seed named on the kernel line (ds=nocloud-net;s=<url>/).
+        Same rules as the preseed: publish-time values only, the password is a crypt
+        hash, no apt mirror block (the installer's default archive is the point), and
+        nothing sensitive beyond the hash.
+    #>
+    param([Parameter(Mandatory)]$Sequence)
+    if ([string]$Sequence.platform -ne 'ubuntu') { return '' }
+    $flds = $Sequence.fields
+    $f = {
+        param($n, $d = '')
+        $v = if ($flds -and $flds.Contains($n)) { ([string]$flds[$n]).Trim() } else { '' }
+        if ($v) { $v } else { $d }
+    }
+    $q = { param($v) ConvertTo-AppPxeBootTsYamlSingleQuoted ([string]$v) }
+
+    $hostname  = & $f 'hostname'   'ubuntu'
+    $locale    = & $f 'locale'     'en_AU.UTF-8'
+    $keymap    = & $f 'keymap'     'us'
+    $timezone  = & $f 'timezone'   'Australia/Melbourne'
+    $username  = & $f 'username'   'localadmin'
+    $fullName  = & $f 'userFullName' 'Local Administrator'
+    $pwCrypt   = & $f 'userPasswordCrypted'
+    if ((& $f 'userSource' 'manual') -eq 'vault') {
+        $vaultUser = Resolve-AppPxeBootTsDebianVaultUser -SecretName (& $f 'userVaultSecret')
+        if ($vaultUser) {
+            $username = [string]$vaultUser.username
+            $fullName = [string]$vaultUser.fullName
+            $pwCrypt  = [string]$vaultUser.crypted
+        } else {
+            $pwCrypt = ''
+        }
+    }
+    $disk      = & $f 'disk'       '/dev/nvme0n1 /dev/sda /dev/mmcblk0'
+    $layout    = & $f 'storageLayout' 'direct'
+    if ($layout -notin @('direct', 'lvm')) { $layout = 'direct' }
+    $packages  = @(((& $f 'packages' '') -split '\s+') | Where-Object { $_ })
+    $sshServer = (& $f 'sshServer' '1') -ne '0'
+    $late      = @(Build-AppPxeBootTaskSequenceAutoinstallLateCommands -Sequence $Sequence)
+    # The Debian disk field is an ordered list of candidates; Subiquity's match takes one
+    # path, so a single device becomes path: and a list becomes the largest disk.
+    $disks = @(($disk -split '\s+') | Where-Object { $_ })
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $add = { param($t) [void]$lines.Add($t) }
+    & $add '#cloud-config'
+    & $add "# WinDeployKit task sequence: $($Sequence.name)"
+    & $add '# Generated - edit the sequence, not this file.'
+    & $add 'autoinstall:'
+    & $add '  version: 1'
+    & $add '  refresh-installer:'
+    & $add '    update: false'
+    & $add "  locale: $(& $q $locale)"
+    & $add '  keyboard:'
+    & $add "    layout: $(& $q $keymap)"
+    & $add "  timezone: $(& $q $timezone)"
+    if ($pwCrypt) {
+        & $add '  identity:'
+        & $add "    hostname: $(& $q $hostname)"
+        & $add "    username: $(& $q $username)"
+        & $add "    realname: $(& $q $fullName)"
+        & $add "    password: $(& $q $pwCrypt)"
+    } else {
+        & $add '  # No password hash set on this sequence: the installer asks for the user.'
+        & $add '  interactive-sections:'
+        & $add '    - identity'
+    }
+    & $add '  ssh:'
+    & $add "    install-server: $(if ($sshServer) { 'true' } else { 'false' })"
+    & $add '    allow-pw: true'
+    & $add '  storage:'
+    & $add '    layout:'
+    & $add "      name: $layout"
+    & $add '      match:'
+    if ($disks.Count -eq 1) {
+        & $add "        path: $(& $q $disks[0])"
+    } else {
+        & $add '        size: largest'
+    }
+    if ($packages.Count -gt 0) {
+        & $add '  packages:'
+        foreach ($p in $packages) { & $add "    - $(& $q $p)" }
+    }
+    & $add '  updates: security'
+    if ($late.Count -gt 0) {
+        & $add '  late-commands:'
+        foreach ($c in $late) { & $add "    - $(& $q $c)" }
+    }
+    & $add '  shutdown: reboot'
+    ($lines -join "`n") + "`n"
 }
 
 function Build-AppPxeBootTaskSequencePreseed {
@@ -1961,6 +2129,12 @@ function Get-AppPxeBootTaskSequencesPayload {
     if ($dir -and (Test-Path -LiteralPath $dir)) {
         $publishedFiles = @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue |
             Where-Object { $_.Extension -in @('.xml', '.cfg') } | ForEach-Object { $_.Name })
+        $aiRoot = Join-Path $dir 'autoinstall'
+        if (Test-Path -LiteralPath $aiRoot -PathType Container) {
+            foreach ($d in @(Get-ChildItem -LiteralPath $aiRoot -Directory -ErrorAction SilentlyContinue)) {
+                if (Test-Path -LiteralPath (Join-Path $d.FullName 'user-data') -PathType Leaf) { $publishedFiles += "$($d.Name).autoinstall" }
+            }
+        }
     }
     # Join-domain options come from the Site Profile. Guard against wrapper leaks:
     # a store that wraps entries as @{value; userLocked; updatedAt} must be

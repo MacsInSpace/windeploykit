@@ -610,24 +610,34 @@ function Handle-ListPxeBootLinuxNetboot {
 function Handle-AddPxeBootLinuxNetboot {
     param([int]$Id, $Params)
     Set-AppImageLibraryRuntimeRootFromParams -Params $Params
-    $codename = Get-AppSidecarParam -Params $Params -Name 'codename'
-    $arch = Get-AppSidecarParam -Params $Params -Name 'arch'
-    if (-not $codename -or -not $arch) { throw 'AddPxeBootLinuxNetboot: codename and arch required.' }
-    $result = Add-AppPxeBootDebianNetboot -Codename ([string]$codename) -Arch ([string]$arch)
+    $installerId = Get-AppSidecarParam -Params $Params -Name 'id'
+    if (-not $installerId) {
+        $codename = Get-AppSidecarParam -Params $Params -Name 'codename'
+        $arch = Get-AppSidecarParam -Params $Params -Name 'arch'
+        if (-not $codename -or -not $arch) { throw 'AddPxeBootLinuxNetboot: id (or codename and arch) required.' }
+        $installerId = "debian-$codename-$arch"
+    }
+    $result = Add-AppPxeBootLinuxInstaller -Id ([string]$installerId)
     Write-SidecarResponse -Id $Id -Data @{
-        updated = [bool]$result.updated
-        entries = @(Get-AppPxeBootDebianNetbootCatalogStatus)
-        mirror  = (Get-AppPxeBootDebianMirrorBase)
+        updated  = [bool]$result.updated
+        queued   = [bool]$result.queued
+        fileName = [string]$result.fileName
+        entries  = @(Get-AppPxeBootDebianNetbootCatalogStatus)
+        mirror   = (Get-AppPxeBootDebianMirrorBase)
     }
 }
 
 function Handle-RemovePxeBootLinuxNetboot {
     param([int]$Id, $Params)
     Set-AppImageLibraryRuntimeRootFromParams -Params $Params
-    $codename = Get-AppSidecarParam -Params $Params -Name 'codename'
-    $arch = Get-AppSidecarParam -Params $Params -Name 'arch'
-    if (-not $codename -or -not $arch) { throw 'RemovePxeBootLinuxNetboot: codename and arch required.' }
-    Remove-AppPxeBootDebianNetboot -Codename ([string]$codename) -Arch ([string]$arch) | Out-Null
+    $installerId = Get-AppSidecarParam -Params $Params -Name 'id'
+    if (-not $installerId) {
+        $codename = Get-AppSidecarParam -Params $Params -Name 'codename'
+        $arch = Get-AppSidecarParam -Params $Params -Name 'arch'
+        if (-not $codename -or -not $arch) { throw 'RemovePxeBootLinuxNetboot: id (or codename and arch) required.' }
+        $installerId = "debian-$codename-$arch"
+    }
+    Remove-AppPxeBootLinuxInstaller -Id ([string]$installerId) | Out-Null
     Write-SidecarResponse -Id $Id -Data @{
         entries = @(Get-AppPxeBootDebianNetbootCatalogStatus)
         mirror  = (Get-AppPxeBootDebianMirrorBase)

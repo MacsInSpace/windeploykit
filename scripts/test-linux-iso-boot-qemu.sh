@@ -14,6 +14,13 @@
 #   WDK_LINUX_ENTRY=lnx_debian_trixie_amd64 ./scripts/test-linux-iso-boot-qemu.sh
 #                                                     # pick an entry (default: the first
 #                                                     #   :lnx_* in the menu)
+#   WDK_VM_RAM=8192 ...                               # VM memory in MB (default 4096;
+#                                                     #   Ubuntu's casper holds the whole
+#                                                     #   ISO in RAM, so give it 8192)
+#
+# Ubuntu entries (casper/vmlinuz): there is no d-i, so the tiers read differently -
+# tier 2 = casper fetched the ISO from Caddy, tier 3 = cloud-init fetched the autoinstall
+# seed (user-data), tier 4 = the install finished and the VM rebooted (exited).
 #   ./scripts/test-linux-iso-boot-qemu.sh --preseed   # tier 4: boot a TASK SEQUENCE
 #                                                     #   handler (needs a published
 #                                                     #   Debian sequence whose disk is
@@ -52,9 +59,12 @@ ENTRY="${WDK_LINUX_ENTRY:-$(grep -m1 -o '^:lnx_[a-z0-9_]*' "$MENU" | grep -v '__
 if [ "$TIER4" = "1" ]; then
     # The entry's first task-sequence handler: <entry>__ts_<sequence>.
     LABEL=$(grep -m1 -o "^:${ENTRY}__ts_[a-z0-9_]*" "$MENU" | tr -d ':')
-    [ -n "$LABEL" ] || { echo "FAIL: no :${ENTRY}__ts_* handler in boot.ipxe - publish an enabled Debian task sequence first"; exit 1; }
-    PRESEED_URI=$(awk -v l=":$LABEL" '$0==l{p=1;next} p&&/^kernel /{print; exit}' "$MENU" | grep -o 'preseed/url=[^ ]*' | sed 's|preseed/url=\${http_base}||')
-    [ -n "$PRESEED_URI" ] || { echo "FAIL: handler $LABEL carries no preseed/url="; exit 1; }
+    [ -n "$LABEL" ] || { echo "FAIL: no :${ENTRY}__ts_* handler in boot.ipxe - publish an enabled Linux task sequence first"; exit 1; }
+    KLINE=$(awk -v l=":$LABEL" '$0==l{p=1;next} p&&/^kernel /{print; exit}' "$MENU")
+    # Debian: preseed/url=<file>. Ubuntu: ds=nocloud-net;s=<dir>/ whose user-data is fetched.
+    PRESEED_URI=$(printf '%s' "$KLINE" | grep -o 'preseed/url=[^ ]*' | sed 's|preseed/url=\${http_base}||')
+    [ -n "$PRESEED_URI" ] || PRESEED_URI=$(printf '%s' "$KLINE" | grep -o 'ds=nocloud-net;s=[^ ]*' | sed 's|ds=nocloud-net;s=\${http_base}||; s|/$|/user-data|')
+    [ -n "$PRESEED_URI" ] || { echo "FAIL: handler $LABEL carries neither preseed/url= nor ds=nocloud-net;s="; exit 1; }
 elif grep -q "^:${ENTRY}__manual\$" "$MENU"; then
     # An install-capable entry with sequences is a submenu; its Interactive handler is
     # the plain boot the lower tiers want.
@@ -63,11 +73,15 @@ else
     LABEL="$ENTRY"
 fi
 KERNEL_URI=$(awk -v l=":$LABEL" '$0==l{p=1;next} p&&/^kernel /{print $2; exit}' "$MENU" | sed 's|\${http_base}||')
+UBUNTU=0; case "$KERNEL_URI" in */casper/vmlinuz) UBUNTU=1 ;; esac
+ISO_URI=""
+[ "$UBUNTU" = "1" ] && ISO_URI=$(awk -v l=":$LABEL" '$0==l{p=1;next} p&&/^kernel /{print; exit}' "$MENU" | grep -o 'url=[^ ]*' | head -1 | sed 's|url=\${http_base}||')
 INITRD_URI=$(awk -v l=":$LABEL" '$0==l{p=1;next} p&&/^initrd /{print $2; exit}' "$MENU" | sed 's|\${http_base}||')
 echo "menu is live (http_base $HTTP_BASE) - testing $LABEL"
 echo "  kernel $KERNEL_URI"
 echo "  initrd $INITRD_URI"
-[ "$TIER4" = "1" ] && echo "  preseed $PRESEED_URI"
+[ "$UBUNTU" = "1" ] && echo "  ubuntu: casper streams $ISO_URI"
+[ "$TIER4" = "1" ] && echo "  seed   $PRESEED_URI"
 
 # --- the VM's boot media ------------------------------------------------------
 rm -rf "$WORK"; mkdir -p "$WORK/fatroot/EFI/BOOT"
@@ -110,7 +124,7 @@ if [ "$TIER4" = "1" ]; then
     qemu-img create -q -f qcow2 "$WORK/disk.qcow2" 16G || { echo "FAIL: qemu-img"; exit 1; }
     EXTRA=(-drive "file=$WORK/disk.qcow2,if=virtio,format=qcow2" -no-reboot)
 fi
-qemu-system-x86_64 -machine q35 -accel tcg,thread=multi -cpu qemu64 -smp 4 -m 4096 \
+qemu-system-x86_64 -machine q35 -accel tcg,thread=multi -cpu qemu64 -smp 4 -m "${WDK_VM_RAM:-4096}" \
   -drive if=pflash,format=raw,readonly=on,file="$FW" \
   -drive if=none,id=fat,file="fat:rw:$WORK/fatroot",format=raw -device ide-hd,drive=fat,bootindex=1 \
   -netdev user,id=n0,tftp="$WORK",bootfile=boot.ipxe -device e1000,netdev=n0 \
@@ -139,8 +153,15 @@ done
 if [ "$TIER2" = "0" ]; then echo "linux iso boot: all checks passed (tier 1)"; exit 0; fi
 
 # --- tier 2: the kernel booted and the installer put up its first screen ------
+# Ubuntu: casper's first act is fetching the ISO named by url= - that is the sign.
 DEADLINE=$(( $(date +%s) + 900 ))
 while :; do
+    if [ "$UBUNTU" = "1" ]; then
+        if seen "$ISO_URI"; then echo "  [OK  ] kernel booted - casper is fetching the ISO from this machine"; break; fi
+        kill -0 "$QEMU" 2>/dev/null || { echo "  [FAIL] qemu exited before casper fetched the ISO"; exit 1; }
+        [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "  [FAIL] casper never fetched the ISO within 15 min"; exit 1; }
+        sleep 5; continue
+    fi
     # A preseeded (tier 3) run never shows the language screen - its first visible
     # step is hardware detection, so that counts too.
     if LC_ALL=C grep -a -q "Select a language\|Choose the language\|Detecting network hardware\|Configuring the network\|login:" "$WORK/serial.log" 2>/dev/null; then
@@ -152,6 +173,32 @@ while :; do
     sleep 5
 done
 if [ "$TIER3" = "0" ]; then echo "linux iso boot: all checks passed (tier 2)"; exit 0; fi
+
+# --- tier 3 (Ubuntu): cloud-init fetched the autoinstall seed ---------------------
+if [ "$UBUNTU" = "1" ]; then
+    if [ "$TIER4" = "1" ]; then
+        DEADLINE=$(( $(date +%s) + 1800 ))
+        while :; do
+            if seen "$PRESEED_URI"; then echo "  [OK  ] cloud-init fetched the autoinstall seed $PRESEED_URI"; break; fi
+            kill -0 "$QEMU" 2>/dev/null || { echo "  [FAIL] qemu exited before the seed was fetched"; exit 1; }
+            [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "  [FAIL] the seed was never fetched within 30 min"; exit 1; }
+            sleep 10
+        done
+        # Tier 4 (Ubuntu): the install finished and the machine rebooted - the VM exits.
+        DEADLINE=$(( $(date +%s) + 3600 ))
+        while :; do
+            if ! kill -0 "$QEMU" 2>/dev/null; then
+                if [ "$(stat -f %z "$WORK/disk.qcow2" 2>/dev/null || echo 0)" -gt 1000000000 ]; then
+                    echo "  [OK  ] install finished and the machine rebooted (VM exited, disk written)"; echo "linux iso boot: all checks passed (tier 4, ubuntu)"; exit 0
+                fi
+                echo "  [FAIL] VM exited but the disk holds no install"; exit 1
+            fi
+            [ "$(date +%s)" -ge "$DEADLINE" ] && { echo "  [FAIL] install did not finish within 60 min"; exit 1; }
+            sleep 15
+        done
+    fi
+    echo "linux iso boot: all checks passed (tier 2, ubuntu - tiers 3 and 4 need --preseed)"; exit 0
+fi
 
 # --- tier 3: network up, mirror accepted, components loaded ---------------------
 # Only meaningful for the netboot-initrd entry (menu note "Installer: netboot initrd").
