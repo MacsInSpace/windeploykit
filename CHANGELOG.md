@@ -5,6 +5,25 @@ The format follows Keep a Changelog; the repository is ASCII-only, so are these 
 
 ## Unreleased
 
+### Added
+
+- **Install feedback for Linux task sequences.** A Debian or Ubuntu install now shows
+  up under PXE boot > imaging clients the way a WinPE deploy does. The menu handler
+  pings the imaging log before it fetches the kernel (keyed by SMBIOS serial, or the
+  MAC when there is none, like the WinPE client) and carries that identity on the
+  kernel line; the preseed's `early_command` (autoinstall: `early-commands`) fetches
+  `sidecar/pxe/linux/wdk-report.sh` from Caddy and starts it, and from then on every
+  installer step is reported in words ("Partitioning the disk", "Installing the base
+  system"), with the latest progress line, anything that looks like a failure, and a
+  heartbeat when it is quiet. The end-of-install steps report start and finish, the
+  new system gets `/etc/windeploykit/deploy.conf` (server, serial, make, model,
+  sequence, session), and the first-boot unit runs the sequence's script through the
+  reporter, which reports the exit code and the last lines of output. The ingest
+  endpoint takes a GET form for this (`?serial=&make=&model=&session=&line=` or
+  `&heartbeat=1`) because the installer's busybox wget cannot POST. Gate:
+  `scripts/test-linux-install-report.ps1` drives the script under `sh` against the
+  real listener.
+
 ### Fixed
 
 - **Debian sequences no longer stall on "Detect network hardware" on real hardware.**

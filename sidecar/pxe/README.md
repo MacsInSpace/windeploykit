@@ -213,3 +213,49 @@ that exist in both the Debian and Ubuntu archives.
 Still open: Secure Boot must be off (the bundled shim trusts the iPXE CA, not a distro
 kernel key). With the mirror on the internet the installed system's apt sources are the
 normal Debian ones.
+### Install feedback: a Linux install in the imaging clients list
+
+The WinPE deploy client POSTs its log to `/imaging-log/ingest` (Caddy reverse-proxies it
+to a loopback listener in the sidecar) and the panel shows one row per machine with its
+last line. A Debian or Ubuntu task sequence now reports through the same endpoint, so
+there is one list and one row per machine whichever OS it is getting:
+
+1. **Boot ping.** A sequence handler runs `isset ${serial} && set wdk_id
+   ${serial:uristring} || set wdk_id ${mac:hexraw}` and `imgfetch --name wdk-ping
+   ${http_base}/imaging-log/ingest?serial=${wdk_id}&make=...&model=...&line=Boot...
+   ||` before `kernel`, so the row exists from the moment the entry is chosen, keyed
+   the way the WinPE client keys itself (SMBIOS serial, else MAC). `||` means a dead
+   endpoint cannot stop a boot. The same identity rides on the kernel line as
+   `wdk_serial= wdk_make= wdk_model=`, before `---`, so the installed system's GRUB never
+   sees it. Interactive entries do none of this.
+2. **The reporter.** `sidecar/pxe/linux/wdk-report.sh` is published to
+   `http/linux/wdk-report.sh`. The preseed's `preseed/early_command` (autoinstall:
+   `early-commands`) reads the server off the kernel line (`preseed/url=` or
+   `ds=nocloud-net;s=`), fetches the script and runs `start`, which reports "Installer
+   running: task sequence <id>" and forks `run` into the background. `run` watches
+   `/var/log/syslog` (Subiquity: its server debug log) and reports each step d-i's
+   main-menu starts, in words, the latest progress line when it changes (debootstrap and
+   in-target lines), anything that looks like a failure, and a heartbeat after a quiet
+   minute. Reports are GETs - the installer's busybox wget cannot POST - and every one
+   ends in `|| true`.
+3. **End of install.** The late_command opens with `wdk-report late` (reports, writes
+   `/target/etc/windeploykit/deploy.conf` with the server, serial, make, model, sequence
+   and session, copies the script to `/usr/local/sbin/wdk-report`) and closes with
+   `wdk-report done $rc`, which reports the previous part's exit status and exits with
+   it, so d-i still sees a failed step. Both parts are guarded by `[ -f /tmp/wdk-report ]`:
+   a sequence whose reporter fetch failed installs exactly as before.
+4. **First boot.** `wdk-firstboot.service` runs `/usr/local/sbin/wdk-report firstboot`
+   when it exists (else `wdk-run` directly, as before). It runs the sequence's script,
+   reports the start, the exit code with the time taken, and the last three lines of
+   output, and exits with the script's code, so a failing script still leaves the unit
+   enabled to retry at the next boot.
+
+The listener accepts `GET /imaging-log/ingest?serial=&make=&model=&session=&line=` (one
+line) or `&heartbeat=1`, URL-decoded, stored exactly as a POST is, answered `200 ok`
+(iPXE's `imgfetch` wants a body). A push with no make or model keeps the last known
+ones. Gate: `scripts/test-linux-install-report.ps1` starts the real listener, drives the
+script under `/bin/sh` with its `WDK_*` test hooks against a d-i-shaped syslog, and
+checks what landed in `imaging-logs/`. Ubuntu's stage names come from Subiquity's log
+and have not been watched on a live install yet; Debian's have been read out of a real
+d-i syslog.
+

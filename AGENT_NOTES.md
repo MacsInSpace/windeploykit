@@ -573,6 +573,28 @@ package picker (cheap, covers the installed system); Debian's netboot `firmware.
 appended as a second iPXE initrd (496 MB for trixie - covers the installer too, but
 heavy). CampusCast's own first-boot script enables the component itself for now.
 
+**Install feedback, same evening (branch `feature/linux-install-feedback`).** Craig,
+watching the 11e sit at a login prompt while its first-boot script was still installing
+packages: *"It'd be good to have feedback like from Windows boot wim."* Design, in
+`sidecar/pxe/README.md` "Install feedback": reuse the imaging-log pipeline rather than
+build a second one. Decisions worth keeping: (1) the installer's busybox wget cannot POST
+(checked the applet table in the initrd - no `--post-data`), so the loopback ingest
+listener grew a GET form and answers it 200 with a body because iPXE's `imgfetch` is the
+boot ping; (2) identity is decided by iPXE (`${serial:uristring}`, else `${mac:hexraw}`)
+and passed on the kernel line as `wdk_serial=` etc. so the ping, the installer and first
+boot key one row - d-i ignores params without a slash; (3) the reporter is one POSIX
+script with modes (`start run late done firstboot`), fetched by `early_command` from the
+server named in `preseed/url=` so it needs no publish-time value, persisted counters in
+`/tmp/wdk-env.state` so a restarted loop does not repeat itself; (4) every part is
+guarded: a failed fetch leaves the install exactly as before, `done` re-raises the
+previous part's exit status so d-i still sees a failed step, and the first-boot unit
+falls back to `wdk-run` when the reporter is missing. Gate:
+`test-linux-install-report.ps1` (the gate forces curl: Craig's Mac has a `~/.wgetrc`
+proxy that keeps GNU wget off loopback). Not yet seen live: the Ubuntu stage names
+(read from Subiquity's server log by pattern, untested), and a real Debian boot with
+the reporter - the code needs the app restarted (the sidecar dot-sources the libs at
+start) and a republish before the next QEMU or 11e run shows the rows.
+
 ### Scope sweep, 2026-08-21 - removed what is not an MDT/PXE replacement
 
 Craig: *"All we are doing is MDT/WDS and PXE imaging."* Everything below was
