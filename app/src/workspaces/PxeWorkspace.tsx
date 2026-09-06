@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -430,6 +430,32 @@ function formatModified(iso?: string): string {
 }
 
 /** Suggested boot-WIM name when extracting from an ISO, e.g. "Win11_23H2" + "boot.wim" -> "Win11_23H2-boot.wim". */
+/** Keeps a live log pane on its newest line (Craig, 2026-09-06: "TFTP log, imaging
+ * clients and Caddy log should all scroll to latest"). Scrolls to the bottom when the
+ * pane appears and whenever new content lands, unless the reader has scrolled up to
+ * look at something - then it stays put until they come back to the bottom. Pass the
+ * content that changes; give the element a key to reset the pin on a new selection. */
+function useFollowTail<T extends HTMLElement>(content: unknown) {
+  const ref = useRef<T | null>(null);
+  const pinned = useRef(true);
+  const seen = useRef<T | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (el !== seen.current) {
+      seen.current = el;
+      pinned.current = true;
+    }
+    if (pinned.current) el.scrollTop = el.scrollHeight;
+    const onScroll = () => {
+      pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [content]);
+  return ref;
+}
+
 function formatAge(ageSeconds: number): string {
   if (ageSeconds < 60) return `${ageSeconds}s`;
   if (ageSeconds < 3600) return `${Math.floor(ageSeconds / 60)}m`;
@@ -605,14 +631,17 @@ export function PxeWorkspace({
   const [pxeHostExpanded, setPxeHostExpanded] = useState(true);
   const [logExpanded, setLogExpanded] = useState(true);
   const [logTail, setLogTail] = useState<PxeBootLogTailResponse | null>(null);
+  const logTailRef = useFollowTail<HTMLPreElement>(logTail);
   const [logLoading, setLogLoading] = useState(false);
   const [imagingExpanded, setImagingExpanded] = useState(true);
   // Caddy's HTTP access log - infrastructure diagnostics, collapsed by default.
   const [httpFetchExpanded, setHttpFetchExpanded] = useState(false);
   const [httpFetches, setHttpFetches] = useState<PxeBootHttpAccessResponse | null>(null);
+  const httpFetchesRef = useFollowTail<HTMLDivElement>(httpFetches);
   const [imagingClients, setImagingClients] = useState<PxeBootImagingClient[] | null>(null);
   const [imagingSelected, setImagingSelected] = useState<string | null>(null);
   const [imagingLog, setImagingLog] = useState<PxeBootImagingClientLogResponse | null>(null);
+  const imagingLogRef = useFollowTail<HTMLPreElement>(imagingLog);
   const [imagingLoading, setImagingLoading] = useState(false);
   const [tsExpanded, setTsExpanded] = useState(true);
   const [tsPayload, setTsPayload] = useState<PxeBootTaskSequencesPayload | null>(null);
@@ -2645,6 +2674,7 @@ export function PxeWorkspace({
                         ) : null}
                       </div>
                       <pre
+                        ref={logTailRef}
                         className="max-h-[280px] min-h-[160px] overflow-auto p-3 text-[11px] leading-relaxed"
                         style={{ color: "#b7f7c4", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                       >
@@ -2735,6 +2765,8 @@ export function PxeWorkspace({
                           </span>
                         </div>
                         <pre
+                          key={imagingSelected}
+                          ref={imagingLogRef}
                           className="max-h-[280px] min-h-[120px] overflow-auto p-3 text-[11px] leading-relaxed"
                           style={{ color: "#b7f7c4", whiteSpace: "pre-wrap", wordBreak: "break-word" }}
                         >
@@ -2775,7 +2807,7 @@ export function PxeWorkspace({
                 {httpFetchExpanded ? (
                   <div className="mt-3">
                     <p className="mb-2 text-[11px]" style={{ color: "var(--text3)" }}>
-                      What booting clients fetched from this host (Caddy access log) - boot files, overlay, WIMs and log pushes, newest first.
+                      What booting clients fetched from this host (Caddy access log) - boot files, overlay, WIMs and log pushes, newest last, like the other logs.
                     </p>
                     {!httpFetches || !httpFetches.available || httpFetches.rows.length === 0 ? (
                       <p className="px-1 py-4 text-center text-[12px]" style={{ color: "var(--text3)" }}>
@@ -2784,10 +2816,10 @@ export function PxeWorkspace({
                           : "No requests in the log tail yet."}
                       </p>
                     ) : (
-                      <div className="max-h-[280px] overflow-auto rounded border" style={{ borderColor: "var(--border)", background: "#05080d" }}>
+                      <div ref={httpFetchesRef} className="max-h-[280px] overflow-auto rounded border" style={{ borderColor: "var(--border)", background: "#05080d" }}>
                         <table className="mono w-full text-[11px]" style={{ borderCollapse: "collapse" }}>
                           <tbody>
-                            {httpFetches.rows.map((r, i) => (
+                            {[...httpFetches.rows].reverse().map((r, i) => (
                               <tr key={`${r.time}-${i}`} style={{ borderBottom: "1px solid var(--border)" }}>
                                 <td className="px-2 py-1 whitespace-nowrap" style={{ color: "var(--text3)" }}>{r.time}</td>
                                 <td className="px-2 py-1 whitespace-nowrap" style={{ color: "var(--text2)" }}>{r.ip}</td>
@@ -2995,7 +3027,17 @@ export function PxeWorkspace({
 
                     </div>
                     {(tsEdit ?? []).map((seq) => {
-                      const published = tsPayload?.publishedFiles.includes(`${seq.id}.xml`) ?? false;
+                      // What "published" means depends on what the sequence compiles to: an
+                      // unattend.xml, a d-i preseed (<id>.cfg) or a Subiquity autoinstall
+                      // (the sidecar lists that as <id>.autoinstall). Checking only .xml left
+                      // every Linux sequence reading "pending save" for good (seen 2026-09-06).
+                      const publishedName =
+                        tsPlatform(seq) === "ubuntu"
+                          ? `${seq.id}.autoinstall`
+                          : tsPlatform(seq) === "debian"
+                            ? `${seq.id}.cfg`
+                            : `${seq.id}.xml`;
+                      const published = tsPayload?.publishedFiles.includes(publishedName) ?? false;
                       const selected = tsSelectedId === seq.id;
                       return (
                         <div

@@ -1976,6 +1976,12 @@ function Get-AppPxeBootTsLateCommandParts {
     param([Parameter(Mandatory)]$Sequence)
 
     $parts = @()
+    # Install feedback (2026-09-06): the reporter early_command fetched to /tmp/wdk-report
+    # reports the end-of-install steps starting, writes /target/etc/windeploykit/deploy.conf
+    # (the server and identity for first boot) and copies itself into the new system. The
+    # guard keeps a sequence installing when the fetch failed. The matching "done" part
+    # closes the list below.
+    $parts += '[ -f /tmp/wdk-report ] && sh /tmp/wdk-report late || true'
     $flds = $Sequence.fields
     $runUrl = if ($flds -and $flds.Contains('runScriptUrl')) { ([string]$flds['runScriptUrl']).Trim() } else { '' }
     # runScriptFile: '' = none (a legacy runScriptUrl alone still counts), 'url' = the
@@ -2007,7 +2013,7 @@ function Get-AppPxeBootTsLateCommandParts {
                  "; chmod 0755 /usr/local/sbin/wdk-run"
         $parts += "in-target sh -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $fetch)"
         $parts += @'
-printf '[Unit]\nDescription=WinDeployKit first boot\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=/usr/local/sbin/wdk-run\n\n[Service]\nType=oneshot\nExecStart=/usr/local/sbin/wdk-run\nExecStartPost=/bin/systemctl disable wdk-firstboot.service\nRemainAfterExit=yes\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n' > /target/etc/systemd/system/wdk-firstboot.service
+printf '[Unit]\nDescription=WinDeployKit first boot\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=/usr/local/sbin/wdk-run\n\n[Service]\nType=oneshot\nExecStart=/bin/sh -c "if [ -x /usr/local/sbin/wdk-report ]; then exec /usr/local/sbin/wdk-report firstboot; fi; exec /usr/local/sbin/wdk-run"\nExecStartPost=/bin/systemctl disable wdk-firstboot.service\nRemainAfterExit=yes\nStandardOutput=journal\nStandardError=journal\n\n[Install]\nWantedBy=multi-user.target\n' > /target/etc/systemd/system/wdk-firstboot.service
 '@
         $parts += 'in-target systemctl enable wdk-firstboot.service'
     }
@@ -2017,8 +2023,33 @@ printf '[Unit]\nDescription=WinDeployKit first boot\nAfter=network-online.target
         if (-not $cmd) { continue }
         $parts += "in-target bash -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $cmd)"
     }
+    # Report the outcome and keep the line's exit status what it was: the step before
+    # this one. Subiquity runs each part as its own command, so rc is 0 there.
+    $parts += 'rc=$?; [ -f /tmp/wdk-report ] && sh /tmp/wdk-report done $rc; exit $rc'
     # Emitted, not wrapped: a `, $parts` here reaches a caller @() as ONE nested array.
     return $parts
+}
+
+function Get-AppPxeBootTsReporterEarlyCommand {
+    <#
+    .SYNOPSIS
+        The one-line shell command that fetches the install reporter from the deployment
+        laptop and starts it: d-i's preseed/early_command, Subiquity's first early-command.
+    .DESCRIPTION
+        The server is read off the kernel line (preseed/url= or ds=nocloud-net;s=), so
+        the command needs no publish-time value and follows whatever URL the installer
+        itself was fetched from. No backslashes (a preseed value is one line and the
+        parser owns the backslash); `cut` instead of ${w#...} for the same reason. Ends in
+        `true`: a reporter that could not be fetched must never stop an install.
+    #>
+    param([ValidateSet('debian', 'ubuntu')][string]$Platform = 'debian')
+    $fetch = if ($Platform -eq 'ubuntu') {
+        # The live installer has curl for certain and wget usually.
+        'for w in $(cat /proc/cmdline); do case $w in ds=nocloud-net*) u=$(echo $w | cut -d= -f3-); u=${u%/}; b=${u%/TaskSequences/*};; esac; done; [ -n "$b" ] && (wget -q -O /tmp/wdk-report "$b/linux/wdk-report.sh" || curl -fsSo /tmp/wdk-report "$b/linux/wdk-report.sh") && sh /tmp/wdk-report start; true'
+    } else {
+        'for w in $(cat /proc/cmdline); do case $w in preseed/url=*) u=$(echo $w | cut -d= -f2-); b=${u%/TaskSequences/*};; esac; done; [ -n "$b" ] && wget -q -O /tmp/wdk-report "$b/linux/wdk-report.sh" && sh /tmp/wdk-report start; true'
+    }
+    return $fetch
 }
 
 function Build-AppPxeBootTaskSequencePreseedLateCommand {
@@ -2143,6 +2174,9 @@ function Build-AppPxeBootTaskSequenceAutoinstall {
         foreach ($p in $packages) { & $add "    - $(& $q $p)" }
     }
     & $add '  updates: security'
+    & $add '  # Install feedback: fetch the reporter from the deployment laptop and start it.'
+    & $add '  early-commands:'
+    & $add "    - $(& $q (Get-AppPxeBootTsReporterEarlyCommand -Platform ubuntu))"
     if ($late.Count -gt 0) {
         & $add '  late-commands:'
         foreach ($c in $late) { & $add "    - $(& $q $c)" }
@@ -2215,6 +2249,11 @@ function Build-AppPxeBootTaskSequencePreseed {
     & $add "d-i netcfg/get_hostname string $hostname"
     & $add "d-i netcfg/get_domain string $domain"
     & $add "d-i netcfg/hostname string $hostname"
+    & $add ''
+    & $add '# Install feedback: as soon as this file is read, fetch the reporter from the'
+    & $add '# deployment laptop and start it. It posts each installer step to the imaging'
+    & $add '# clients list (the way the WinPE client does) and never fails the install.'
+    & $add "d-i preseed/early_command string $(Get-AppPxeBootTsReporterEarlyCommand -Platform debian)"
     & $add ''
     & $add '# No mirror block on purpose: the PXE menu already points d-i at the'
     & $add '# mounted ISO with mirror/http/*, and repeating it here would override it.'

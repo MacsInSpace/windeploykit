@@ -173,7 +173,20 @@ enabled, `<id>.cfg` on the share) is a submenu: one item per sequence, `Interact
 install (no task sequence)`, `Back`. A sequence handler boots the same kernel and
 netboot initrd with `auto=true priority=critical preseed/url=${http_base}/TaskSequences/<id>.cfg`
 added before `---`; Interactive carries neither. Interactive is preselected unless the
-store's default sequence is a Debian one. A sequence whose "Linux installer" field names a
+store's default sequence is a Debian one. A sequence handler also carries
+`hw-detect/firmware-lookup=never`. The netboot initrd ships no firmware (only the
+regulatory database), and an unattended machine has no USB stick, yet d-i's
+check-missing-firmware still hunts for one: for every driver that asked for a blob it
+unloads and reloads the driver, mounts every partition on every disk looking for
+media, settles udev and goes round again, and at `priority=critical` its "load from
+removable media?" question is skipped and defaults to yes. A ThinkPad 11e 5th Gen sat
+on "Detect network hardware" for half an hour that way on 2026-09-06 - its wired
+RTL8168 asks for an optional `rtl_nic/rtl8168g-3.fw` - and installed in twenty minutes
+once the argument was on the line. Interactive keeps the question (it is asked at
+priority high, and "no" ends the loop). Nothing is lost: there is no firmware source
+to look up. Firmware for the installed system is a separate matter - Debian publishes
+`firmware.cpio.gz` for netboot (496 MB for trixie), and a preseed can set
+`apt-setup/non-free-firmware boolean true`; neither is wired up yet. A sequence whose "Linux installer" field names a
 release (`debian-<codename>-<arch>`) appears only under that release's entry; a blank one
 appears under every Debian entry. Gate: `scripts/test-linux-menu.ps1`; live:
 `scripts/test-linux-iso-boot-qemu.sh --preseed` (needs a published sequence whose disk
@@ -200,3 +213,51 @@ that exist in both the Debian and Ubuntu archives.
 Still open: Secure Boot must be off (the bundled shim trusts the iPXE CA, not a distro
 kernel key). With the mirror on the internet the installed system's apt sources are the
 normal Debian ones.
+### Install feedback: a Linux install in the imaging clients list
+
+The WinPE deploy client POSTs its log to `/imaging-log/ingest` (Caddy reverse-proxies it
+to a loopback listener in the sidecar) and the panel shows one row per machine with its
+last line. A Debian or Ubuntu task sequence now reports through the same endpoint, so
+there is one list and one row per machine whichever OS it is getting:
+
+1. **Boot ping.** A sequence handler runs `isset ${serial} && set wdk_id
+   ${serial:uristring} || set wdk_id ${mac:hexraw}` and `imgfetch --name wdk-ping
+   ${http_base}/imaging-log/ingest?serial=${wdk_id}&make=...&model=...&line=Boot...
+   ||` before `kernel`, so the row exists from the moment the entry is chosen, keyed
+   the way the WinPE client keys itself (SMBIOS serial, else MAC). `||` means a dead
+   endpoint cannot stop a boot. The same identity rides on the kernel line as
+   `wdk_serial= wdk_make= wdk_model=`, before `---`, so the installed system's GRUB never
+   sees it. Interactive entries do none of this.
+2. **The reporter.** `sidecar/pxe/linux/wdk-report.sh` is published to
+   `http/linux/wdk-report.sh`. The preseed's `preseed/early_command` (autoinstall:
+   `early-commands`) reads the server off the kernel line (`preseed/url=` or
+   `ds=nocloud-net;s=`), fetches the script and runs `start`, which reports "Installer
+   running: task sequence <id>" and forks `run` into the background. `run` watches
+   `/var/log/syslog` (Subiquity: its server debug log) and reports each step d-i's
+   main-menu starts, in words, the latest progress line when it changes (debootstrap and
+   in-target lines), anything that looks like a failure, and a heartbeat after a quiet
+   minute. Reports are GETs - the installer's busybox wget cannot POST - and every one
+   ends in `|| true`.
+3. **End of install.** The late_command opens with `wdk-report late` (reports, writes
+   `/target/etc/windeploykit/deploy.conf` with the server, serial, make, model, sequence
+   and session, copies the script to `/usr/local/sbin/wdk-report`) and closes with
+   `wdk-report done $rc`, which reports the previous part's exit status and exits with
+   it, so d-i still sees a failed step. Both parts are guarded by `[ -f /tmp/wdk-report ]`:
+   a sequence whose reporter fetch failed installs exactly as before.
+4. **First boot.** `wdk-firstboot.service` runs `/usr/local/sbin/wdk-report firstboot`
+   when it exists (else `wdk-run` directly, as before). It runs the sequence's script,
+   reports the start, the exit code with the time taken, and the last three lines of
+   output, and exits with the script's code, so a failing script still leaves the unit
+   enabled to retry at the next boot.
+
+The listener accepts `GET /imaging-log/ingest?serial=&make=&model=&session=&line=` (one
+line) or `&heartbeat=1`, URL-decoded, stored exactly as a POST is, answered `200 ok`
+(iPXE's `imgfetch` wants a body). A push with no make or model keeps the last known
+ones. Gate: `scripts/test-linux-install-report.ps1` starts the real listener, drives the
+script under `/bin/sh` with its `WDK_*` test hooks against a d-i-shaped syslog, and
+checks what landed in `imaging-logs/`. Verified live on a ThinkPad 11e 5th Gen
+(2026-09-06): boot ping, sixteen steps in words, end of install, and first boot
+reporting the CampusCast script's exit code and last lines, seven and a half minutes
+from ping to reboot. Ubuntu's stage names come from Subiquity's log by pattern and have
+not been watched on a live install yet.
+

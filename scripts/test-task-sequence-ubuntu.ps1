@@ -86,8 +86,12 @@ Check 'no password hash: the installer asks for the user instead of a passwordle
 Check 'the installer refreshes nothing and reboots when done' { ($out -match "  refresh-installer:\n    update: false") -and ($out -match "  shutdown: reboot\n$") }
 
 Write-Host 'Late commands:'
-Check 'late-commands run through curtin in-target, one YAML item each' {
-    ($out -match "  late-commands:\n    - 'curtin in-target --target=/target -- sh -c ") -and (@($out -split "`n" | Where-Object { $_ -like "    - 'curtin in-target*" }).Count -ge 2)
+Check 'late-commands run through curtin in-target, one YAML item each, after the reporter part' {
+    ($out -match "  late-commands:\n    - '\[ -f /tmp/wdk-report \] && sh /tmp/wdk-report late \|\| true'\n    - 'curtin in-target --target=/target -- sh -c ") -and (@($out -split "`n" | Where-Object { $_ -like "    - 'curtin in-target*" }).Count -ge 2)
+}
+Check 'early-commands fetch the reporter from the NoCloud seed server (wget, then curl) and start it' {
+    $e = @($out -split "`n" | Where-Object { $_ -match '^    - .*wdk-report' })
+    ($out -match "  early-commands:\n    - 'for w in ") -and ($e[0] -match 'ds=nocloud-net\*\)') -and ($e[0] -match 'cut -d= -f3-') -and ($e[0] -match '\(wget -q -O /tmp/wdk-report "\$b/linux/wdk-report\.sh" \|\| curl -fsSo /tmp/wdk-report "\$b/linux/wdk-report\.sh"\) && sh /tmp/wdk-report start; true''$')
 }
 Check 'a URL with a space and an ampersand survives YAML and both shell levels as one argument' {
     # Pull the fetch item back out of the YAML (single-quoted scalar: '' is a quote), run

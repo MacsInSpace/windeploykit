@@ -39,7 +39,8 @@ the deployment server on a site that has no server at all.
 | **Boot Images** | Pull `boot.wim` out of any Windows ISO and overlay it with wimlib - no ADK on the imaging machine (one prior ADK export per WinPE build; see Requirements) |
 | **Operating Systems** | Windows ISOs mounted read-only and served **zero-copy** - `install.wim` straight out of the ISO, never extracted. Acquisition from Microsoft Evaluation Center, a torrent catalog, or a URL |
 | **Out-of-Box Drivers** | Vendor driver-pack catalogs (Dell, HP, Lenovo, Acer, Microsoft Surface) resolved by model, hash-verified on download, injected offline before first boot |
-| **Task Sequences** | Named deployment recipes, one per platform. Windows: compile to `unattend.xml` - computer naming, domain join, machine OU, product key - plus ordered first-boot steps (registry, command, PowerShell, or a **Script by URL** streamed with `irm | iex` from the library's `Scripts/` folder). Debian: a d-i preseed. Ubuntu: a Subiquity autoinstall. Linux sequences take their first user from the vault (password hashed), a first-boot script from `Scripts/` or a URL, end-of-install bash steps, and a picker of known extra packages |
+| **Task Sequences** | Named deployment recipes, one per platform. Windows: compile to `unattend.xml` - computer naming, domain join, machine OU, product key - plus ordered first-boot steps (registry, command, PowerShell, or a **Script by URL** streamed with `irm | iex` from the library's `Scripts/` folder). Debian: a d-i preseed. Ubuntu: a Subiquity autoinstall. Linux sequences take their first user from the vault (password hashed), a first-boot script from `Scripts/` or a URL, end-of-install bash steps, and a picker of known extra packages. A Linux install reports its steps, end-of-install and first boot to the imaging clients list like a WinPE deploy does |
+| **Runs in the menu bar** | Closing the window hides WinDeployKit to the macOS menu bar (Windows: the notification area) and PXE and the deployment share keep serving. The icon's menu has Open and Quit; File > "Close to menu bar" turns the behaviour off |
 | **Monitoring** | Live PXE activity log (which client fetched which boot file) and per-device imaging logs streamed back during deployment. Both clearable |
 | **Transfers** | The download client - torrents and HTTP, with progress, cancel and hash verification |
 
@@ -214,6 +215,7 @@ push; the two live boot tests are opt-in and need Homebrew QEMU.
 | `test-linux-menu.ps1` | Linux PXE entries, task-sequence submenu, kernel arguments, no store or mount needed |
 | `test-task-sequence-debian.ps1` / `-ubuntu.ps1` | Preseed / autoinstall compile, shell and YAML quoting, vault first user, the Scripts folder import |
 | `test-task-sequence-library.ps1` / `-accounts.ps1` | The Windows step library and the unattend account, first-boot batch and Script by URL step |
+| `test-linux-install-report.ps1` | Install feedback: the GET form of the imaging-log ingest against the real listener, and the Linux reporter script driven under `sh` |
 | `test-deploy-overlay.ps1`, `test-install-images.ps1`, `test-eval-iso-catalog.ps1`, `test-server-eval-conversion.ps1`, `test-storage-policy.ps1` | Boot-image overlay, install.wim inventory, evaluation catalog and conversion, the storage split |
 | `test-linux-iso-boot-qemu.sh` | Live: boots the generated menu in QEMU, tiers up to an unattended Debian or Ubuntu install from a published sequence |
 | `test-boot-chain-vm.sh` | Live: the Windows iPXE -> wimboot chain in a VM |

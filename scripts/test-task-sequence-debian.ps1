@@ -141,7 +141,7 @@ Check 'a library first-boot script resolves to this machine''s /Scripts/ URL in 
 Check 'a custom URL is used as typed, and a path-shaped script name is refused' {
     $u = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'fu'; name = 'FU'; platform = 'debian'; fields = [pscustomobject]@{ runScriptFile = 'url'; runScriptUrl = 'https://example.org/x.sh' } })
     $b = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'fb'; name = 'FB'; platform = 'debian'; fields = [pscustomobject]@{ runScriptFile = '../etc/passwd' } })
-    ((Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $u) -match "'https://example\.org/x\.sh'") -and ((Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $b) -eq '')
+    ((Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $u) -match "'https://example\.org/x\.sh'") -and ((Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $b) -notmatch 'wdk-run')
 }
 Write-Host 'Scripts folder (Add... in the panel):'
 $script:scriptsRoot = Join-Path ([IO.Path]::GetTempPath()) ("wdk-ts-scripts-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -269,9 +269,44 @@ Check 'a single quote in a command cannot end the shell string early' {
     # every embedded quote is closed and reopened, so the payload stays one argument
     $out -match "'\\\\''" -or $out -match "'\\''"
 }
-Check 'no late_command line at all when there is nothing to run' {
+Check 'a sequence with nothing to run still gets the reporter late and done parts, and nothing else' {
     $n = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'n'; name = 'N'; platform = 'debian' })
-    (Build-AppPxeBootTaskSequencePreseed -Sequence $n) -notmatch 'late_command'
+    $o = Build-AppPxeBootTaskSequencePreseed -Sequence $n
+    ($o -match 'late_command string \[ -f /tmp/wdk-report \] && sh /tmp/wdk-report late \|\| true; rc=\$\?; \[ -f /tmp/wdk-report \] && sh /tmp/wdk-report done \$rc; exit \$rc\n') -and ($o -notmatch 'wdk-run') -and ($o -notmatch 'in-target')
+}
+
+Write-Host "`nInstall feedback (the reporter):"
+Check 'early_command fetches the reporter from the server the preseed came from and starts it, one line, no backslash' {
+    $early = @($cfg -split "`n" | Where-Object { $_ -match '^d-i preseed/early_command string ' })
+    ($early.Count -eq 1) -and ($early[0] -match 'preseed/url=\*\)') -and ($early[0] -match 'wget -q -O /tmp/wdk-report "\$b/linux/wdk-report\.sh" && sh /tmp/wdk-report start; true$') -and ($early[0] -notmatch '\\')
+}
+Check 'the late_command opens with the reporter (guarded) and closes by reporting the previous exit status' {
+    $line = @($cfg -split "`n" | Where-Object { $_ -match '^d-i preseed/late_command string ' })[0]
+    ($line -match 'string \[ -f /tmp/wdk-report \] && sh /tmp/wdk-report late \|\| true; in-target sh -c ') -and ($line -match '; rc=\$\?; \[ -f /tmp/wdk-report \] && sh /tmp/wdk-report done \$rc; exit \$rc$')
+}
+Check 'the first-boot unit runs the script through the reporter when it is there, and directly when it is not' {
+    $cfg -match 'ExecStart=/bin/sh -c "if \[ -x /usr/local/sbin/wdk-report \]; then exec /usr/local/sbin/wdk-report firstboot; fi; exec /usr/local/sbin/wdk-run"'
+}
+Check 'the early_command runs as written under sh with wget stubbed: it fetches the reporter and starts it' {
+    $early = @($cfg -split "`n" | Where-Object { $_ -match '^d-i preseed/early_command string ' })[0] -replace '^d-i preseed/early_command string ', ''
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('n'))
+    $null = New-Item -ItemType Directory -Path $dir
+    $bin = Join-Path $dir 'bin'; $null = New-Item -ItemType Directory -Path $bin
+    $got = Join-Path $dir 'got'
+    # wget records its URL; the fetched "reporter" records the mode it was started with.
+    $wgetStub = "#!/bin/sh`n" + 'printf ''%s\n'' "$4" >> ''' + $got + '''; printf ''echo started $1 >> ' + $got + '\n'' > "$3"' + "`n"
+    $catStub = "#!/bin/sh`n" + 'if [ "$1" = /proc/cmdline ]; then echo ''BOOT_IMAGE=/linux auto=true preseed/url=http://10.0.0.9:8080/TaskSequences/z.cfg --- quiet''; else exec /bin/cat "$@"; fi' + "`n"
+    [System.IO.File]::WriteAllText((Join-Path $bin 'wget'), $wgetStub)
+    [System.IO.File]::WriteAllText((Join-Path $bin 'cat'), $catStub)
+    foreach ($f in @('wget', 'cat')) { & chmod 0755 (Join-Path $bin $f) }
+    [System.IO.File]::WriteAllText((Join-Path $dir 'e.sh'), "$early`n")
+    $prev = $env:PATH
+    $env:PATH = "${bin}:${prev}"
+    try { & sh (Join-Path $dir 'e.sh') 2>&1 | Out-Null } finally { $env:PATH = $prev }
+    $lines = @(if (Test-Path -LiteralPath $got) { Get-Content -LiteralPath $got } else { @() })
+    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath '/tmp/wdk-report' -Force -ErrorAction SilentlyContinue
+    ($lines.Count -eq 2) -and ($lines[0] -eq 'http://10.0.0.9:8080/linux/wdk-report.sh') -and ($lines[1] -eq 'started start')
 }
 
 if ($script:fail) {

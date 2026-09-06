@@ -2339,6 +2339,13 @@ function Add-AppPxeBootDebianPreseedKernelArgs {
         auto=true defers the locale and keyboard questions until the network is up and
         the preseed fetched; priority=critical asks nothing the preseed answers. Never
         emit auto=true without a URL - d-i then stops to ask for one (seen 2026-09-04).
+        hw-detect/firmware-lookup=never: the netboot initrd carries no firmware and an
+        unattended install has no USB stick, so check-missing-firmware would otherwise
+        loop - unload and reload every driver that asked for a blob (the wired r8169
+        included), mount every partition looking for media, settle udev, repeat. At
+        priority=critical its "load from removable media?" question is skipped and
+        defaults to yes, which is how a ThinkPad 11e sat on "Detect network hardware"
+        for half an hour (2026-09-06). "never" ends the loop after the first scan.
         ${http_base} is iPXE's variable, expanded on the kernel line at boot, so the
         URL follows whatever the menu resolved (LAN IP or ${next-server}).
     #>
@@ -2346,7 +2353,7 @@ function Add-AppPxeBootDebianPreseedKernelArgs {
         [string]$KernelArgs,
         [Parameter(Mandatory)][string]$PreseedHttpRel
     )
-    $extra = 'auto=true priority=critical preseed/url=${http_base}/' + $PreseedHttpRel.TrimStart('/')
+    $extra = 'auto=true priority=critical hw-detect/firmware-lookup=never preseed/url=${http_base}/' + $PreseedHttpRel.TrimStart('/')
     return (Add-AppPxeBootKernelArgsBeforeSeparator -KernelArgs $KernelArgs -Extra $extra)
 }
 
@@ -2419,7 +2426,9 @@ function Get-AppPxeBootLinuxTaskSequenceChoices {
 function Get-AppPxeBootLinuxIpxeBlock {
     param(
         [Parameter(Mandatory)]$Entry,
-        [string]$EchoLabel
+        [string]$EchoLabel,
+        # Set for a task-sequence handler: emit the boot ping and the identity arguments.
+        [string]$ReportLabel
     )
     # A Linux ISO boots the distro's own kernel + initrd straight off the mounted ISO
     # (Caddy /iso-mount/<token>/ route) - no wimboot, no extraction. initrd=<name> on the
@@ -2428,9 +2437,21 @@ function Get-AppPxeBootLinuxIpxeBlock {
     # initrd through the boot protocol either way.
     $block = [System.Collections.Generic.List[string]]::new()
     if ($EchoLabel) { [void]$block.Add("echo $EchoLabel") }
+    $kernelArgs = ([string]$Entry.kernelArgs).Trim()
+    if ($ReportLabel) {
+        # Install feedback (2026-09-06). Before the kernel is fetched, ping the imaging-log
+        # endpoint the WinPE client uses, keyed the way that client keys itself: the
+        # SMBIOS serial, or the MAC when there is none. The same identity rides on the
+        # kernel line (before ---, so the installed system's GRUB never sees it) for the
+        # reporter the preseed starts, so the boot ping and every later report land on
+        # one panel row. `||` keeps a dead endpoint from stopping the boot.
+        [void]$block.Add('isset ${serial} && set wdk_id ${serial:uristring} || set wdk_id ${mac:hexraw}')
+        $lineText = [Uri]::EscapeDataString("Boot: $ReportLabel")
+        [void]$block.Add("imgfetch --name wdk-ping `${http_base}/imaging-log/ingest?serial=`${wdk_id}&make=`${manufacturer:uristring}&model=`${product:uristring}&line=$lineText ||")
+        $kernelArgs = Add-AppPxeBootKernelArgsBeforeSeparator -KernelArgs $kernelArgs -Extra 'wdk_serial=${wdk_id} wdk_make=${manufacturer:uristring} wdk_model=${product:uristring}'
+    }
     [void]$block.Add('imgfree')
     $initrdName = [IO.Path]::GetFileName([string]$Entry.initrdHttpRel)
-    $kernelArgs = ([string]$Entry.kernelArgs).Trim()
     $argStr = if ($kernelArgs) { " $kernelArgs" } else { '' }
     [void]$block.Add("kernel `${http_base}/$([string]$Entry.kernelHttpRel) initrd=$initrdName$argStr")
     [void]$block.Add("initrd `${http_base}/$([string]$Entry.initrdHttpRel)")
@@ -2547,7 +2568,7 @@ function Get-AppPxeBootLinuxMenuHandlerLines {
             [void]$lines.Add(":$itemId")
             if ($note) { [void]$lines.Add("echo $note") }
             [void]$lines.Add("echo Task sequence: $seqName - unattended, the disk named in the sequence will be wiped.")
-            foreach ($bootLine in (Get-AppPxeBootLinuxIpxeBlock -Entry $seeded -EchoLabel "Booting $label...")) {
+            foreach ($bootLine in (Get-AppPxeBootLinuxIpxeBlock -Entry $seeded -EchoLabel "Booting $label..." -ReportLabel "$label, $seqName")) {
                 [void]$lines.Add($bootLine)
             }
             foreach ($l in (Get-AppPxeBootLinuxBootFailureLines -Label $label)) { [void]$lines.Add($l) }
@@ -2604,6 +2625,12 @@ function Write-AppPxeBootMenuFiles {
         if ($ccHave -ne $ccBody) { [System.IO.File]::WriteAllText($ccFile, $ccBody, (New-Object System.Text.UTF8Encoding $false)) }
     } catch {
         Write-SidecarLog "PXE boot: cloud-config-none not written - $($_.Exception.Message)"
+    }
+    # The install reporter a Debian/Ubuntu sequence's early command fetches (install feedback).
+    try {
+        $null = Write-AppPxeBootLinuxReporterAsset -HttpRoot $paths.httpRoot
+    } catch {
+        Write-SidecarLog "PXE boot: wdk-report.sh not published - $($_.Exception.Message)"
     }
 
     # The deploy overlay (deploy.unc, deploy.cred, loghost, startnet.cmd, tools) is
@@ -3452,6 +3479,50 @@ function Get-AppPxeBootDeployClientStartnetSource {
         if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
     }
     return $null
+}
+
+function Get-AppPxeBootLinuxReporterSourcePath {
+    <#
+    .SYNOPSIS
+        sidecar/pxe/linux/wdk-report.sh: the install reporter a Debian or Ubuntu task
+        sequence fetches from Caddy (/linux/wdk-report.sh) and runs inside the installer.
+    #>
+    $root = if (Test-Path variable:script:AppSidecarProjectRoot) { $script:AppSidecarProjectRoot } elseif ($SidecarRoot) { Split-Path -Parent $SidecarRoot } else { $null }
+    $candidates = @()
+    if ($SidecarRoot) { $candidates += (Join-Path $SidecarRoot 'pxe/linux/wdk-report.sh') }
+    if ($root) {
+        $candidates += (Join-Path $root 'sidecar/pxe/linux/wdk-report.sh')
+        $candidates += (Join-Path $root 'pxe/linux/wdk-report.sh')
+    }
+    foreach ($rel in $candidates) {
+        $path = ($rel -replace '/', [IO.Path]::DirectorySeparatorChar)
+        if (Test-Path -LiteralPath $path) { return (Resolve-Path -LiteralPath $path).Path }
+    }
+    return $null
+}
+
+function Write-AppPxeBootLinuxReporterAsset {
+    <#
+    .SYNOPSIS
+        Publish the install reporter as http/linux/wdk-report.sh (LF, no BOM), rewritten
+        only when it differs. Returns the published path, or $null when the source is
+        missing - a Linux install then simply does not report; it still installs.
+    #>
+    param([Parameter(Mandatory)][string]$HttpRoot)
+    $src = Get-AppPxeBootLinuxReporterSourcePath
+    if (-not $src) {
+        Write-SidecarLog 'PXE boot: pxe/linux/wdk-report.sh is not beside the sidecar - Linux installs will not report progress'
+        return $null
+    }
+    $dir = Join-Path $HttpRoot 'linux'
+    if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
+    $dst = Join-Path $dir 'wdk-report.sh'
+    $body = ([System.IO.File]::ReadAllText($src)) -replace "`r`n", "`n"
+    $have = if (Test-Path -LiteralPath $dst) { [System.IO.File]::ReadAllText($dst) } else { $null }
+    if ($have -ne $body) {
+        [System.IO.File]::WriteAllText($dst, $body, (New-Object System.Text.UTF8Encoding $false))
+    }
+    return $dst
 }
 
 function Get-AppPxeBootDeployClientToolsDir {
@@ -6935,14 +7006,44 @@ function Start-AppPxeBootImagingLogIngest {
                         }
                     }
 
+                    # Two shapes. The WinPE deploy client POSTs JSON. A Linux install
+                    # reports with GET ?serial=&make=&model=&session=&line= (or
+                    # &heartbeat=1) - one line per request - because the installer's
+                    # busybox wget cannot POST (sidecar/pxe/linux/wdk-report.sh); iPXE
+                    # sends the same GET as a boot ping. A GET is answered 200 with a
+                    # body, since iPXE's imgfetch wants something to fetch.
                     $status = $null
-                    if ($requestLine -notmatch '^POST\s+/imaging-log/ingest(\?|\s)') {
+                    $isGet = $false
+                    $query = ''
+                    if ($requestLine -match '^GET\s+/imaging-log/ingest\?(\S*)\s') {
+                        $isGet = $true
+                        $query = [string]$matches[1]
+                    } elseif ($requestLine -notmatch '^POST\s+/imaging-log/ingest(\?|\s)') {
                         $status = "HTTP/1.1 404 Not Found`r`nContent-Length: 0`r`nConnection: close`r`n`r`n"
                     } elseif ($contentLength -le 0 -or $contentLength -gt 524288) {
                         $status = "HTTP/1.1 413 Payload Too Large`r`nContent-Length: 0`r`nConnection: close`r`n`r`n"
                     }
 
-                    if (-not $status) {
+                    if (-not $status -and $isGet) {
+                        $q = @{}
+                        foreach ($pair in ($query -split '&')) {
+                            if (-not $pair) { continue }
+                            $eq = $pair.IndexOf('=')
+                            $k = if ($eq -ge 0) { $pair.Substring(0, $eq) } else { $pair }
+                            $v = if ($eq -ge 0) { $pair.Substring($eq + 1) } else { '' }
+                            try { $v = [Uri]::UnescapeDataString($v.Replace('+', ' ')) } catch { }
+                            $q[$k] = $v
+                        }
+                        $getLine = [string]$q['line']
+                        $payload = [pscustomobject]@{
+                            serial    = [string]$q['serial']
+                            make      = [string]$q['make']
+                            model     = [string]$q['model']
+                            session   = [string]$q['session']
+                            heartbeat = ($q.ContainsKey('heartbeat') -and ([string]$q['heartbeat']) -notin @('', '0', 'false'))
+                            lines     = @(if ($getLine -ne '') { , $getLine } else { @() })
+                        }
+                    } elseif (-not $status) {
                         $body = [byte[]]::new($contentLength)
                         $read = 0
                         while ($read -lt $contentLength) {
@@ -6952,6 +7053,8 @@ function Start-AppPxeBootImagingLogIngest {
                         }
                         $payload = $null
                         try { $payload = $encoding.GetString($body, 0, $read) | ConvertFrom-Json } catch { $payload = $null }
+                    }
+                    if (-not $status) {
                         # StrictMode: a bare $payload.lines THROWS when the client omits
                         # the key, and `-and $payload.lines` does NOT guard it - the
                         # property read happens before the comparison. Read every field
@@ -7017,10 +7120,17 @@ function Start-AppPxeBootImagingLogIngest {
                                     $session = 'host-' + [DateTime]::UtcNow.ToString('yyyyMMddHHmmssfff')
                                 }
                             }
+                            # A push that names no make or model (a bare heartbeat, a GET
+                            # from a script that only knows the serial) keeps the last known
+                            # ones rather than blanking the row.
+                            $make = [string](Get-IngestProp $payload 'make')
+                            $model = [string](Get-IngestProp $payload 'model')
+                            if ([string]::IsNullOrWhiteSpace($make)) { $make = [string](Get-IngestProp $previous 'make') }
+                            if ([string]::IsNullOrWhiteSpace($model)) { $model = [string](Get-IngestProp $previous 'model') }
                             $statusInfo = [ordered]@{
                                 serial      = $serialRaw.Trim()
-                                make        = [string](Get-IngestProp $payload 'make')
-                                model       = [string](Get-IngestProp $payload 'model')
+                                make        = $make
+                                model       = $model
                                 ip          = [string]$clientIp
                                 session     = $session
                                 lastSeenUtc = [DateTime]::UtcNow.ToString('o')
@@ -7032,7 +7142,11 @@ function Start-AppPxeBootImagingLogIngest {
                                 }
                             }
                             ($statusInfo | ConvertTo-Json -Compress) | Set-Content -LiteralPath $statusPath -Encoding utf8 -Force
-                            $status = "HTTP/1.1 204 No Content`r`nConnection: close`r`n`r`n"
+                            $status = if ($isGet) {
+                                "HTTP/1.1 200 OK`r`nContent-Type: text/plain`r`nContent-Length: 3`r`nConnection: close`r`n`r`nok`n"
+                            } else {
+                                "HTTP/1.1 204 No Content`r`nConnection: close`r`n`r`n"
+                            }
                         } else {
                             $status = "HTTP/1.1 400 Bad Request`r`nContent-Length: 0`r`nConnection: close`r`n`r`n"
                         }

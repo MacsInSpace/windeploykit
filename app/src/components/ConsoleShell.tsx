@@ -9,7 +9,7 @@
  * toolbar glyphs every node shares (Refresh, Properties). Panels render no
  * action buttons of their own.
  */
-import { useCallback, useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 
 import { AppIcon } from "./AppIcon";
 import appIcon from "../../src-tauri/icons/32x32.png";
@@ -19,7 +19,8 @@ import { MenuBar, type Menu } from "./MenuBar";
 import { ToolbarIcon, type ToolbarGlyph } from "./ToolbarIcon";
 import { findNavNode, findParentId, flattenNav, type NavNode } from "./navConfig";
 import { APP_VERSION } from "../lib/buildInfo";
-import { sidecar } from "../lib/ipc";
+import { appExit, sidecar } from "../lib/ipc";
+import { getSetting, setSetting, SETTING_CLOSE_TO_TRAY, subscribeSettings } from "../lib/settings";
 import { isTauri } from "../lib/tauriEnv";
 import { restartSidecarNow, useSidecarBootState } from "../lib/sidecarBoot";
 import {
@@ -211,6 +212,11 @@ export function ConsoleShell({
   const statusTone = lastToast?.variant === "error" ? "status-error" : lastToast?.variant === "warn" ? "status-warn" : "";
 
   /* -- menus --------------------------------------------------------------- */
+  // Close-to-tray (the window's close button hides the app to the menu bar / tray and
+  // PXE keeps serving) is a checkbox here, as in AdobeUpdateKit and USM; Exit is a real
+  // exit through the host, since with the setting on a window close no longer quits.
+  const closeToTray = useSyncExternalStore(subscribeSettings, () => getSetting(SETTING_CLOSE_TO_TRAY), () => true);
+  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent);
   const menus = useMemo<Menu[]>(
     () => [
       {
@@ -224,16 +230,20 @@ export function ConsoleShell({
             onSelect: actions.properties,
           },
           SEP,
+          ...(isTauri()
+            ? [
+                {
+                  label: isMac ? "Close to menu bar" : "Close to tray",
+                  checked: closeToTray,
+                  onSelect: () => setSetting(SETTING_CLOSE_TO_TRAY, !closeToTray),
+                },
+                SEP,
+              ]
+            : []),
           {
             label: "Exit",
             onSelect: () => {
-              if (isTauri()) {
-                void import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
-                  getCurrentWindow().close(),
-                );
-              } else {
-                window.close();
-              }
+              void appExit();
             },
           },
         ],
@@ -265,7 +275,7 @@ export function ConsoleShell({
         ],
       },
     ],
-    [actions, activeNode, nodeVerbs, expandAll, collapseAll, navigate],
+    [actions, activeNode, nodeVerbs, expandAll, collapseAll, navigate, closeToTray, isMac],
   );
 
   // Only a sidecar that is NOT fine earns a badge - steady state is silent.

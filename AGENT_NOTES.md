@@ -546,6 +546,82 @@ bundled shim trusts the iPXE CA only); the Windows Script by URL step wants one 
 first boot; the Linux `cmd` step could take a script by URL too (`wget -qO- | bash`) if
 anyone asks.
 
+**First real hardware, 2026-09-06 evening (ThinkPad 11e 5th Gen, Celeron N4100, wired
+RTL8168, Intel AC 9260).** Both Debian entries sat on "Detect network hardware" with the
+mouse still moving. The syslog (Ctrl+Alt+F4 in the graphical installer; Ctrl+Alt+F2 is a
+shell) repeated `rtl_nic/rtl8168g-3.fw requested by r8169 ... failed with error -2`.
+Cause, read out of the initrd's own scripts (`usr/bin/check-missing-firmware`,
+`hw-detect`, `ethdetect`, `mountmedia`): the netboot initrd carries no firmware at all
+(4 entries under `lib/firmware`, all regulatory.db), and at `priority=critical` the
+"load missing firmware from removable media?" question is skipped with its default of
+yes, so the script unloads and reloads every driver that asked for a blob, mounts every
+partition it can find looking for media, settles udev, and repeats. Fix: sequence
+handlers carry `hw-detect/firmware-lookup=never` (`Add-AppPxeBootDebianPreseedKernelArgs`),
+which ends the loop after the first scan. Verified: same machine, same entry, installed
+and rebooted in about twenty minutes, then fetched its first-boot script and tarball.
+Two lessons for next time: (1) the menu iPXE runs is `tftp/boot.ipxe`, not
+`http/menu.ipxe` - a hand patch to the served menu must hit `tftp/boot.ipxe` and
+`http/boot.ipxe` too (the sidecar regenerates all three on publish); (2) d-i's DHCP lease
+is a different IP from iPXE's (10.0.1.45 vs .44 here), so do not filter the Caddy log on
+the iPXE address when looking for the preseed fetch.
+
+Open from that session: firmware for the *installed* system. A wired netboot install
+never loads firmware, so d-i leaves `non-free-firmware` off and a laptop reboots with no
+Wi-Fi. Options: `apt-setup/non-free-firmware boolean true` in the preseed plus
+`firmware-linux`/`firmware-iwlwifi`/`firmware-realtek`/`firmware-sof-signed` in the
+package picker (cheap, covers the installed system); Debian's netboot `firmware.cpio.gz`
+appended as a second iPXE initrd (496 MB for trixie - covers the installer too, but
+heavy). CampusCast's own first-boot script enables the component itself for now.
+
+**Install feedback, same evening (branch `feature/linux-install-feedback`).** Craig,
+watching the 11e sit at a login prompt while its first-boot script was still installing
+packages: *"It'd be good to have feedback like from Windows boot wim."* Design, in
+`sidecar/pxe/README.md` "Install feedback": reuse the imaging-log pipeline rather than
+build a second one. Decisions worth keeping: (1) the installer's busybox wget cannot POST
+(checked the applet table in the initrd - no `--post-data`), so the loopback ingest
+listener grew a GET form and answers it 200 with a body because iPXE's `imgfetch` is the
+boot ping; (2) identity is decided by iPXE (`${serial:uristring}`, else `${mac:hexraw}`)
+and passed on the kernel line as `wdk_serial=` etc. so the ping, the installer and first
+boot key one row - d-i ignores params without a slash; (3) the reporter is one POSIX
+script with modes (`start run late done firstboot`), fetched by `early_command` from the
+server named in `preseed/url=` so it needs no publish-time value, persisted counters in
+`/tmp/wdk-env.state` so a restarted loop does not repeat itself; (4) every part is
+guarded: a failed fetch leaves the install exactly as before, `done` re-raises the
+previous part's exit status so d-i still sees a failed step, and the first-boot unit
+falls back to `wdk-run` when the reporter is missing. Gate:
+`test-linux-install-report.ps1` (the gate forces curl: Craig's Mac has a `~/.wgetrc`
+proxy that keeps GNU wget off loopback). Not yet seen live: the Ubuntu stage names
+(read from Subiquity's server log by pattern, untested), and a real Debian boot with
+the reporter - the code needs the app restarted (the sidecar dot-sources the libs at
+start) and a republish before the next QEMU or 11e run shows the rows.
+
+**Seen live, 22:13 the same evening.** After the app restart the 11e's third run put
+the whole chain on the panel: boot ping 21:58:19 (serial R90RERU6, LENOVO 20LRS04R00,
+from iPXE), preseed 21:58:58, reporter fetched and "Installer running: task sequence
+campuscast-client" 21:58:59, then the steps in words (network, task sequence fetch,
+language, keyboard, mirror, components, first user, clock, disks, partitioning 21:59:47,
+base system 22:00:32, apt 22:02:48, software 22:02:49, GRUB 22:05:21), "End-of-install
+steps running" 22:05:58, "Installation finished; rebooting" 22:06:00, "First boot:
+running the first-boot script" 22:06:50, "First boot: the script exited 0 after 373s"
+22:13:03 with the CampusCast installer's last lines. Craig: *"the 11e is up, ready to
+cast and as it should be. Successful test."* Small things learned: d-i's first two menu
+items are the braille and speech helpers (now skipped); the installer stamps lines in
+UTC and the installed system in local time (cosmetic, open); d-i's wget is GNU wget
+1.25 (wget-udeb), not busybox - the GET design still stands, POST would have worked too.
+
+**Same evening, panel and host (Craig's asks while watching):** the imaging-log,
+TFTP-log and HTTP-fetches panes now follow their newest line (`useFollowTail`) and the
+HTTP table runs oldest to newest like the others; a Linux sequence's "published" badge
+checked for `<id>.xml` only and read "pending save" for ever (fixed: `.cfg` /
+`.autoinstall` by platform); and close-to-tray landed, a straight port of
+AdobeUpdateKit's (`WindowPrefs` + `set_close_to_tray` + `set_tray_tooltip` in lib.rs,
+`lib/tray.ts`, the setting `window.closeToTray`, a checked item in File). Default on.
+The glyph is the icon's hexagon with a deploy arrow, generated by
+`scripts/make-tray-icons.py` (pure Python, no PIL on this Mac); regenerate there, never
+hand-edit the PNGs. To test: close the window (menu-bar icon stays, Dock icon goes),
+click the icon or Open to come back, File > Exit or Quit to really quit, and the
+tooltip should read the PXE URL while serving.
+
 ### Scope sweep, 2026-08-21 - removed what is not an MDT/PXE replacement
 
 Craig: *"All we are doing is MDT/WDS and PXE imaging."* Everything below was

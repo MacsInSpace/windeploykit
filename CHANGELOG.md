@@ -3,6 +3,55 @@
 All notable changes to WinDeployKit. Dates are when the work landed on `main`.
 The format follows Keep a Changelog; the repository is ASCII-only, so are these notes.
 
+## Unreleased
+
+### Added
+
+- **Install feedback for Linux task sequences.** A Debian or Ubuntu install now shows
+  up under PXE boot > imaging clients the way a WinPE deploy does. The menu handler
+  pings the imaging log before it fetches the kernel (keyed by SMBIOS serial, or the
+  MAC when there is none, like the WinPE client) and carries that identity on the
+  kernel line; the preseed's `early_command` (autoinstall: `early-commands`) fetches
+  `sidecar/pxe/linux/wdk-report.sh` from Caddy and starts it, and from then on every
+  installer step is reported in words ("Partitioning the disk", "Installing the base
+  system"), with the latest progress line, anything that looks like a failure, and a
+  heartbeat when it is quiet. The end-of-install steps report start and finish, the
+  new system gets `/etc/windeploykit/deploy.conf` (server, serial, make, model,
+  sequence, session), and the first-boot unit runs the sequence's script through the
+  reporter, which reports the exit code and the last lines of output. The ingest
+  endpoint takes a GET form for this (`?serial=&make=&model=&session=&line=` or
+  `&heartbeat=1`) because the installer's busybox wget cannot POST. Gate:
+  `scripts/test-linux-install-report.ps1` drives the script under `sh` against the
+  real listener. Verified on a ThinkPad 11e 5th Gen: boot ping, sixteen installer
+  steps in words, end of install, and first boot reporting "the script exited 0
+  after 373s" with the CampusCast installer's last lines.
+- **Close to menu bar / tray**, as AdobeUpdateKit and USM have. Closing the window
+  hides WinDeployKit to the macOS menu bar (Windows: the notification area) and PXE
+  and the deployment share keep serving; the icon's menu has Open and Quit, a left
+  click opens, and the tooltip carries the PXE URL while it serves. File > "Close to
+  menu bar" (on by default, also under Settings > Window) turns it off. File > Exit
+  and the tray's Quit are real exits. The glyph is the app icon's hexagon with a
+  deploy arrow (`scripts/make-tray-icons.py`).
+
+### Fixed
+
+- **A Linux task sequence read "pending save" for ever.** The panel checked for
+  `<id>.xml` only; a Debian sequence publishes `<id>.cfg` and an Ubuntu one an
+  autoinstall. It now checks the name the platform actually publishes.
+- **The TFTP, imaging and Caddy log panes follow their newest line**, and the Caddy
+  (HTTP fetches) table lists oldest to newest like the other two instead of the
+  opposite order. A pane lets go while the reader has scrolled up.
+
+- **Debian sequences no longer stall on "Detect network hardware" on real hardware.**
+  Sequence handlers now pass `hw-detect/firmware-lookup=never`. The netboot initrd has
+  no firmware and an unattended machine has no USB stick, but at `priority=critical`
+  d-i's check-missing-firmware took the default "load from removable media" answer and
+  looped: unload and reload every driver that asked for a blob, mount every partition
+  looking for media, repeat. A ThinkPad 11e 5th Gen (wired RTL8168, optional
+  `rtl8168g-3.fw`) sat there for half an hour; with the argument it installed in
+  twenty minutes. The Interactive entry is unchanged: it asks the question and "no"
+  ends the loop.
+
 ## Unreleased - Linux task sequences (merged 2026-09-06)
 
 Branch `feature/linux-task-sequences`. Design record: `AGENT_NOTES.md` sections

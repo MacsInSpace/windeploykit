@@ -93,10 +93,10 @@ $tab = [char]9
 Write-Host 'Kernel arguments:'
 Check 'preseed args land before --- and keep what follows it' {
     $r = Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs 'vga=788 --- quiet' -PreseedHttpRel 'TaskSequences/x.cfg'
-    $r -eq 'vga=788 auto=true priority=critical preseed/url=${http_base}/TaskSequences/x.cfg --- quiet'
+    $r -eq 'vga=788 auto=true priority=critical hw-detect/firmware-lookup=never preseed/url=${http_base}/TaskSequences/x.cfg --- quiet'
 }
 Check 'preseed args append when there is no separator' {
-    (Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs 'vga=788' -PreseedHttpRel '/TaskSequences/x.cfg') -eq 'vga=788 auto=true priority=critical preseed/url=${http_base}/TaskSequences/x.cfg'
+    (Add-AppPxeBootDebianPreseedKernelArgs -KernelArgs 'vga=788' -PreseedHttpRel '/TaskSequences/x.cfg') -eq 'vga=788 auto=true priority=critical hw-detect/firmware-lookup=never preseed/url=${http_base}/TaskSequences/x.cfg'
 }
 Check 'installer mirror args name the Debian mirror, the suite and the country=manual switch, before ---' {
     $r = Add-AppPxeBootDebianInstallerKernelArgs -KernelArgs 'vga=788 --- quiet' -Codename 'trixie'
@@ -143,7 +143,13 @@ Check 'sequence handler exists and boots the ISO kernel with the netboot initrd'
     ($seqBlock.Count -gt 0) -and ($seqKernel -like 'kernel ${http_base}/iso-mount/tok/install.amd/vmlinuz initrd=initrd.gz *') -and ($seqBlock -contains 'initrd ${http_base}/linux/debian/trixie-amd64-e7667ff9/initrd.gz')
 }
 Check 'sequence handler carries preseed/url for its .cfg, unattended, before ---' {
-    $seqKernel -match ' auto=true priority=critical preseed/url=\$\{http_base\}/TaskSequences/campuscast-receiver\.cfg --- quiet$'
+    $seqKernel -match ' auto=true priority=critical hw-detect/firmware-lookup=never preseed/url=\$\{http_base\}/TaskSequences/campuscast-receiver\.cfg wdk_serial=\$\{wdk_id\} wdk_make=\$\{manufacturer:uristring\} wdk_model=\$\{product:uristring\} --- quiet$'
+}
+Check 'sequence handler pings the imaging log before the kernel fetch, keyed like the WinPE client (serial, else MAC), and never fails the boot on it' {
+    $ping = [string](@($seqBlock | Where-Object { $_ -like 'imgfetch --name wdk-ping *' }) | Select-Object -First 1)
+    ($seqBlock -contains 'isset ${serial} && set wdk_id ${serial:uristring} || set wdk_id ${mac:hexraw}') -and
+    ($ping -eq 'imgfetch --name wdk-ping ${http_base}/imaging-log/ingest?serial=${wdk_id}&make=${manufacturer:uristring}&model=${product:uristring}&line=Boot%3A%20Debian%20GNU%2FLinux%2013.6.0%20Trixie%20amd64%20installer%2C%20CampusCast%20receiver ||') -and
+    ([array]::IndexOf($seqBlock, $ping) -lt [array]::IndexOf($seqBlock, $seqKernel))
 }
 Check 'sequence handler keeps the mirror args (the preseed has no mirror block on purpose)' {
     ($seqKernel -match ' mirror/country=manual ') -and ($seqKernel -match ' mirror/http/directory=/debian ')
@@ -162,6 +168,9 @@ foreach ($l in $lines) {
 $manKernel = [string](@($manBlock | Where-Object { $_ -like 'kernel *' }) | Select-Object -First 1)
 Check 'Interactive boots the same kernel and initrd with no preseed and no auto=true' {
     ($manBlock.Count -gt 0) -and ($manKernel -notmatch 'preseed/url') -and ($manKernel -notmatch 'auto=true') -and ($manKernel -match ' mirror/http/directory=/debian ')
+}
+Check 'Interactive neither pings the imaging log nor carries an identity (nothing reports on an interactive install)' {
+    ($manKernel -notmatch 'wdk_') -and -not ($manBlock -like 'imgfetch --name wdk-ping *')
 }
 
 Write-Host 'No submenu where it makes no sense:'
@@ -213,7 +222,7 @@ Check 'an Ubuntu casper entry is install-capable: submenu with the Ubuntu sequen
 }
 $uk = [string](@($ul | Where-Object { $_ -like 'kernel *' -and $_ -match 'autoinstall' }) | Select-Object -First 1)
 Check 'the Ubuntu sequence handler arms autoinstall with the NoCloud seed directory and streams the ISO' {
-    ($uk -match ' ip=dhcp url=\$\{http_base\}/iso/ubuntu-24\.04\.4-live-server-amd64\.iso') -and ($uk -match ' autoinstall ds=nocloud-net;s=\$\{http_base\}/TaskSequences/autoinstall/ubuntu-lab/ cloud-config-url=\$\{http_base\}/TaskSequences/autoinstall/ubuntu-lab/user-data$') -and ($uk -notmatch 'preseed/url') -and ($uk -notmatch 'cloud-config-none')
+    ($uk -match ' ip=dhcp url=\$\{http_base\}/iso/ubuntu-24\.04\.4-live-server-amd64\.iso') -and ($uk -match ' autoinstall ds=nocloud-net;s=\$\{http_base\}/TaskSequences/autoinstall/ubuntu-lab/ cloud-config-url=\$\{http_base\}/TaskSequences/autoinstall/ubuntu-lab/user-data wdk_serial=\$\{wdk_id\} wdk_make=\$\{manufacturer:uristring\} wdk_model=\$\{product:uristring\}$') -and ($uk -notmatch 'preseed/url') -and ($uk -notmatch 'cloud-config-none')
 }
 Check 'the Ubuntu Interactive handler has no autoinstall' {
     $mk = [string](@($ul | Where-Object { $_ -like 'kernel *' -and $_ -notmatch 'autoinstall' }) | Select-Object -First 1)
