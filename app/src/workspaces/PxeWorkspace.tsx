@@ -41,6 +41,7 @@ import type {
   PxeBootTaskSequence,
   PxeBootTaskSequenceStep,
   PxeBootTaskSequencesPayload,
+  PxeBootTsScriptResponse,
   TaskSequenceLibraryEntry,
   TaskSequenceLibraryLists,
   VaultSecretsResponse,
@@ -1620,6 +1621,45 @@ export function PxeWorkspace({
       await sidecar.invoke("OpenPxeBootWimFolder");
     } catch (e) {
       toast.error(PLUGIN_TITLE, e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  /** Copy a script from this machine into <library>/Scripts through the sidecar (which
+   * checks the #! line and fixes CRLF); resolves to the file name, or null. */
+  const importFirstBootScript = useCallback(async (): Promise<string | null> => {
+    const picked = await open({
+      multiple: false,
+      title: "First-boot script",
+      filters: [
+        { name: "Scripts", extensions: ["sh", "bash", "py", "pl", "rb"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+    });
+    if (!picked || typeof picked !== "string") return null;
+    try {
+      const data = await sidecar.invoke<PxeBootTsScriptResponse>("ImportPxeBootTsScript", {
+        sourcePath: picked,
+        replaceExisting: true,
+      });
+      setTsPayload((prev) =>
+        prev ? { ...prev, firstBootScripts: data.scripts, scriptsDir: data.scriptsDir ?? prev.scriptsDir } : prev,
+      );
+      toast.success(
+        "Task sequences",
+        `${data.fileName} is in the Scripts folder${data.normalized ? " (line endings fixed for Linux)" : ""}. Save to publish.`,
+      );
+      return data.fileName;
+    } catch (e) {
+      toast.error("Task sequences", e instanceof Error ? e.message : String(e));
+      return null;
+    }
+  }, []);
+
+  const openScriptsFolder = useCallback(async () => {
+    try {
+      await sidecar.invoke("OpenPxeBootTsScriptsFolder");
+    } catch (e) {
+      toast.error("Task sequences", e instanceof Error ? e.message : String(e));
     }
   }, []);
 
@@ -3281,23 +3321,45 @@ export function PxeWorkspace({
                                         onChange={(e) => setField(e.target.value)}
                                       />
                                     ) : tsIsLinux(seq) && key === "runScriptFile" ? (
-                                      <select
-                                        className="input-box mono h-[26px] text-[11px]"
-                                        value={seq.fields[key] ?? (seq.fields.runScriptUrl ? "url" : "")}
-                                        title={`Runs once at first boot through a one-shot systemd unit. Library scripts live in ${tsPayload?.scriptsDir ?? "<library>/Scripts"} and are served by Netboot's HTTP.`}
-                                        onChange={(e) => setField(e.target.value)}
-                                      >
-                                        <option value="">(none)</option>
-                                        {(tsPayload?.firstBootScripts ?? []).map((f) => (
-                                          <option key={f} value={f}>
-                                            {f} - from the library
-                                          </option>
-                                        ))}
-                                        <option value="url">Custom URL...</option>
-                                        {seq.fields[key] && seq.fields[key] !== "url" && !(tsPayload?.firstBootScripts ?? []).includes(seq.fields[key]) ? (
-                                          <option value={seq.fields[key]}>{seq.fields[key]} (missing from the library)</option>
-                                        ) : null}
-                                      </select>
+                                      <div className="flex items-center gap-1.5">
+                                        <select
+                                          className="input-box mono h-[26px] flex-1 text-[11px]"
+                                          value={seq.fields[key] ?? (seq.fields.runScriptUrl ? "url" : "")}
+                                          title={`Runs once at first boot through a one-shot systemd unit, as root, with the network up. Library scripts live in ${tsPayload?.scriptsDir ?? "<library>/Scripts"} and are served by Netboot's HTTP at /Scripts/.`}
+                                          onChange={(e) => setField(e.target.value)}
+                                        >
+                                          <option value="">(none)</option>
+                                          {(tsPayload?.firstBootScripts ?? []).map((f) => (
+                                            <option key={f} value={f}>
+                                              {f} - from the library
+                                            </option>
+                                          ))}
+                                          <option value="url">Custom URL...</option>
+                                          {seq.fields[key] && seq.fields[key] !== "url" && !(tsPayload?.firstBootScripts ?? []).includes(seq.fields[key]) ? (
+                                            <option value={seq.fields[key]}>{seq.fields[key]} (missing from the library)</option>
+                                          ) : null}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          className="btn px-1.5 py-0 text-[10px]"
+                                          title="Copy a script from this machine into the Scripts folder and select it here. It needs a #! first line; CRLF line endings are fixed on the way in."
+                                          onClick={() =>
+                                            void importFirstBootScript().then((name) => {
+                                              if (name) setField(name);
+                                            })
+                                          }
+                                        >
+                                          Add...
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn px-1.5 py-0 text-[10px]"
+                                          title={`Open ${tsPayload?.scriptsDir ?? "the Scripts folder"} in the file manager`}
+                                          onClick={() => void openScriptsFolder()}
+                                        >
+                                          Folder
+                                        </button>
+                                      </div>
                                     ) : tsIsLinux(seq) && key === "runScriptUrl" ? (
                                       <input
                                         className="input-box mono h-[26px] text-[11px]"

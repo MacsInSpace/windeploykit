@@ -393,6 +393,17 @@ a cache description, correctly left alone.
   phase (systemd unit, network up). The fetch line itself stays `sh -c`. "Extra
   packages" got a picker (`TS_LINUX_PACKAGE_PICKS`, names present in both archives,
   per-platform rows for desktops and Hyper-V tools); the text stays the record.
+- **First-boot script upload (2026-09-06, Craig: "can we allow uploading a script to the
+  local caddy").** `ImportPxeBootTsScript` copies a file from the Mac into
+  `<library>/Scripts/` (`Import-AppPxeBootTsScript`), mirroring ImportPxeBootIso's shape
+  (dialog in the panel, sidecar does the copy). It refuses what the target would choke
+  on: no `#!` first line (systemd execs the file - ENOEXEC, and the first boot silently
+  does nothing), binary, a name the compiler would not accept, README; a BOM or CRLF is
+  normalised to LF (a CRLF shebang is "bash\r: not found"). `RemovePxeBootTsScript` and
+  `OpenPxeBootTsScriptsFolder` round it out; the panel's "Add..." selects the imported
+  name straight into the sequence. Nothing is copied at publish - the installer wgets
+  the script from Caddy at the end of the install. Gate: five checks in the Debian gate
+  against a temp library root (`Get-AppImageLibraryRoot` stubbed).
 - Debugging an installer you cannot type at: from tier 3 the QEMU test passes
   `log_host=10.0.2.2 log_port=5514` and listens with `nc -u -k -l 5514`, so
   d-i's syslog lands in `$WORK/d-i.syslog` (udeb fetches, module loads, disks

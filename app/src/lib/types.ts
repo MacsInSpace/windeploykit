@@ -80,6 +80,7 @@ export type SidecarCommand =
   | "GetSidecarStatus"
   | "GetSiteProfile"
   | "ImportPxeBootIso"
+  | "ImportPxeBootTsScript"
   | "ImportPxeBootWim"
   | "ImportPxeBootWimBootAssets"
   | "ImportPxeBootWimFromIso"
@@ -104,12 +105,14 @@ export type SidecarCommand =
   | "OpenPxeBootDriversFolder"
   | "OpenPxeBootIsoFolder"
   | "OpenPxeBootStoreFolder"
+  | "OpenPxeBootTsScriptsFolder"
   | "OpenPxeBootWimFolder"
   | "Ping"
   | "PrefetchMacOsAdminCredential"
   | "PrepareAppExit"
   | "RefreshVendorSccmCatalogs"
   | "RemovePxeBootIso"
+  | "RemovePxeBootTsScript"
   | "RemovePxeBootWim"
   | "RestartPxeBootServices"
   | "RevealSmbdForFullDiskAccess"
@@ -809,6 +812,20 @@ export interface PxeBootHttpFetchRow {
 export interface PxeBootHttpAccessResponse {
   available: boolean;
   rows: PxeBootHttpFetchRow[];
+}
+
+/** ImportPxeBootTsScript / RemovePxeBootTsScript: the Scripts folder after the change. */
+export interface PxeBootTsScriptResponse {
+  fileName: string;
+  path?: string;
+  url?: string;
+  sizeBytes?: number;
+  replaced?: boolean;
+  /** A BOM or CRLF line endings were normalised to plain LF on the way in. */
+  normalized?: boolean;
+  removed?: boolean;
+  scripts: string[];
+  scriptsDir?: string | null;
 }
 
 export interface PxeBootTaskSequencesPayload {

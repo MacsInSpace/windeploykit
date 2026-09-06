@@ -387,6 +387,33 @@ function Handle-OpenPxeBootDriversFolder {
     Write-SidecarResponse -Id $Id -Data $data
 }
 
+function Handle-ImportPxeBootTsScript {
+    param([int]$Id, $Params)
+    $sourcePath = Get-AppSidecarParam -Params $Params -Name 'sourcePath'
+    if (-not $sourcePath) { throw 'ImportPxeBootTsScript: sourcePath required.' }
+    $targetFileName = Get-AppSidecarParam -Params $Params -Name 'targetFileName'
+    $replaceExisting = Get-AppSidecarParam -Params $Params -Name 'replaceExisting'
+    $data = Import-AppPxeBootTsScript `
+        -SourcePath ([string]$sourcePath) `
+        -TargetFileName $(if ($targetFileName) { [string]$targetFileName } else { $null }) `
+        -ReplaceExisting:([bool]$replaceExisting)
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-RemovePxeBootTsScript {
+    param([int]$Id, $Params)
+    $fileName = Get-AppSidecarParam -Params $Params -Name 'fileName'
+    if (-not $fileName) { throw 'RemovePxeBootTsScript: fileName required.' }
+    $data = Remove-AppPxeBootTsScript -FileName ([string]$fileName)
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
+function Handle-OpenPxeBootTsScriptsFolder {
+    param([int]$Id, $Params)
+    $data = Open-AppPxeBootTsScriptsFolder
+    Write-SidecarResponse -Id $Id -Data $data
+}
+
 function Handle-GetPxeBootOptionalAssets {
     param([int]$Id, $Params)
     $data = Get-AppPxeBootOptionalAssetsStatus

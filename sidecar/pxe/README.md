@@ -171,7 +171,10 @@ whose disk is `/dev/vda`) - 2026-09-05: the sequence handler booted, d-i fetched
 First user: typed, or a vault credential whose login/full name/password are resolved at
 publish (password hashed with crypt SHA-512 in the sidecar). A typed password is hashed on
 save; only the hash is stored or published. First-boot script: a file in
-`<library>/Scripts/` (served at `/Scripts/`, listed in the panel) or a custom URL; it runs
+`<library>/Scripts/` (served at `/Scripts/`, listed in the panel; **Add...** copies one in
+from this machine, checking for a `#!` first line and fixing CRLF, **Folder** opens the
+folder) or a custom URL. Nothing is copied at publish: the installer fetches the script
+over HTTP at the end of the install into `/usr/local/sbin/wdk-run` in the target; it runs
 on the first boot of the installed system through a one-shot systemd unit, with the
 network up. Steps (the panel calls them "End-of-install steps" on Linux) are different:
 each is `bash -c '<command>'` run in-target as root at the end of the install, before

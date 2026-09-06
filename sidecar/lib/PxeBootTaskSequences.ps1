@@ -1383,18 +1383,8 @@ function Sync-AppPxeBootTaskSequenceStore {
     $dir = Get-AppPxeBootTaskSequenceLibraryDir
     if (-not $dir) { return @{ published = 0; dir = $null } }
     if (-not (Test-Path -LiteralPath $dir)) { $null = New-Item -Path $dir -ItemType Directory -Force }
-    # <library>/Scripts: first-boot scripts a Debian sequence can name; served by Caddy.
-    try {
-        $scriptsDir = Get-AppPxeBootTsScriptsDir
-        if ($scriptsDir -and -not (Test-Path -LiteralPath $scriptsDir)) {
-            $null = New-Item -Path $scriptsDir -ItemType Directory -Force
-            $readme = Join-Path $scriptsDir 'README.txt'
-            [System.IO.File]::WriteAllText($readme, ("First-boot scripts for Linux task sequences.`n" +
-                "Drop a script here (for example firstboot.sh) and pick it as the sequence's First-boot script.`n" +
-                "The installer fetches it from this machine over HTTP (/Scripts/<name>) at the end of the install`n" +
-                "and runs it once at first boot through a one-shot systemd unit.`n"), (New-Object System.Text.UTF8Encoding $false))
-        }
-    } catch {
+    # <library>/Scripts: first-boot scripts a Linux sequence can name; served by Caddy.
+    try { $null = Initialize-AppPxeBootTsScriptsDir } catch {
         Write-SidecarLogVerbose "Task sequences: Scripts folder not created - $($_.Exception.Message)"
     }
 
@@ -1799,6 +1789,111 @@ function Get-AppPxeBootTsFirstBootScripts {
     return @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch '^(README|readme)' -and $_.Name -notmatch '^\.' } |
         Sort-Object Name | ForEach-Object { $_.Name })
+}
+
+function Initialize-AppPxeBootTsScriptsDir {
+    # <library>/Scripts, created with its README on first use. Null without a library root.
+    $dir = Get-AppPxeBootTsScriptsDir
+    if (-not $dir) { return $null }
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+        $null = New-Item -Path $dir -ItemType Directory -Force
+        $readme = Join-Path $dir 'README.txt'
+        [System.IO.File]::WriteAllText($readme, ("First-boot scripts for Linux task sequences.`n" +
+            "Add one from the sequence editor (First-boot script > Add...) or drop it here (for example firstboot.sh)`n" +
+            "and pick it as the sequence's First-boot script. It needs a #! first line - systemd runs it directly.`n" +
+            "The installer fetches it from this machine over HTTP (/Scripts/<name>) at the end of the install`n" +
+            "and runs it once at first boot through a one-shot systemd unit, as root, with the network up.`n"), (New-Object System.Text.UTF8Encoding $false))
+    }
+    return $dir
+}
+
+function Test-AppPxeBootTsScriptFileName {
+    # The name the compiler accepts for runScriptFile, minus the README and dotfiles the
+    # listing hides: a wrong name here would be offered by the panel and skipped at publish.
+    param([string]$Name)
+    $n = [string]$Name
+    ($n -match '^[A-Za-z0-9][A-Za-z0-9._-]*$') -and ($n -notmatch '^(README|readme)') -and ($n.Length -le 120)
+}
+
+function Import-AppPxeBootTsScript {
+    <#
+        .SYNOPSIS
+        Copy a script from this machine into <library>/Scripts so a Linux sequence can
+        name it. The copy is checked the way the target will read it: a #! first line
+        (systemd execs the file - without one the first boot silently does nothing),
+        text not binary, and LF line endings (a CRLF shebang is "bash\r: not found").
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [string]$TargetFileName,
+        [switch]$ReplaceExisting
+    )
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { throw 'Task sequences: source script not found.' }
+    $src = Get-Item -LiteralPath $SourcePath
+    $name = if ($TargetFileName) { ([string]$TargetFileName).Trim() } else { $src.Name }
+    if (-not (Test-AppPxeBootTsScriptFileName -Name $name)) {
+        throw "Task sequences: script name '$name' - letters, digits, dot, dash and underscore only, no spaces, not README."
+    }
+    if ($src.Length -gt 8MB) { throw "Task sequences: $name is over 8 MB - that is not a script; host it and use a custom URL." }
+    $bytes = [System.IO.File]::ReadAllBytes($SourcePath)
+    if ([Array]::IndexOf($bytes, [byte]0) -ge 0) { throw "Task sequences: $name is a binary file, not a script." }
+    $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+    $normalized = $false
+    if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1); $normalized = $true }
+    if ($text.Contains("`r")) { $text = ($text -replace "`r`n", "`n") -replace "`r", "`n"; $normalized = $true }
+    if (-not $text.StartsWith('#!')) {
+        throw "Task sequences: $name has no #! first line. systemd runs the script directly, so it needs one - for example #!/bin/bash."
+    }
+    $dir = Initialize-AppPxeBootTsScriptsDir
+    if (-not $dir) { throw 'Task sequences: no image library root is set, so there is no Scripts folder yet.' }
+    $dest = Join-Path $dir $name
+    $existed = Test-Path -LiteralPath $dest -PathType Leaf
+    if ($existed -and -not $ReplaceExisting) { throw "Task sequences: $name is already in the Scripts folder." }
+    [System.IO.File]::WriteAllText($dest, $text, (New-Object System.Text.UTF8Encoding $false))
+    $url = try { "$(Get-AppPxeBootTsScriptsBaseUrl)/$name" } catch { '' }
+    Write-SidecarLog ("Task sequences: first-boot script $name ($($bytes.Length) bytes) copied into the Scripts folder" +
+        $(if ($normalized) { ' (BOM/CRLF normalised to plain LF)' } else { '' }))
+    @{
+        fileName   = $name
+        path       = $dest
+        url        = $url
+        sizeBytes  = (Get-Item -LiteralPath $dest).Length
+        replaced   = [bool]$existed
+        normalized = $normalized
+        scripts    = @(Get-AppPxeBootTsFirstBootScripts)
+        scriptsDir = $dir
+    }
+}
+
+function Remove-AppPxeBootTsScript {
+    # Delete a library first-boot script. A sequence still naming it shows "missing" in
+    # the panel and publishes without a fetch line (the compiler refuses unknown names).
+    param([Parameter(Mandatory)][string]$FileName)
+    if (-not (Test-AppPxeBootTsScriptFileName -Name $FileName)) { throw "Task sequences: '$FileName' is not a library script name." }
+    $dir = Get-AppPxeBootTsScriptsDir
+    $removed = $false
+    if ($dir) {
+        $path = Join-Path $dir $FileName
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            Remove-Item -LiteralPath $path -Force
+            $removed = $true
+            Write-SidecarLog "Task sequences: first-boot script $FileName removed from the Scripts folder"
+        }
+    }
+    @{ fileName = $FileName; removed = $removed; scripts = @(Get-AppPxeBootTsFirstBootScripts); scriptsDir = $dir }
+}
+
+function Open-AppPxeBootTsScriptsFolder {
+    $path = Initialize-AppPxeBootTsScriptsDir
+    if (-not $path) { throw 'Task sequences: no image library root is set, so there is no Scripts folder yet.' }
+    if ($IsWindows -or ($env:OS -eq 'Windows_NT')) {
+        Start-Process -FilePath 'explorer.exe' -ArgumentList (Format-AppProcessArgumentList -Arguments @($path))
+    } elseif ($IsMacOS) {
+        Start-Process -FilePath 'open' -ArgumentList (Format-AppProcessArgumentList -Arguments @($path))
+    } else {
+        Start-Process -FilePath 'xdg-open' -ArgumentList (Format-AppProcessArgumentList -Arguments @($path)) -ErrorAction SilentlyContinue
+    }
+    @{ opened = $true; path = $path }
 }
 
 function Get-AppPxeBootTsScriptsBaseUrl {

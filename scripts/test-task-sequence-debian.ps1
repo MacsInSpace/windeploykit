@@ -143,6 +143,51 @@ Check 'a custom URL is used as typed, and a path-shaped script name is refused' 
     $b = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'fb'; name = 'FB'; platform = 'debian'; fields = [pscustomobject]@{ runScriptFile = '../etc/passwd' } })
     ((Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $u) -match "'https://example\.org/x\.sh'") -and ((Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $b) -eq '')
 }
+Write-Host 'Scripts folder (Add... in the panel):'
+$script:scriptsRoot = Join-Path ([IO.Path]::GetTempPath()) ("wdk-ts-scripts-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
+function Get-AppImageLibraryRoot { param([switch]$NoCreate) $script:scriptsRoot }
+function Format-AppProcessArgumentList { param($Arguments) @($Arguments) }
+$null = New-Item -Path $script:scriptsRoot -ItemType Directory -Force
+$stage = Join-Path $script:scriptsRoot 'stage'
+$null = New-Item -Path $stage -ItemType Directory -Force
+function Write-Stage($name, [byte[]]$bytes) { $p = Join-Path $stage $name; [System.IO.File]::WriteAllBytes($p, $bytes); $p }
+$utf8 = [System.Text.Encoding]::UTF8
+Check 'a CRLF script with a BOM lands in <library>/Scripts as plain LF, is listed, and resolves to the /Scripts/ URL' {
+    $p = Write-Stage 'firstboot.sh' ([byte[]](0xEF, 0xBB, 0xBF) + $utf8.GetBytes("#!/bin/bash`r`necho hi`r`n"))
+    $r = Import-AppPxeBootTsScript -SourcePath $p
+    $saved = [System.IO.File]::ReadAllBytes($r.path)
+    ($r.fileName -eq 'firstboot.sh') -and $r.normalized -and (-not $r.replaced) -and
+        ($utf8.GetString($saved) -eq "#!/bin/bash`necho hi`n") -and ($r.url -eq 'http://10.0.0.1:8080/Scripts/firstboot.sh') -and
+        (@($r.scripts) -contains 'firstboot.sh') -and (@(Get-AppPxeBootTsFirstBootScripts) -notcontains 'README.txt') -and
+        (Test-Path -LiteralPath (Join-Path $script:scriptsRoot 'Scripts/README.txt'))
+}
+Check 'a script without a #! first line is refused - systemd would exec it and the first boot would silently do nothing' {
+    $p = Write-Stage 'noshebang.sh' ($utf8.GetBytes("echo hi`n"))
+    try { $null = Import-AppPxeBootTsScript -SourcePath $p; $false } catch { $_.Exception.Message -match '#!' }
+}
+Check 'a binary, a name with a space, and a README name are refused' {
+    $b = Write-Stage 'blob.sh' ([byte[]](0x23, 0x21, 0x00, 0x01))
+    $s = Write-Stage 'ok.sh' ($utf8.GetBytes("#!/bin/sh`n"))
+    $bin = try { $null = Import-AppPxeBootTsScript -SourcePath $b; $false } catch { $_.Exception.Message -match 'binary' }
+    $sp = try { $null = Import-AppPxeBootTsScript -SourcePath $s -TargetFileName 'first boot.sh'; $false } catch { $_.Exception.Message -match 'no spaces' }
+    $rd = try { $null = Import-AppPxeBootTsScript -SourcePath $s -TargetFileName 'README.sh'; $false } catch { $_.Exception.Message -match 'README' }
+    $bin -and $sp -and $rd
+}
+Check 'a second import of the same name needs ReplaceExisting and then reports replaced' {
+    $p = Write-Stage 'firstboot.sh' ($utf8.GetBytes("#!/bin/bash`necho two`n"))
+    $refused = try { $null = Import-AppPxeBootTsScript -SourcePath $p; $false } catch { $_.Exception.Message -match 'already' }
+    $r = Import-AppPxeBootTsScript -SourcePath $p -ReplaceExisting
+    $refused -and $r.replaced -and ([System.IO.File]::ReadAllText($r.path) -eq "#!/bin/bash`necho two`n")
+}
+Check 'the imported script is what the compiler names in late_command, and Remove takes it off the list' {
+    $r = ConvertTo-AppPxeBootTaskSequenceRecord -Item ([pscustomobject]@{ id = 'fi'; name = 'FI'; platform = 'debian'; fields = [pscustomobject]@{ runScriptFile = 'firstboot.sh' } })
+    $line = Build-AppPxeBootTaskSequencePreseedLateCommand -Sequence $r
+    $gone = Remove-AppPxeBootTsScript -FileName 'firstboot.sh'
+    ($line -match 'Scripts/firstboot\.sh') -and $gone.removed -and (@($gone.scripts).Count -eq 0) -and
+        (-not (Test-Path -LiteralPath (Join-Path $script:scriptsRoot 'Scripts/firstboot.sh'))) -and
+        (-not (Remove-AppPxeBootTsScript -FileName 'firstboot.sh').removed)
+}
+Remove-Item -LiteralPath $script:scriptsRoot -Recurse -Force -ErrorAction SilentlyContinue
 Check 'UEFI install is forced: d-i must not stop to ask when another OS sits on a disk in BIOS mode' {
     $cfg -match 'partman-efi/non_efi_system boolean true'
 }
