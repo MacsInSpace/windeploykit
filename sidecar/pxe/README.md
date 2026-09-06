@@ -171,7 +171,13 @@ whose disk is `/dev/vda`) - 2026-09-05: the sequence handler booted, d-i fetched
 First user: typed, or a vault credential whose login/full name/password are resolved at
 publish (password hashed with crypt SHA-512 in the sidecar). A typed password is hashed on
 save; only the hash is stored or published. First-boot script: a file in
-`<library>/Scripts/` (served at `/Scripts/`, listed in the panel) or a custom URL.
+`<library>/Scripts/` (served at `/Scripts/`, listed in the panel) or a custom URL; it runs
+on the first boot of the installed system through a one-shot systemd unit, with the
+network up. Steps (the panel calls them "End-of-install steps" on Linux) are different:
+each is `bash -c '<command>'` run in-target as root at the end of the install, before
+the reboot, with no services running - d-i's late_command, or a curtin in-target
+late-command under Subiquity. Extra packages: free text plus a picker of known names
+that exist in both the Debian and Ubuntu archives.
 
 Still open: Secure Boot must be off (the bundled shim trusts the iPXE CA, not a distro
 kernel key). With the mirror on the internet the installed system's apt sources are the

@@ -266,6 +266,52 @@ const TS_DEBIAN_FIELD_OPTIONS: Record<string, { value: string; label: string }[]
     { value: "/dev/mmcblk0", label: "eMMC (/dev/mmcblk0)" },
   ],
 };
+/** Known extra packages for the Linux "Extra packages" field. Names are checked
+ * against both Debian 12/13 and Ubuntu 22.04/24.04 archives; a row with `platforms`
+ * only shows for those. A value may carry several names (one pick, one purpose). */
+const TS_LINUX_PACKAGE_PICKS: { group: string; value: string; label: string; platforms?: string[] }[] = [
+  { group: "Admin basics", value: "curl wget ca-certificates", label: "curl, wget, ca-certificates" },
+  { group: "Admin basics", value: "vim", label: "vim" },
+  { group: "Admin basics", value: "nano", label: "nano" },
+  { group: "Admin basics", value: "htop", label: "htop" },
+  { group: "Admin basics", value: "tmux", label: "tmux" },
+  { group: "Admin basics", value: "git", label: "git" },
+  { group: "Admin basics", value: "rsync", label: "rsync" },
+  { group: "Admin basics", value: "unzip zip", label: "unzip, zip" },
+  { group: "Admin basics", value: "jq", label: "jq" },
+  { group: "Admin basics", value: "sudo", label: "sudo" },
+  { group: "Admin basics", value: "openssh-server", label: "openssh-server (SSH access)", platforms: ["debian"] },
+  { group: "Admin basics", value: "unattended-upgrades", label: "unattended-upgrades (automatic security updates)" },
+  { group: "Network", value: "net-tools", label: "net-tools (ifconfig, netstat)" },
+  { group: "Network", value: "bind9-dnsutils", label: "bind9-dnsutils (dig, nslookup)" },
+  { group: "Network", value: "tcpdump", label: "tcpdump" },
+  { group: "Network", value: "chrony", label: "chrony (NTP time sync)" },
+  { group: "Network", value: "ufw", label: "ufw (firewall)" },
+  { group: "Network", value: "fail2ban", label: "fail2ban" },
+  { group: "Virtual machine guest", value: "open-vm-tools", label: "open-vm-tools (VMware)" },
+  { group: "Virtual machine guest", value: "qemu-guest-agent", label: "qemu-guest-agent (QEMU, Proxmox, UTM)" },
+  { group: "Virtual machine guest", value: "hyperv-daemons", label: "hyperv-daemons (Hyper-V)", platforms: ["debian"] },
+  { group: "Virtual machine guest", value: "linux-cloud-tools-virtual", label: "linux-cloud-tools-virtual (Hyper-V)", platforms: ["ubuntu"] },
+  { group: "Storage and file sharing", value: "nfs-common", label: "nfs-common (NFS client)" },
+  { group: "Storage and file sharing", value: "cifs-utils", label: "cifs-utils (SMB / Windows shares)" },
+  { group: "Storage and file sharing", value: "samba", label: "samba (file server)" },
+  { group: "Directory and identity", value: "realmd sssd sssd-tools adcli libnss-sss libpam-sss packagekit", label: "Active Directory join tools (realmd, sssd, adcli)" },
+  { group: "Services and languages", value: "docker.io", label: "docker.io (Docker engine)" },
+  { group: "Services and languages", value: "podman", label: "podman" },
+  { group: "Services and languages", value: "nginx", label: "nginx" },
+  { group: "Services and languages", value: "apache2", label: "apache2" },
+  { group: "Services and languages", value: "mariadb-server", label: "mariadb-server" },
+  { group: "Services and languages", value: "postgresql", label: "postgresql" },
+  { group: "Services and languages", value: "cockpit", label: "cockpit (web admin console)" },
+  { group: "Services and languages", value: "python3 python3-pip python3-venv", label: "Python 3 with pip and venv" },
+  { group: "Services and languages", value: "build-essential", label: "build-essential (gcc, make)" },
+  { group: "Desktop (large downloads)", value: "task-gnome-desktop", label: "GNOME desktop (task-gnome-desktop)", platforms: ["debian"] },
+  { group: "Desktop (large downloads)", value: "task-xfce-desktop", label: "Xfce desktop (task-xfce-desktop)", platforms: ["debian"] },
+  { group: "Desktop (large downloads)", value: "task-kde-desktop", label: "KDE Plasma desktop (task-kde-desktop)", platforms: ["debian"] },
+  { group: "Desktop (large downloads)", value: "ubuntu-desktop-minimal", label: "Ubuntu desktop, minimal (ubuntu-desktop-minimal)", platforms: ["ubuntu"] },
+  { group: "Desktop (large downloads)", value: "ubuntu-desktop", label: "Ubuntu desktop, full (ubuntu-desktop)", platforms: ["ubuntu"] },
+  { group: "Desktop (large downloads)", value: "xrdp", label: "xrdp (RDP into the desktop)" },
+];
 const TS_PLATFORM_LABELS: Record<string, string> = {
   windows: "Windows",
   debian: "Debian",
@@ -3260,6 +3306,73 @@ export function PxeWorkspace({
                                         placeholder="http://... - fetched by the installer at the end of the install"
                                         onChange={(e) => setField(e.target.value.trim())}
                                       />
+                                    ) : tsIsLinux(seq) && key === "packages" ? (
+                                      (() => {
+                                        // The text is the record; the picker only appends known names and
+                                        // the chips only remove, so nothing is typed that the archive has not got.
+                                        const current = (seq.fields[key] ?? "").split(/\s+/).filter(Boolean);
+                                        const picks = TS_LINUX_PACKAGE_PICKS.filter(
+                                          (p) => !p.platforms || p.platforms.includes(tsPlatform(seq)),
+                                        );
+                                        const groups = picks.map((p) => p.group).filter((g, i, all) => all.indexOf(g) === i);
+                                        const addPick = (value: string) => {
+                                          const add = value.split(/\s+/).filter((n) => n && !current.includes(n));
+                                          if (add.length > 0) setField([...current, ...add].join(" "));
+                                        };
+                                        return (
+                                          <div className="flex flex-col gap-1">
+                                            <div className="flex items-center gap-1.5">
+                                              <input
+                                                className="input-box mono h-[26px] flex-1 text-[11px]"
+                                                value={seq.fields[key] ?? ""}
+                                                spellCheck={false}
+                                                placeholder="space-separated package names, or pick from the list"
+                                                title="Installed from the distro's archive at the end of the install. A name the release's repositories do not have fails the package step, so prefer the list."
+                                                onChange={(e) => setField(e.target.value)}
+                                              />
+                                              <select
+                                                className="input-box mono h-[26px] w-[200px] text-[11px]"
+                                                value=""
+                                                title="Known packages for this platform - a pick is added to the list"
+                                                onChange={(e) => addPick(e.target.value)}
+                                              >
+                                                <option value="">Add a known package...</option>
+                                                {groups.map((g) => (
+                                                  <optgroup key={g} label={g}>
+                                                    {picks
+                                                      .filter((p) => p.group === g)
+                                                      .map((p) => (
+                                                        <option
+                                                          key={p.value}
+                                                          value={p.value}
+                                                          disabled={p.value.split(/\s+/).every((n) => current.includes(n))}
+                                                        >
+                                                          {p.label}
+                                                        </option>
+                                                      ))}
+                                                  </optgroup>
+                                                ))}
+                                              </select>
+                                            </div>
+                                            {current.length > 0 ? (
+                                              <span className="flex flex-wrap items-center gap-1 text-[10px]" style={{ color: "var(--text3)" }}>
+                                                Click to remove:
+                                                {current.map((n) => (
+                                                  <button
+                                                    key={n}
+                                                    type="button"
+                                                    className="btn px-1 py-0 text-[10px]"
+                                                    title={`Remove ${n} from the list`}
+                                                    onClick={() => setField(current.filter((x) => x !== n).join(" "))}
+                                                  >
+                                                    {n}
+                                                  </button>
+                                                ))}
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                        );
+                                      })()
                                     ) : tsIsLinux(seq) && TS_DEBIAN_FIELD_OPTIONS[key] ? (
                                       <select
                                         className="input-box mono h-[26px] text-[11px]"
@@ -3838,19 +3951,28 @@ export function PxeWorkspace({
                           {selected ? (
                             <div className="border-t px-3 py-2" style={{ borderColor: "var(--border)" }}>
                               <div className="mb-1.5 flex items-center gap-2">
-                                <span className="mono text-[10px] uppercase tracking-wider" style={{ color: "var(--text3)" }}>
-                                  First-boot steps
+                                <span
+                                  className="mono text-[10px] uppercase tracking-wider"
+                                  style={{ color: "var(--text3)" }}
+                                  title={
+                                    tsIsLinux(seq)
+                                      ? "Run as root inside the installed system at the end of the install, before it reboots (no services are running yet). Anything that needs the running system goes in the first-boot script."
+                                      : undefined
+                                  }
+                                >
+                                  {tsIsLinux(seq) ? "End-of-install steps" : "First-boot steps"}
                                 </span>
                                 <span className="ml-auto flex gap-1">
                                   {(
                                     [
                                       ["reg", "+ Reg key"],
-                                      ["cmd", "+ Command"],
+                                      ["cmd", tsIsLinux(seq) ? "+ Bash" : "+ Command"],
                                       ["pwsh", "+ PowerShell"],
                                     ] as const
                                   )
-                                    // A preseed's late_command runs shell commands; registry keys and
-                                    // PowerShell are Windows verbs and the builder skips them anyway.
+                                    // A Linux step is one bash -c line run in-target at the end of the
+                                    // install; registry keys and PowerShell are Windows verbs and the
+                                    // builder skips them anyway.
                                     .filter(([t]) => !tsIsLinux(seq) || t === "cmd")
                                     .map(([t, label]) => (
                                     <button
@@ -4022,7 +4144,7 @@ export function PxeWorkspace({
                                           className="mono rounded border px-1 text-[9px] uppercase"
                                           style={{ borderColor: "var(--border)", color: "var(--text3)" }}
                                         >
-                                          {step.type === "pwsh" ? "PowerShell" : step.type === "reg" ? "Reg" : "Cmd"}
+                                          {step.type === "pwsh" ? "PowerShell" : step.type === "reg" ? "Reg" : tsIsLinux(seq) ? "Bash" : "Cmd"}
                                         </span>
                                         <input
                                           className="input-box mono h-[22px] flex-1 text-[10px]"
@@ -4105,7 +4227,13 @@ export function PxeWorkspace({
                                       ) : (
                                         <input
                                           className="input-box mono h-[22px] w-full text-[10px]"
-                                          placeholder={step.type === "pwsh" ? "PowerShell command..." : "Command..."}
+                                          placeholder={
+                                            step.type === "pwsh"
+                                              ? "PowerShell command..."
+                                              : tsIsLinux(seq)
+                                                ? "bash -c ... as root in the installed system, end of install"
+                                                : "Command..."
+                                          }
                                           value={step.command ?? ""}
                                           spellCheck={false}
                                           onChange={(e) => updateStep({ command: e.target.value })}

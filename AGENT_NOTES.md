@@ -384,6 +384,15 @@ a cache description, correctly left alone.
   when both are present, so every Ubuntu handler names one: the seed's
   `user-data` on a sequence handler, `http/linux/ubuntu/cloud-config-none`
   (`#cloud-config` + `{}`, written on menu regen) on Interactive.
+- **Linux steps run through `bash -c` (2026-09-06, Craig's call).** They were `sh -c`
+  (dash on both distros) and the panel badge said "Cmd", which reads as cmd.exe. bash is
+  Essential on Debian and in the Ubuntu server base, so it is always in /target by
+  late_command time, and every sh one-liner runs unchanged under it. The panel now says
+  "End-of-install steps" / "+ Bash" on a Linux sequence, because that is when they run:
+  in-target as root before the reboot, no systemd. The first-boot script is the other
+  phase (systemd unit, network up). The fetch line itself stays `sh -c`. "Extra
+  packages" got a picker (`TS_LINUX_PACKAGE_PICKS`, names present in both archives,
+  per-platform rows for desktops and Hyper-V tools); the text stays the record.
 - Debugging an installer you cannot type at: from tier 3 the QEMU test passes
   `log_host=10.0.2.2 log_port=5514` and listens with `nc -u -k -l 5514`, so
   d-i's syslog lands in `$WORK/d-i.syslog` (udeb fetches, module loads, disks

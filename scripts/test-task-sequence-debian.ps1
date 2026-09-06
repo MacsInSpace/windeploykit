@@ -210,8 +210,8 @@ Check 'a URL carrying a shell metacharacter survives as one argument' {
 Check 'a one-shot unit is registered and disables itself' {
     $cfg -match 'wdk-firstboot.service' -and $cfg -match 'ExecStartPost=/bin/systemctl disable wdk-firstboot.service'
 }
-Check 'cmd steps run in-target, not in the installer ramdisk' {
-    $cfg -match "in-target sh -c 'systemctl mask sleep.target suspend.target'"
+Check 'cmd steps run in-target through bash, not in the installer ramdisk' {
+    $cfg -match "in-target bash -c 'systemctl mask sleep.target suspend.target'"
 }
 Check 'reg and pwsh steps are skipped, not mistranslated' {
     $cfg -notmatch 'HKLM' -and $cfg -notmatch 'Write-Host'

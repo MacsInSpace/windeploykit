@@ -124,7 +124,7 @@ Check 'cmd steps become late-commands; reg and pwsh steps are skipped, not mistr
     )
     $o = Build-AppPxeBootTaskSequenceAutoinstall -Sequence $st
     # Inside the YAML single-quoted scalar the shell's own quote appears doubled.
-    ($o -match "curtin in-target --target=/target -- sh -c ''echo it is done''") -and ($o -notmatch 'Get-Date') -and ($o -notmatch 'HKLM')
+    ($o -match "curtin in-target --target=/target -- bash -c ''echo it is done''") -and ($o -notmatch 'Get-Date') -and ($o -notmatch 'HKLM')
 }
 Check 'a single quote inside a step is doubled for YAML and survives as one command' {
     $st = New-Seq @{ userPassword = 'x' } @([pscustomobject]@{ type = 'cmd'; description = 'c'; command = "echo it's" })

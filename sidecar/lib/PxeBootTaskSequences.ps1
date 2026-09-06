@@ -1828,7 +1828,11 @@ function Get-AppPxeBootTsLateCommandParts {
         .DESCRIPTION
         Only cmd steps make sense here: reg and pwsh are Windows verbs and are
         skipped rather than silently mistranslated. Every command runs in-target,
-        so it sees the installed system and not the installer's ramdisk.
+        so it sees the installed system and not the installer's ramdisk, and
+        through bash -c (Craig, 2026-09-06): bash is Essential on Debian and in the
+        Ubuntu server base, so it is always in /target by late_command time, people
+        type bash syntax, and every sh one-liner runs unchanged under it. The fetch
+        line above stays sh: it is ours and POSIX.
     #>
     param([Parameter(Mandatory)]$Sequence)
 
@@ -1872,7 +1876,7 @@ printf '[Unit]\nDescription=WinDeployKit first boot\nAfter=network-online.target
         if ([string]$step.type -ne 'cmd') { continue }
         $cmd = ([string]$step.command).Trim()
         if (-not $cmd) { continue }
-        $parts += "in-target sh -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $cmd)"
+        $parts += "in-target bash -c $(ConvertTo-AppPxeBootTsShellSingleQuoted $cmd)"
     }
     # Emitted, not wrapped: a `, $parts` here reaches a caller @() as ONE nested array.
     return $parts
