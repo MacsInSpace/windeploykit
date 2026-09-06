@@ -61,11 +61,13 @@ function New-Entry([string]$id, [string]$mode) {
         kernelArgs    = if ($mode -eq 'netboot') { 'vga=788 mirror/country=manual mirror/http/hostname=deb.debian.org mirror/http/directory=/debian --- quiet' } else { 'vga=788 --- quiet' }
         installMode   = $mode
         note          = if ($mode -eq 'netboot') { 'Installer: netboot initrd (d-i 20250803+deb13u6) + packages from the mounted ISO' } else { 'NOTE: installer files not fetched' }
+        codename      = 'trixie'
+        arch          = 'amd64'
     }
 }
 $seqs = @(
-    @{ id = 'campuscast-receiver'; name = 'CampusCast receiver'; cfgHttpRel = 'TaskSequences/campuscast-receiver.cfg'; isDefault = $false }
-    @{ id = 'lab-desktop';         name = 'Lab desktop';         cfgHttpRel = 'TaskSequences/lab-desktop.cfg';         isDefault = $false }
+    @{ id = 'campuscast-receiver'; name = 'CampusCast receiver'; cfgHttpRel = 'TaskSequences/campuscast-receiver.cfg'; isDefault = $false; installer = '' }
+    @{ id = 'lab-desktop';         name = 'Lab desktop';         cfgHttpRel = 'TaskSequences/lab-desktop.cfg';         isDefault = $false; installer = '' }
 )
 $tab = [char]9
 
@@ -105,7 +107,7 @@ Check 'Interactive is preselected when no Debian sequence is the default' {
     ($lines -contains 'choose --default lnx_deb__manual target || goto start') -and ($lines -contains 'goto ${target}')
 }
 Check 'a Debian default sequence is preselected instead' {
-    $d = @(@{ id = 'lab-desktop'; name = 'Lab desktop'; cfgHttpRel = 'TaskSequences/lab-desktop.cfg'; isDefault = $true })
+    $d = @(@{ id = 'lab-desktop'; name = 'Lab desktop'; cfgHttpRel = 'TaskSequences/lab-desktop.cfg'; isDefault = $true; installer = '' })
     $l = @(Get-AppPxeBootLinuxMenuHandlerLines -Entries @((New-Entry 'lnx_deb' 'netboot')) -Sequences $d)
     $l -contains 'choose --default lnx_deb__ts_lab_desktop target || goto start'
 }
@@ -167,6 +169,22 @@ Check 'the whole menu is ASCII' {
 }
 Check 'sequence item ids are plain labels derived from the sequence id' {
     (Get-AppPxeBootLinuxSequenceMenuItemId -EntryId 'lnx_deb' -SequenceId 'Camp.us-Cast_9') -eq 'lnx_deb__ts_camp_us_cast_9'
+}
+
+Write-Host 'Installer binding (the panel Linux installer field):'
+$bound = @(
+    @{ id = 'trixie-only';   name = 'Trixie only';   cfgHttpRel = 'TaskSequences/trixie-only.cfg';   isDefault = $false; installer = 'debian-trixie-amd64' }
+    @{ id = 'bookworm-only'; name = 'Bookworm only'; cfgHttpRel = 'TaskSequences/bookworm-only.cfg'; isDefault = $false; installer = 'debian-bookworm-amd64' }
+    @{ id = 'any-debian';    name = 'Any Debian';    cfgHttpRel = 'TaskSequences/any-debian.cfg';    isDefault = $false; installer = '' }
+)
+$bl = @(Get-AppPxeBootLinuxMenuHandlerLines -Entries @((New-Entry 'lnx_deb' 'netboot')) -Sequences $bound)
+Check 'a trixie amd64 entry lists the sequences bound to it and the unbound ones, not the bookworm one' {
+    ($bl -contains "item lnx_deb__ts_trixie_only${tab}Trixie only") -and ($bl -contains "item lnx_deb__ts_any_debian${tab}Any Debian") -and -not ($bl -like "item lnx_deb__ts_bookworm_only*")
+}
+Check 'an entry with only foreign-bound sequences is a straight boot, no submenu' {
+    $only = @(@{ id = 'bookworm-only'; name = 'Bookworm only'; cfgHttpRel = 'TaskSequences/bookworm-only.cfg'; isDefault = $false; installer = 'debian-bookworm-amd64' })
+    $l = @(Get-AppPxeBootLinuxMenuHandlerLines -Entries @((New-Entry 'lnx_deb' 'netboot')) -Sequences $only)
+    ($l[0] -eq ':lnx_deb') -and -not ($l -like 'menu *')
 }
 
 Write-Host 'ISO-less netboot pairs (store-resident kernel + initrd):'

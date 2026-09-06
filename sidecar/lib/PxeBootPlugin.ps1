@@ -2215,6 +2215,8 @@ function Get-AppPxeBootLinuxBootInventory {
                 kernelArgs    = $kernelArgs
                 installMode   = $installMode
                 note          = $note
+                codename      = [string]$linux.codename
+                arch          = [string]$linux.arch
             }) | Out-Null
     }
     # ISO-less Debian: the netboot pairs kept in the store (Add-AppPxeBootDebianNetboot).
@@ -2244,6 +2246,8 @@ function ConvertTo-AppPxeBootDebianNetbootInventoryRow {
         kernelArgs    = Add-AppPxeBootDebianInstallerKernelArgs -KernelArgs $baseArgs -Codename $codename
         installMode   = 'netboot'
         note          = "Installer: netboot d-i $([string]$Pair.diVersion), drivers and packages from $mirrorHost"
+        codename      = $codename
+        arch          = $arch
     }
 }
 
@@ -2363,11 +2367,17 @@ function Get-AppPxeBootLinuxTaskSequenceChoices {
         if ([string]$rec.platform -ne 'debian') { continue }
         $id = [string]$rec.id
         if (-not (Test-Path -LiteralPath (Join-Path $dir "$id.cfg") -PathType Leaf)) { continue }
+        # installer: the panel's "Linux installer" binding, debian-<codename>-<arch>, or ''
+        # for "any Debian entry". Decides which entries' submenus list this sequence.
+        $installer = ''
+        $flds = $rec.fields
+        if ($flds -and $flds.Contains('linuxInstaller')) { $installer = ([string]$flds['linuxInstaller']).Trim().ToLowerInvariant() }
         $rows.Add(@{
                 id         = $id
                 name       = [string]$rec.name
                 cfgHttpRel = "TaskSequences/$id.cfg"
                 isDefault  = ($default -and ($id -eq $default))
+                installer  = $installer
             }) | Out-Null
     }
     return $rows.ToArray()
@@ -2454,7 +2464,11 @@ function Get-AppPxeBootLinuxMenuHandlerLines {
         $label = [string]$entry.label
         $entryId = [string]$entry.id
         $note = [string]$entry.note
-        $useSubmenu = (([string]$entry.installMode) -eq 'netboot') -and ($seqs.Count -gt 0)
+        # A sequence bound to a Linux installer (debian-<codename>-<arch>) appears only under
+        # that entry; an unbound one appears under every Debian entry.
+        $entryKey = "debian-$([string]$entry.codename)-$([string]$entry.arch)".ToLowerInvariant()
+        $seqsFor = @($seqs | Where-Object { -not [string]$_.installer -or ([string]$_.installer -eq $entryKey) })
+        $useSubmenu = (([string]$entry.installMode) -eq 'netboot') -and ($seqsFor.Count -gt 0)
         if (-not $useSubmenu) {
             [void]$lines.Add(":$entryId")
             if ($note) { [void]$lines.Add("echo $note") }
@@ -2470,7 +2484,7 @@ function Get-AppPxeBootLinuxMenuHandlerLines {
         [void]$lines.Add(":$entryId")
         [void]$lines.Add("menu $label - task sequence")
         [void]$lines.Add('item --gap -- ------------------------------')
-        foreach ($seq in $seqs) {
+        foreach ($seq in $seqsFor) {
             $itemId = Get-AppPxeBootLinuxSequenceMenuItemId -EntryId $entryId -SequenceId ([string]$seq.id)
             [void]$lines.Add((Format-AppPxeBootIpxeMenuItemLine -Id $itemId -Label ([string]$seq.name)))
             if ([bool]$seq.isDefault) { $defaultTarget = $itemId }
@@ -2482,7 +2496,7 @@ function Get-AppPxeBootLinuxMenuHandlerLines {
         [void]$lines.Add('goto ${target}')
         [void]$lines.Add('')
 
-        foreach ($seq in $seqs) {
+        foreach ($seq in $seqsFor) {
             $itemId = Get-AppPxeBootLinuxSequenceMenuItemId -EntryId $entryId -SequenceId ([string]$seq.id)
             $seqName = [string]$seq.name
             $seeded = @{} + $entry

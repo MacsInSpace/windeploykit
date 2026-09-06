@@ -314,6 +314,22 @@ a cache description, correctly left alone.
   10 GB** (768 MB EFI + 768 MB /boot + 8 GB / + swap); a smaller disk fails with
   "Unable to satisfy all constraints on the partition" - that is what
   `small_disk` is for. The QEMU test disk is 16 GB for that reason.
+- **Panel, 2026-09-06 (Craig's review of the first Debian sequence):** the platform
+  decides what the editor shows. A Debian sequence no longer offers Role, Windows
+  image, Join a domain, Win 11 requirements, OOBE screens, After first-boot setup
+  or the Windows local account (its first-user fields are the account), and its
+  first-boot steps offer only `+ Command` (late_command runs shell; reg/pwsh are
+  Windows verbs the builder skips). Win 11 requirements also hide for the Windows
+  Server role. Debian fields with a right answer set are dropdowns
+  (`TS_DEBIAN_FIELD_OPTIONS`: locale, keyboard, time zone, partitioning recipe,
+  target disk presets) - a saved value outside the list still shows as
+  "(custom)". "Windows image" becomes **Linux installer** on a Debian sequence:
+  the catalog from Operating Systems > Linux network installers, saved in field
+  `linuxInstaller` as `debian-<codename>-<arch>` or '' for any. The menu honours
+  it: a bound sequence appears only under that release's entry
+  (`Get-AppPxeBootLinuxMenuHandlerLines` filters per entry by codename + arch,
+  which every inventory row now carries). The Windows local-account validation is
+  skipped for a preseed so an empty Windows account cannot block a Debian save.
 - Debugging an installer you cannot type at: from tier 3 the QEMU test passes
   `log_host=10.0.2.2 log_port=5514` and listens with `nc -u -k -l 5514`, so
   d-i's syslog lands in `$WORK/d-i.syslog` (udeb fetches, module loads, disks

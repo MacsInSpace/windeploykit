@@ -36,6 +36,8 @@ import type {
   PxeBootPluginStatus,
   PxeBootBrandingStatus,
   PxeBootInstallImageEntry,
+  PxeBootLinuxNetbootEntry,
+  PxeBootLinuxNetbootResponse,
   PxeBootTaskSequence,
   PxeBootTaskSequenceStep,
   PxeBootTaskSequencesPayload,
@@ -103,6 +105,7 @@ const TS_FIELD_ORDER = [
  * questions. Nothing here overlaps with the Windows set on purpose: a field that
  * means one thing under unattend and another under d-i is worse than two fields. */
 const TS_DEBIAN_FIELD_LABELS: Record<string, string> = {
+  linuxInstaller: "Linux installer",
   hostname: "Hostname",
   domain: "Domain",
   locale: "Locale",
@@ -117,6 +120,7 @@ const TS_DEBIAN_FIELD_LABELS: Record<string, string> = {
   runScriptUrl: "First-boot script URL",
 };
 const TS_DEBIAN_FIELD_ORDER = [
+  "linuxInstaller",
   "hostname",
   "domain",
   "locale",
@@ -131,6 +135,7 @@ const TS_DEBIAN_FIELD_ORDER = [
   "runScriptUrl",
 ];
 const TS_DEBIAN_DEFAULT_FIELDS: Record<string, string> = {
+  linuxInstaller: "",
   hostname: "debian",
   domain: "local",
   locale: "en_AU.UTF-8",
@@ -143,6 +148,92 @@ const TS_DEBIAN_DEFAULT_FIELDS: Record<string, string> = {
   partitionRecipe: "atomic",
   packages: "",
   runScriptUrl: "",
+};
+/** Dropdown choices for the Debian fields that have a right answer set. Free text here
+ * was where the mistakes came from (Craig, 2026-09-06): a typo in a locale or a recipe
+ * name only shows up as an installer stuck on a question. A value saved before these
+ * lists existed still shows - the select carries it as an extra option. */
+const TS_DEBIAN_FIELD_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  locale: [
+    ["en_AU.UTF-8", "English (Australia)"],
+    ["en_NZ.UTF-8", "English (New Zealand)"],
+    ["en_GB.UTF-8", "English (United Kingdom)"],
+    ["en_US.UTF-8", "English (United States)"],
+    ["en_CA.UTF-8", "English (Canada)"],
+    ["en_IE.UTF-8", "English (Ireland)"],
+    ["de_DE.UTF-8", "German"],
+    ["fr_FR.UTF-8", "French"],
+    ["es_ES.UTF-8", "Spanish"],
+    ["it_IT.UTF-8", "Italian"],
+    ["nl_NL.UTF-8", "Dutch"],
+    ["pt_BR.UTF-8", "Portuguese (Brazil)"],
+    ["sv_SE.UTF-8", "Swedish"],
+    ["ja_JP.UTF-8", "Japanese"],
+    ["zh_CN.UTF-8", "Chinese (Simplified)"],
+  ].map(([value, label]) => ({ value, label: `${label} - ${value}` })),
+  keymap: [
+    ["us", "US"],
+    ["gb", "UK"],
+    ["de", "German"],
+    ["fr", "French"],
+    ["es", "Spanish"],
+    ["it", "Italian"],
+    ["nl", "Dutch"],
+    ["br", "Portuguese (Brazil)"],
+    ["pt", "Portuguese"],
+    ["se", "Swedish"],
+    ["dk", "Danish"],
+    ["no", "Norwegian"],
+    ["fi", "Finnish"],
+    ["ch", "Swiss"],
+    ["jp", "Japanese"],
+    ["latam", "Latin American"],
+    ["dvorak", "Dvorak"],
+  ].map(([value, label]) => ({ value, label: `${label} - ${value}` })),
+  timezone: [
+    "Australia/Melbourne",
+    "Australia/Sydney",
+    "Australia/Brisbane",
+    "Australia/Adelaide",
+    "Australia/Perth",
+    "Australia/Hobart",
+    "Australia/Darwin",
+    "Pacific/Auckland",
+    "Asia/Singapore",
+    "Asia/Hong_Kong",
+    "Asia/Tokyo",
+    "Asia/Kolkata",
+    "Europe/London",
+    "Europe/Dublin",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Amsterdam",
+    "Europe/Madrid",
+    "Europe/Rome",
+    "Europe/Stockholm",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Toronto",
+    "America/Vancouver",
+    "America/Sao_Paulo",
+    "UTC",
+  ].map((value) => ({ value, label: value })),
+  partitionRecipe: [
+    { value: "atomic", label: "All files in one partition (atomic) - needs about 10 GB" },
+    { value: "home", label: "Separate /home (home)" },
+    { value: "multi", label: "Separate /home, /var, /tmp (multi)" },
+    { value: "server", label: "Server layout (server)" },
+    { value: "small_disk", label: "Small disk, under 10 GB (small_disk)" },
+  ],
+  disk: [
+    { value: "/dev/nvme0n1 /dev/sda /dev/mmcblk0", label: "First of NVMe, SATA, eMMC - typical laptop or desktop" },
+    { value: "/dev/nvme0n1", label: "NVMe (/dev/nvme0n1)" },
+    { value: "/dev/sda", label: "SATA or SCSI (/dev/sda)" },
+    { value: "/dev/vda", label: "virtio disk - KVM, Proxmox, QEMU (/dev/vda)" },
+    { value: "/dev/mmcblk0", label: "eMMC (/dev/mmcblk0)" },
+  ],
 };
 const TS_PLATFORM_LABELS: Record<string, string> = {
   windows: "Windows",
@@ -568,6 +659,9 @@ export function PxeWorkspace({
    * to, and therefore which fields the editor offers. Not changed afterwards,
    * because the field sets do not overlap. */
   const [tsNewPlatform, setTsNewPlatform] = useState("windows");
+  // The Linux installers a Debian sequence can bind to (Operating Systems > Linux
+  // network installers). Read when the node opens; the list is small and live.
+  const [tsLinuxInstallers, setTsLinuxInstallers] = useState<PxeBootLinuxNetbootEntry[]>([]);
   // Sequences whose local-domain machine OU is in "Custom..." free-text mode (the
   // select alone can't tell "custom equals the suggestion" from "picked the suggestion").
   // Preselected deploy-client menu item ("" = tech picks at the device).
@@ -828,6 +922,22 @@ export function PxeWorkspace({
     };
   }, [tsExpanded]);
 
+  useEffect(() => {
+    if (!tsExpanded) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await sidecar.invoke<PxeBootLinuxNetbootResponse>("ListPxeBootLinuxNetboot");
+        if (!cancelled) setTsLinuxInstallers(data?.entries ?? []);
+      } catch {
+        if (!cancelled) setTsLinuxInstallers([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tsExpanded]);
+
   const tsDirty = useMemo(() => {
     if (!tsPayload || !tsEdit) return false;
     if (tsDefaultId !== (tsPayload.defaultSequenceId ?? "")) return true;
@@ -864,7 +974,9 @@ export function PxeWorkspace({
       }
       // A local account that cannot resolve a password is silently dropped from the
       // unattend (login-less machine, Craig 2026-08-23) - catch it here instead.
-      const acct = s.localAccount;
+      // A preseed has its own first-user fields; the Windows local account never
+      // applies to it, so it must not block the save either.
+      const acct = tsPlatform(s) === "debian" ? undefined : s.localAccount;
       const acctMode = acct?.mode ?? (acct?.enabled ? (acct.passwordSource === "vault" ? "vault" : "manual") : "none");
       if (acct && acctMode === "vault") {
         if (!(acct.vaultSecret ?? "").trim()) {
@@ -2822,6 +2934,7 @@ export function PxeWorkspace({
                               className="grid grid-cols-[140px_1fr] items-center gap-x-3 gap-y-1.5 border-t px-3 py-2"
                               style={{ borderColor: "var(--border)" }}
                             >
+                              {tsPlatform(seq) !== "debian" ? (<>
                               <label className="text-[11px]" style={{ color: "var(--text2)" }}>
                                 Role
                               </label>
@@ -2848,6 +2961,8 @@ export function PxeWorkspace({
                                 <option value="client">Client</option>
                                 <option value="server">Server</option>
                               </select>
+                              </>) : null}
+                              {tsPlatform(seq) !== "debian" ? (<>
                               <label
                                 className="text-[11px]"
                                 style={{ color: "var(--text2)" }}
@@ -2948,6 +3063,7 @@ export function PxeWorkspace({
                                 />
                                 Join a domain
                               </label>
+                                </>) : null}
                               {tsFieldOrder(tsPlatform(seq))
                                 .filter((key) => tsPlatform(seq) === "debian"
                                   || key in seq.fields
@@ -2984,7 +3100,40 @@ export function PxeWorkspace({
                                     >
                                       {tsFieldLabel(tsPlatform(seq), key)}
                                     </label>
-                                    {key === "computerName" ? (
+                                    {tsPlatform(seq) === "debian" && key === "linuxInstaller" ? (
+                                      <select
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        value={seq.fields[key] ?? ""}
+                                        title="Which PXE menu entry offers this sequence. Any = every Debian entry. Installers are added under Operating Systems > Linux network installers."
+                                        onChange={(e) => setField(e.target.value)}
+                                      >
+                                        <option value="">Any Debian installer on the menu</option>
+                                        {tsLinuxInstallers.map((r) => (
+                                          <option key={r.id} value={r.id}>
+                                            {r.label} {r.arch}
+                                            {r.ready ? "" : " - not added yet"}
+                                          </option>
+                                        ))}
+                                        {seq.fields[key] && !tsLinuxInstallers.some((r) => r.id === seq.fields[key]) ? (
+                                          <option value={seq.fields[key]}>{seq.fields[key]} (not in the catalog)</option>
+                                        ) : null}
+                                      </select>
+                                    ) : tsPlatform(seq) === "debian" && TS_DEBIAN_FIELD_OPTIONS[key] ? (
+                                      <select
+                                        className="input-box mono h-[26px] text-[11px]"
+                                        value={seq.fields[key] ?? ""}
+                                        onChange={(e) => setField(e.target.value)}
+                                      >
+                                        {TS_DEBIAN_FIELD_OPTIONS[key].map((o) => (
+                                          <option key={o.value} value={o.value}>
+                                            {o.label}
+                                          </option>
+                                        ))}
+                                        {seq.fields[key] && !TS_DEBIAN_FIELD_OPTIONS[key].some((o) => o.value === seq.fields[key]) ? (
+                                          <option value={seq.fields[key]}>{seq.fields[key]} (custom)</option>
+                                        ) : null}
+                                      </select>
+                                    ) : key === "computerName" ? (
                                       <input
                                         className="input-box mono h-[26px] text-[11px]"
                                         value={seq.fields[key]}
@@ -3223,6 +3372,7 @@ export function PxeWorkspace({
                                   </Fragment>
                                 );
                               })}
+                              {tsPlatform(seq) !== "debian" && seq.kind !== "server" ? (<>
                               <label className="text-[11px]" style={{ color: "var(--text2)" }}>
                                 Win 11 requirements
                               </label>
@@ -3242,6 +3392,8 @@ export function PxeWorkspace({
                                 />
                                 Bypass TPM / Secure Boot / RAM / CPU (VMs, older hardware)
                               </label>
+                              </>) : null}
+                              {tsPlatform(seq) !== "debian" ? (<>
                               <label className="text-[11px]" style={{ color: "var(--text2)" }}>
                                 OOBE screens
                               </label>
@@ -3273,6 +3425,7 @@ export function PxeWorkspace({
                                   </label>
                                 ))}
                               </div>
+                              </>) : null}
                               <label className="text-[11px]" style={{ color: "var(--text2)" }}>
                                 After first-boot setup
                               </label>
@@ -3386,7 +3539,7 @@ export function PxeWorkspace({
                               </button>
                             </div>
                           ) : null}
-                          {selected ? (
+                          {selected && tsPlatform(seq) !== "debian" ? (
                             (() => {
                               const account = seq.localAccount ?? {
                                 enabled: false,
@@ -3553,7 +3706,11 @@ export function PxeWorkspace({
                                       ["cmd", "+ Command"],
                                       ["pwsh", "+ PowerShell"],
                                     ] as const
-                                  ).map(([t, label]) => (
+                                  )
+                                    // A preseed's late_command runs shell commands; registry keys and
+                                    // PowerShell are Windows verbs and the builder skips them anyway.
+                                    .filter(([t]) => tsPlatform(seq) !== "debian" || t === "cmd")
+                                    .map(([t, label]) => (
                                     <button
                                       key={t}
                                       type="button"
@@ -3582,7 +3739,7 @@ export function PxeWorkspace({
                                   ))}
                                 </span>
                               </div>
-                              {stepLibrary ? (
+                              {stepLibrary && tsPlatform(seq) !== "debian" ? (
                                 (() => {
                                   const pick = libraryPick[seq.id] ?? { entryId: "", value: "" };
                                   const entries = libraryFor(seq.kind);
@@ -3681,7 +3838,9 @@ export function PxeWorkspace({
                               ) : null}
                               {(seq.steps ?? []).length === 0 ? (
                                 <p className="text-[11px]" style={{ color: "var(--text3)" }}>
-                                  None - nothing runs at first boot beyond Windows setup itself.
+                                  {tsPlatform(seq) === "debian"
+                                    ? "None - nothing runs in the installer's late_command beyond fetching the first-boot script, if one is set."
+                                    : "None - nothing runs at first boot beyond Windows setup itself."}
                                 </p>
                               ) : (
                                 (seq.steps ?? []).map((step, idx) => {

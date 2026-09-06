@@ -109,14 +109,18 @@ These are not incidental; every one of them shaped the code.
    `RemovePxeBootLinuxNetboot`. The ISO route still works and still needs
    nothing extracted, but nobody needs a Debian ISO any more.
    `APP_DEBIAN_MIRROR` overrides the mirror. Live: verified 2026-09-06 in QEMU: the sequence handler (kernel off the ISO, netboot initrd, preseed off the share) ran a full unattended install from deb.debian.org on a 16 GB virtio disk - partitioning, base system, standard task, GRUB, reboot - and the ISO-less entry (kernel + initrd from the store) booted to the same installer, configured the network and loaded its components from the mirror.
-3. **Serve the first-boot script.** `runScriptUrl` is free text today. It should
+3. ~~Recipe picker / free-text Debian fields~~ **Done 2026-09-06.** Debian fields are
+   dropdowns, Windows-only sections hide on a Debian sequence, and "Linux
+   installer" binds a sequence to a release (`linuxInstaller` field; the menu
+   filters the submenu by it).
+4. **Serve the first-boot script.** `runScriptUrl` is free text today. It should
    be a file in the library served over the existing Caddy tree, the way
    everything else is.
-4. **Verify end to end in QEMU.** `scripts/test-linux-iso-boot-qemu.sh` already
+5. **Verify end to end in QEMU.** `scripts/test-linux-iso-boot-qemu.sh` already
    boots a Debian netinst; the missing tier is an install that consumes a
    generated preseed and lands a working machine. Nothing here has touched real
    hardware or a real installer.
-5. **Ubuntu and RHEL**, if wanted. Each is another `platform` value and another
+6. **Ubuntu and RHEL**, if wanted. Each is another `platform` value and another
    builder; the store, publish and panel gating already take one.
 
 ---

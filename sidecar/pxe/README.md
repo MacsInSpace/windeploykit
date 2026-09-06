@@ -147,7 +147,9 @@ enabled, `<id>.cfg` on the share) is a submenu: one item per sequence, `Interact
 install (no task sequence)`, `Back`. A sequence handler boots the same kernel and
 netboot initrd with `auto=true priority=critical preseed/url=${http_base}/TaskSequences/<id>.cfg`
 added before `---`; Interactive carries neither. Interactive is preselected unless the
-store's default sequence is a Debian one. Gate: `scripts/test-linux-menu.ps1`; live:
+store's default sequence is a Debian one. A sequence whose "Linux installer" field names a
+release (`debian-<codename>-<arch>`) appears only under that release's entry; a blank one
+appears under every Debian entry. Gate: `scripts/test-linux-menu.ps1`; live:
 `scripts/test-linux-iso-boot-qemu.sh --preseed` (needs a published Debian sequence
 whose disk is `/dev/vda`) - 2026-09-05: the sequence handler booted, d-i fetched debian-qemu-test.cfg off the share, loaded its components off the ISO and asked nothing up to partitioning, where it stopped with 'No root file system is defined' - the storage-udeb gap (next item), not the menu.
 
