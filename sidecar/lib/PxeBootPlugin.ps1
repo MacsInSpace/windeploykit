@@ -5277,13 +5277,19 @@ function Write-AppPxeBootCaddyfile {
                 # TaskSequences/ so an HTTP-only client (no Deploy$ mount) can read
                 # index.json and the unattend it names. Same files the share serves.
                 @{ prefix = 'TaskSequences'; dir = (Join-Path $lib.root 'TaskSequences') },
-                # Scripts/ so a Debian install can fetch its first-boot script from here.
-                @{ prefix = 'Scripts'; dir = (Join-Path $lib.root 'Scripts') }
+                # Scripts/ so a Linux install fetches its first-boot script from here and a
+                # Windows first boot streams a .ps1 with irm | iex. Everything in it is a
+                # text script: say so, or Go sniffs a type per file and irm may try to
+                # parse the body as something else.
+                @{ prefix = 'Scripts'; dir = (Join-Path $lib.root 'Scripts'); contentType = 'text/plain; charset=utf-8' }
             )) {
             $dirNorm = ([string]$route.dir -replace '\\', '/')
             $routeLines += @(
                 "    handle_path /$($route.prefix)/* {"
                 "        root * `"$dirNorm`""
+            )
+            if ($route.Contains('contentType')) { $routeLines += "        header Content-Type `"$($route.contentType)`"" }
+            $routeLines += @(
                 '        file_server'
                 '    }'
             )

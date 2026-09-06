@@ -1085,6 +1085,13 @@ export function PxeWorkspace({
           note("runScriptUrl", "the first-boot script URL must start with http:// or https://.");
         }
       }
+      // A script step with nothing to fetch would be dropped by the normaliser on save.
+      (s.steps ?? []).forEach((st, i) => {
+        if (st.type !== "script") return;
+        if (!(st.file ?? "").trim() && !/^https?:\/\/\S+$/i.test((st.url ?? "").trim())) {
+          note(`step:${i}`, `step ${i + 1}: pick a script from the library or give a full http(s) URL.`);
+        }
+      });
       // A preseed has its own first-user fields; the Windows local account never
       // applies to it, so it must not block the save either.
       const acct = tsIsLinux(s) ? undefined : s.localAccount;
@@ -1626,12 +1633,14 @@ export function PxeWorkspace({
 
   /** Copy a script from this machine into <library>/Scripts through the sidecar (which
    * checks the #! line and fixes CRLF); resolves to the file name, or null. */
-  const importFirstBootScript = useCallback(async (): Promise<string | null> => {
+  const importFirstBootScript = useCallback(async (kind: "linux" | "windows" = "linux"): Promise<string | null> => {
     const picked = await open({
       multiple: false,
-      title: "First-boot script",
+      title: kind === "windows" ? "First-boot PowerShell script" : "First-boot script",
       filters: [
-        { name: "Scripts", extensions: ["sh", "bash", "py", "pl", "rb"] },
+        kind === "windows"
+          ? { name: "PowerShell script", extensions: ["ps1"] }
+          : { name: "Scripts", extensions: ["sh", "bash", "py", "pl", "rb"] },
         { name: "All files", extensions: ["*"] },
       ],
     });
@@ -3329,11 +3338,13 @@ export function PxeWorkspace({
                                           onChange={(e) => setField(e.target.value)}
                                         >
                                           <option value="">(none)</option>
-                                          {(tsPayload?.firstBootScripts ?? []).map((f) => (
-                                            <option key={f} value={f}>
-                                              {f} - from the library
-                                            </option>
-                                          ))}
+                                          {(tsPayload?.firstBootScripts ?? [])
+                                            .filter((f) => !/\.ps1$/i.test(f))
+                                            .map((f) => (
+                                              <option key={f} value={f}>
+                                                {f} - from the library
+                                              </option>
+                                            ))}
                                           <option value="url">Custom URL...</option>
                                           {seq.fields[key] && seq.fields[key] !== "url" && !(tsPayload?.firstBootScripts ?? []).includes(seq.fields[key]) ? (
                                             <option value={seq.fields[key]}>{seq.fields[key]} (missing from the library)</option>
@@ -4030,6 +4041,7 @@ export function PxeWorkspace({
                                       ["reg", "+ Reg key"],
                                       ["cmd", tsIsLinux(seq) ? "+ Bash" : "+ Command"],
                                       ["pwsh", "+ PowerShell"],
+                                      ["script", "+ Script by URL"],
                                     ] as const
                                   )
                                     // A Linux step is one bash -c line run in-target at the end of the
@@ -4052,7 +4064,9 @@ export function PxeWorkspace({
                                                     ...(s.steps ?? []),
                                                     t === "reg"
                                                       ? { _key: `s${tsStepKeyCounter++}`, type: "reg", description: "", op: "add", path: "", name: "", valueType: "REG_SZ", data: "" }
-                                                      : { _key: `s${tsStepKeyCounter++}`, type: t, description: "", command: "" },
+                                                      : t === "script"
+                                                        ? { _key: `s${tsStepKeyCounter++}`, type: "script", description: "", file: "", url: "" }
+                                                        : { _key: `s${tsStepKeyCounter++}`, type: t, description: "", command: "" },
                                                   ],
                                                 }
                                               : s,
@@ -4206,7 +4220,17 @@ export function PxeWorkspace({
                                           className="mono rounded border px-1 text-[9px] uppercase"
                                           style={{ borderColor: "var(--border)", color: "var(--text3)" }}
                                         >
-                                          {step.type === "pwsh" ? "PowerShell" : step.type === "reg" ? "Reg" : tsIsLinux(seq) ? "Bash" : "Cmd"}
+                                          {step.type === "pwsh"
+                                            ? "PowerShell"
+                                            : step.type === "pwshEncoded"
+                                              ? "PS script"
+                                              : step.type === "script"
+                                                ? "Script"
+                                                : step.type === "reg"
+                                                  ? "Reg"
+                                                  : tsIsLinux(seq)
+                                                    ? "Bash"
+                                                    : "Cmd"}
                                         </span>
                                         <input
                                           className="input-box mono h-[22px] flex-1 text-[10px]"
@@ -4286,20 +4310,103 @@ export function PxeWorkspace({
                                             </>
                                           ) : null}
                                         </div>
+                                      ) : step.type === "script" ? (
+                                        (() => {
+                                          const ps1 = (tsPayload?.firstBootScripts ?? []).filter((f) => /\.ps1$/i.test(f));
+                                          const choice = step.file ? step.file : step.url ? "url" : "";
+                                          return (
+                                            <div className="flex flex-col gap-1">
+                                              <div className="flex items-center gap-1.5">
+                                                <select
+                                                  className="input-box mono h-[22px] flex-1 text-[10px]"
+                                                  value={choice}
+                                                  title="A .ps1 from the Scripts folder, served by Netboot's HTTP at /Scripts/, or any URL. Streamed at first boot - nothing is embedded, so the script can be any length."
+                                                  onChange={(e) =>
+                                                    updateStep(
+                                                      e.target.value === "url"
+                                                        ? { file: "", url: step.url || "http://" }
+                                                        : { file: e.target.value, url: "" },
+                                                    )
+                                                  }
+                                                >
+                                                  <option value="">Choose a script...</option>
+                                                  {ps1.map((f) => (
+                                                    <option key={f} value={f}>
+                                                      {f} - from the library
+                                                    </option>
+                                                  ))}
+                                                  <option value="url">Custom URL...</option>
+                                                  {step.file && !ps1.includes(step.file) ? (
+                                                    <option value={step.file}>{step.file} (missing from the library)</option>
+                                                  ) : null}
+                                                </select>
+                                                <button
+                                                  type="button"
+                                                  className="btn px-1.5 py-0 text-[10px]"
+                                                  title="Copy a .ps1 from this machine into the Scripts folder and select it here"
+                                                  onClick={() =>
+                                                    void importFirstBootScript("windows").then((name) => {
+                                                      if (name) updateStep({ file: name, url: "" });
+                                                    })
+                                                  }
+                                                >
+                                                  Add...
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  className="btn px-1.5 py-0 text-[10px]"
+                                                  title={`Open ${tsPayload?.scriptsDir ?? "the Scripts folder"} in the file manager`}
+                                                  onClick={() => void openScriptsFolder()}
+                                                >
+                                                  Folder
+                                                </button>
+                                              </div>
+                                              {choice === "url" ? (
+                                                <input
+                                                  className="input-box mono h-[22px] w-full text-[10px]"
+                                                  placeholder="http://... - fetched at first boot"
+                                                  value={step.url ?? ""}
+                                                  spellCheck={false}
+                                                  onChange={(e) => updateStep({ url: e.target.value.trim(), file: "" })}
+                                                />
+                                              ) : null}
+                                              <span className="text-[10px]" style={{ color: "var(--text3)" }}>
+                                                Runs as SYSTEM from SetupComplete: powershell -Command &quot;irm &apos;&lt;url&gt;&apos; | iex&quot;. No $PSScriptRoot - the script is streamed, not saved.
+                                              </span>
+                                            </div>
+                                          );
+                                        })()
                                       ) : (
-                                        <input
-                                          className="input-box mono h-[22px] w-full text-[10px]"
-                                          placeholder={
-                                            step.type === "pwsh"
-                                              ? "PowerShell command..."
-                                              : tsIsLinux(seq)
-                                                ? "bash -c ... as root in the installed system, end of install"
-                                                : "Command..."
-                                          }
-                                          value={step.command ?? ""}
-                                          spellCheck={false}
-                                          onChange={(e) => updateStep({ command: e.target.value })}
-                                        />
+                                        (() => {
+                                          // -EncodedCommand is base64 of UTF-16LE: 8/3 of the script's length,
+                                          // plus the powershell.exe prefix and the log redirect, on ONE cmd line.
+                                          const encodedLength =
+                                            step.type === "pwshEncoded" ? Math.ceil(((step.command ?? "").length * 2) / 3) * 4 + 90 : 0;
+                                          const tooLong = encodedLength > 8191;
+                                          return (
+                                            <div className="flex flex-col gap-1">
+                                              <input
+                                                className="input-box mono h-[22px] w-full text-[10px]"
+                                                style={tooLong ? { borderColor: "var(--amber)" } : undefined}
+                                                placeholder={
+                                                  step.type === "pwsh"
+                                                    ? "PowerShell command..."
+                                                    : tsIsLinux(seq)
+                                                      ? "bash -c ... as root in the installed system, end of install"
+                                                      : "Command..."
+                                                }
+                                                value={step.command ?? ""}
+                                                spellCheck={false}
+                                                onChange={(e) => updateStep({ command: e.target.value })}
+                                              />
+                                              {tooLong ? (
+                                                <span className="text-[10px]" style={{ color: "var(--amber)" }}>
+                                                  About {encodedLength} characters once encoded - over cmd&apos;s 8191-character line limit, so this step will not run at first boot. Save the script as a .ps1 in the Scripts folder and use a Script by URL step instead.
+                                                </span>
+                                              ) : null}
+                                            </div>
+                                          );
+                                        })()
                                       )}
                                     </div>
                                   );

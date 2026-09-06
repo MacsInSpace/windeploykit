@@ -636,8 +636,9 @@ export interface PxeBootTaskSequenceStep {
   /** UI-only stable identity for React list keys (not persisted - the sidecar's
    * step normaliser drops unknown fields on save). */
   _key?: string;
-  /** pwshEncoded carries a whole script as one step (base64 into -EncodedCommand). */
-  type: "reg" | "cmd" | "pwsh" | "pwshEncoded" | string;
+  /** pwshEncoded carries a whole script as one step (base64 into -EncodedCommand) -
+   * capped by cmd's 8191-character line; script streams one by URL instead. */
+  type: "reg" | "cmd" | "pwsh" | "pwshEncoded" | "script" | string;
   description: string;
   /** reg only */
   op?: "add" | "delete" | string;
@@ -647,6 +648,9 @@ export interface PxeBootTaskSequenceStep {
   data?: string;
   /** cmd / pwsh only */
   command?: string;
+  /** script only: a .ps1 in <library>/Scripts (served at /Scripts/), or a custom URL. */
+  file?: string;
+  url?: string;
 }
 
 /** One Netboot task sequence - generates a first-boot unattend.xml on the share. */

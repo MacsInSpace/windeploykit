@@ -281,6 +281,34 @@ Test-Case 'A server unattend has no RunSynchronous and no ProductKey; the conver
     Assert-True (-not ($fb -match '(?i)Convert-EvalEdition.ps1')) 'the eval conversion leaked into the first-boot steps'
 }
 
+Test-Case 'A Script step streams a library .ps1 or a URL with irm | iex from firstboot.cmd; nothing is embedded' {
+    $item = [pscustomobject]@{ id = 'sc'; name = 'SC'; kind = 'client'; steps = @(
+        [pscustomobject]@{ type = 'script'; description = 'Site setup'; file = 'site-setup.ps1' }
+        [pscustomobject]@{ type = 'script'; description = 'Vendor'; url = 'https://example.org/tools/install%20agent.ps1' }
+        [pscustomobject]@{ type = 'script'; description = 'empty'; file = ''; url = '' }
+        [pscustomobject]@{ type = 'script'; description = 'traversal'; file = '../x.ps1' }
+        [pscustomobject]@{ type = 'script'; description = 'bad url'; url = 'ftp://x/y.ps1' }
+    ) }
+    $rec = ConvertTo-AppPxeBootTaskSequenceRecord -Item $item
+    Assert-True (@($rec.steps).Count -eq 2) "the normaliser kept $(@($rec.steps).Count) script steps, expected the two with a source"
+    $fb = Get-AppPxeBootTsFirstBootScript -Sequence $rec
+    Assert-True ($fb -match "powershell\.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm 'http://[^']+/Scripts/site-setup\.ps1' \| iex`" >>`"%LOG%`" 2>&1") 'the library script line is not the irm | iex form'
+    # A URL in a batch file: % doubled so cmd does not expand %20 as argument 2 + "0".
+    Assert-True ($fb -match "irm 'https://example\.org/tools/install%%20agent\.ps1' \| iex") 'the custom URL was not batch-escaped'
+    Assert-True (-not ($fb -match 'EncodedCommand')) 'a script step must not embed anything'
+}
+Test-Case 'An EncodedCommand step over cmd''s line limit is flagged in the batch and the log rather than silently mangled' {
+    $long = ('Write-Host "' + ('x' * 4000) + '"')
+    $item = [pscustomobject]@{ id = 'lg'; name = 'LG'; kind = 'client'; steps = @(
+        [pscustomobject]@{ type = 'pwshEncoded'; description = 'big'; command = $long }
+    ) }
+    $fb = Get-AppPxeBootTsFirstBootScript -Sequence (ConvertTo-AppPxeBootTaskSequenceRecord -Item $item)
+    Assert-True ($fb -match 'rem WARNING: the next line is over cmd') 'no warning for an over-long encoded step'
+    Assert-True ($fb -match 'WARNING: step line is \d+ characters') 'the warning is not logged to firstboot.log'
+    $short = [pscustomobject]@{ id = 'sm'; name = 'SM'; kind = 'client'; steps = @([pscustomobject]@{ type = 'pwshEncoded'; description = 'small'; command = 'Write-Host hi' }) }
+    Assert-True (-not ((Get-AppPxeBootTsFirstBootScript -Sequence (ConvertTo-AppPxeBootTaskSequenceRecord -Item $short)) -match 'WARNING')) 'a short encoded step was flagged'
+}
+
 Write-Host ''
 if ($failures -gt 0) {
     Write-Host "task sequence accounts: $failures failure(s)"

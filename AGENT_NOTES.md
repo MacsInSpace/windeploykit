@@ -404,6 +404,18 @@ a cache description, correctly left alone.
   name straight into the sequence. Nothing is copied at publish - the installer wgets
   the script from Caddy at the end of the install. Gate: five checks in the Debian gate
   against a temp library root (`Get-AppImageLibraryRoot` stubbed).
+- **Windows Script by URL step (2026-09-06, Craig: "Windows fails to run long encoded
+  scripts and would work better to run irm http://(host-ip)/scripts/ps1.ps1 | iex").**
+  Root cause: firstboot.cmd is a batch file and cmd's line limit is 8191 characters;
+  an `-EncodedCommand` is 8/3 of the script's length, so ~3 KB of PowerShell is already
+  over and cmd mangles the line. New step `type: script` (`file` = a .ps1 in
+  <library>/Scripts, or `url`) compiles to `powershell.exe ... -Command "irm '<url>' |
+  iex"` (`Resolve-AppPxeBootTsScriptStepUrl`; the library URL is resolved at publish
+  like the Linux script; `%` doubled for batch). The Scripts route now sends
+  `Content-Type: text/plain` so irm hands back a string rather than guessing. Over-long
+  encoded steps get a `rem WARNING` + a log line in the batch, and the panel shows the
+  estimated encoded length in amber. Linux late_command skips script steps (it has the
+  First-boot script field). Gate: two Test-Cases in test-task-sequence-accounts.
 - Debugging an installer you cannot type at: from tier 3 the QEMU test passes
   `log_host=10.0.2.2 log_port=5514` and listens with `nc -u -k -l 5514`, so
   d-i's syslog lands in `$WORK/d-i.syslog` (udeb fetches, module loads, disks

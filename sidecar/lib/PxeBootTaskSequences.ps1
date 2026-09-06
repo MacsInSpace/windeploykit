@@ -236,12 +236,20 @@ function ConvertTo-AppPxeBootTaskSequenceRecord {
         # pwshEncoded carries a whole script as one step (the Server evaluation
         # conversion is one). Leaving it off this list silently deleted that step on
         # the first save - caught 2026-08-22.
-        if ($type -notin @('reg', 'cmd', 'pwsh', 'pwshencoded')) { continue }
+        # script (2026-09-06): a library .ps1 or a URL, streamed at first boot with
+        # irm | iex - Craig: long EncodedCommand steps fail (cmd's 8191-char line).
+        if ($type -notin @('reg', 'cmd', 'pwsh', 'pwshencoded', 'script')) { continue }
         $step = [ordered]@{
             type        = if ($type -eq 'pwshencoded') { 'pwshEncoded' } else { $type }
             description = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'description')).Trim()
         }
-        if ($type -eq 'reg') {
+        if ($type -eq 'script') {
+            $file = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'file')).Trim()
+            $url = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'url')).Trim()
+            $step.file = if ($file -and (Test-AppPxeBootTsScriptFileName -Name $file)) { $file } else { '' }
+            $step.url = if (-not $step.file -and $url -match '^https?://\S+$') { $url } else { '' }
+            if (-not $step.file -and -not $step.url) { continue }
+        } elseif ($type -eq 'reg') {
             $op = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'op')).Trim().ToLowerInvariant()
             $step.op = if ($op -eq 'delete') { 'delete' } else { 'add' }
             $step.path = ([string](Get-AppPxeBootTsProp -Item $stepIn -Name 'path')).Trim()
@@ -582,6 +590,18 @@ function Get-AppPxeBootTsStepCommandLine {
             }
         }
         'pwsh' { "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"$(([string]$Step.command) -replace '"', '\"')`"" }
+        # A script by URL, streamed and run in one go (Craig, 2026-09-06: "irm ... | iex").
+        # Nothing is embedded, so there is no line-length limit - the reason this exists.
+        # Runs from firstboot.cmd, a batch file: % would expand (and %2 in %20 is an
+        # argument), so it is doubled; quotes and spaces cannot be in a usable URL.
+        'script' {
+            $u = Resolve-AppPxeBootTsScriptStepUrl -Step $Step
+            if (-not $u) { "rem script step skipped - no library script or URL" }
+            else {
+                $u = (($u -replace '["'' ]', '') -replace '%', '%%')
+                "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `"irm '$u' | iex`""
+            }
+        }
         # A whole script as one step: base64 (UTF-16LE, what -EncodedCommand wants) so
         # quoting cannot break the generated line, however long or nested the script is.
         # The step still stores readable text, so the panel can show and edit it.
@@ -592,6 +612,21 @@ function Get-AppPxeBootTsStepCommandLine {
         default { "cmd /c $([string]$Step.command)" }
     }
 }
+
+function Resolve-AppPxeBootTsScriptStepUrl {
+    # Where a script step fetches from: a library file under this machine's /Scripts/
+    # (resolved at publish, like the Linux first-boot script) or the step's own URL.
+    param([Parameter(Mandatory)]$Step)
+    $file = [string](Get-AppPxeBootTsProp -Item $Step -Name 'file')
+    if ($file -and (Test-AppPxeBootTsScriptFileName -Name $file)) { return "$(Get-AppPxeBootTsScriptsBaseUrl)/$file" }
+    $url = ([string](Get-AppPxeBootTsProp -Item $Step -Name 'url')).Trim()
+    if ($url -match '^https?://\S+$') { return $url }
+    return ''
+}
+
+# cmd.exe reads a batch file one line at a time and refuses a line over this; an
+# -EncodedCommand step is 8/3 of its script's length, so a 3 KB script is already over.
+$script:AppPxeBootTsBatchLineLimit = 8191
 
 function Test-AppPxeBootTsIsEvalConversionStep {
     # The eval->licensed conversion no longer rides in the unattend: it is a 9KB
@@ -638,7 +673,15 @@ function Get-AppPxeBootTsFirstBootScript {
         # A one-line echo of the step name, then the step itself, both logged. The step
         # line is the same one the unattend used to carry (reg/cmd/pwsh/encoded).
         [void]$lines.Add("echo %DATE% %TIME% [$n] $($desc -replace '[<>|&%]', ' ')>>`"%LOG%`"")
-        [void]$lines.Add((Get-AppPxeBootTsStepCommandLine -Step $step) + ' >>"%LOG%" 2>&1')
+        $stepLine = (Get-AppPxeBootTsStepCommandLine -Step $step) + ' >>"%LOG%" 2>&1'
+        if ($stepLine.Length -gt $script:AppPxeBootTsBatchLineLimit) {
+            # Emitted anyway (the sequence is the user's), but flagged in the batch, the
+            # log and the sidecar log: cmd silently mangles a line this long.
+            Write-SidecarLog "Task sequences: step [$n] '$desc' is $($stepLine.Length) characters - over cmd's $($script:AppPxeBootTsBatchLineLimit)-character line limit; put the script in the Scripts folder and use a Script step"
+            [void]$lines.Add("echo %DATE% %TIME% [$n] WARNING: step line is $($stepLine.Length) characters, over cmd's $($script:AppPxeBootTsBatchLineLimit) limit - use a Script step>>`"%LOG%`"")
+            [void]$lines.Add("rem WARNING: the next line is over cmd's line limit and will not run as written")
+        }
+        [void]$lines.Add($stepLine)
     }
     [void]$lines.Add('echo %DATE% %TIME% first-boot steps done>>"%LOG%"')
     ($lines -join "`r`n") + "`r`n"
@@ -1921,8 +1964,9 @@ function Get-AppPxeBootTsLateCommandParts {
         The sequence's steps and run script as one d-i late_command.
 
         .DESCRIPTION
-        Only cmd steps make sense here: reg and pwsh are Windows verbs and are
-        skipped rather than silently mistranslated. Every command runs in-target,
+        Only cmd steps make sense here: reg, pwsh and script are Windows verbs and
+        are skipped rather than silently mistranslated (a Linux sequence has the
+        First-boot script field for a script by URL). Every command runs in-target,
         so it sees the installed system and not the installer's ramdisk, and
         through bash -c (Craig, 2026-09-06): bash is Essential on Debian and in the
         Ubuntu server base, so it is always in /target by late_command time, people

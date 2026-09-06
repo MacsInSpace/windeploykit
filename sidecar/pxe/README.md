@@ -153,6 +153,17 @@ cloud-config and would otherwise read the whole ISO into memory (OOM, seen 2026-
 the Interactive entry points it at an empty cloud-config the menu regen writes. Debian and Ubuntu sequences only ever
 appear under entries of their own platform.
 
+### Windows: a Script by URL step
+
+A Windows sequence's first-boot steps run from `<id>.firstboot.cmd`, one cmd line each,
+and cmd refuses a line over 8191 characters - so a whole script as an `-EncodedCommand`
+step (8/3 of its length in base64) fails past about 3 KB. The **Script by URL** step is
+the fix: pick a `.ps1` from `<library>/Scripts/` (**Add...** copies one in) or give a URL,
+and the batch line is `powershell -Command "irm '<url>' | iex"` - the script streams from
+Caddy's `/Scripts/` (served as `text/plain`) at first boot, as SYSTEM, any length. The
+panel flags an encoded step that is over the limit. The Scripts folder is shared: the
+Linux First-boot script picker hides `.ps1`, the Windows step shows only `.ps1`.
+
 ### Task sequences reach the installer through the menu
 
 d-i reads `preseed/url=` off the kernel command line, so the menu entry decides which
