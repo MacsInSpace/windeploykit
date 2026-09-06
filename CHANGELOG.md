@@ -22,9 +22,25 @@ The format follows Keep a Changelog; the repository is ASCII-only, so are these 
   endpoint takes a GET form for this (`?serial=&make=&model=&session=&line=` or
   `&heartbeat=1`) because the installer's busybox wget cannot POST. Gate:
   `scripts/test-linux-install-report.ps1` drives the script under `sh` against the
-  real listener.
+  real listener. Verified on a ThinkPad 11e 5th Gen: boot ping, sixteen installer
+  steps in words, end of install, and first boot reporting "the script exited 0
+  after 373s" with the CampusCast installer's last lines.
+- **Close to menu bar / tray**, as AdobeUpdateKit and USM have. Closing the window
+  hides WinDeployKit to the macOS menu bar (Windows: the notification area) and PXE
+  and the deployment share keep serving; the icon's menu has Open and Quit, a left
+  click opens, and the tooltip carries the PXE URL while it serves. File > "Close to
+  menu bar" (on by default, also under Settings > Window) turns it off. File > Exit
+  and the tray's Quit are real exits. The glyph is the app icon's hexagon with a
+  deploy arrow (`scripts/make-tray-icons.py`).
 
 ### Fixed
+
+- **A Linux task sequence read "pending save" for ever.** The panel checked for
+  `<id>.xml` only; a Debian sequence publishes `<id>.cfg` and an Ubuntu one an
+  autoinstall. It now checks the name the platform actually publishes.
+- **The TFTP, imaging and Caddy log panes follow their newest line**, and the Caddy
+  (HTTP fetches) table lists oldest to newest like the other two instead of the
+  opposite order. A pane lets go while the reader has scrolled up.
 
 - **Debian sequences no longer stall on "Detect network hardware" on real hardware.**
   Sequence handlers now pass `hw-detect/firmware-lookup=never`. The netboot initrd has

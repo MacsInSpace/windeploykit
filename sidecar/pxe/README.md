@@ -255,7 +255,9 @@ line) or `&heartbeat=1`, URL-decoded, stored exactly as a POST is, answered `200
 (iPXE's `imgfetch` wants a body). A push with no make or model keeps the last known
 ones. Gate: `scripts/test-linux-install-report.ps1` starts the real listener, drives the
 script under `/bin/sh` with its `WDK_*` test hooks against a d-i-shaped syslog, and
-checks what landed in `imaging-logs/`. Ubuntu's stage names come from Subiquity's log
-and have not been watched on a live install yet; Debian's have been read out of a real
-d-i syslog.
+checks what landed in `imaging-logs/`. Verified live on a ThinkPad 11e 5th Gen
+(2026-09-06): boot ping, sixteen steps in words, end of install, and first boot
+reporting the CampusCast script's exit code and last lines, seven and a half minutes
+from ping to reboot. Ubuntu's stage names come from Subiquity's log by pattern and have
+not been watched on a live install yet.
 
