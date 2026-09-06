@@ -136,6 +136,8 @@ $cmdline = Join-Path $fix 'cmdline'
 [System.IO.File]::WriteAllText($cmdline, "BOOT_IMAGE=/linux initrd=initrd.gz vga=788 auto=true priority=critical preseed/url=$base/TaskSequences/campuscast-client.cfg wdk_serial=PF2ABC1D wdk_make=LENOVO wdk_model=20LRS0DP00 --- quiet`n")
 $syslog = Join-Path $fix 'syslog'
 [System.IO.File]::WriteAllText($syslog, @"
+Sep  6 10:52:18 main-menu[321]: INFO: Menu item 'brltty-udeb' selected
+Sep  6 10:52:19 main-menu[321]: INFO: Menu item 'espeakup-udeb' selected
 Sep  6 10:52:20 main-menu[321]: INFO: Menu item 'netcfg' selected
 Sep  6 10:52:28 main-menu[321]: INFO: Menu item 'network-preseed' selected
 Sep  6 10:52:40 main-menu[321]: INFO: Menu item 'partman-base' selected
@@ -188,7 +190,7 @@ Check 'run: every d-i step is reported in words, the failure is reported, and th
     (($lines -match '  Partitioning the disk$').Count -eq 1) -and (($lines -match '  Installing the base system$').Count -eq 1) -and
     (($lines -match '  Installer: main-menu_321_: WARNING __: Configuring _somepkg_ failed with error code 1$').Count -eq 1) -and
     (($lines -match '  debootstrap: I: Configuring libc6:amd64\.\.\.$').Count -eq 1) -and
-    (($lines -match 'Retrieving libc6').Count -eq 0)
+    (($lines -match 'Retrieving libc6').Count -eq 0) -and (($lines -match 'brltty|espeakup').Count -eq 0)
 }
 Check 'run again on an unchanged log says nothing new' {
     $before = (Read-Log 'PF2ABC1D').Count

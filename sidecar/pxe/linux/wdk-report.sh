@@ -123,8 +123,11 @@ step_lines() {
     grep -o 'start: subiquity/[A-Za-z0-9_]*/[A-Za-z0-9_]*' "$log" 2>/dev/null | sed 's#start: subiquity/##' | awk '!seen[$0]++'
 }
 
+# Empty for the two accessibility helpers d-i always runs first (braille, speech):
+# a step nobody chose is not a milestone. Seen as "Step: brltty-udeb" on the 11e.
 describe() {
     case "$1" in
+        brltty-udeb|espeakup-udeb)        echo "" ;;
         localechooser)                    echo "Choosing the language" ;;
         kbd-chooser|console-setup-udeb)   echo "Configuring the keyboard" ;;
         ethdetect)                        echo "Detecting network hardware" ;;
@@ -195,7 +198,7 @@ case "$mode" in
             if [ -n "$log" ] && [ -f "$log" ]; then
                 n=$(step_lines | wc -l | tr -d ' ')
                 if [ "$n" -gt "$steps_seen" ]; then
-                    step_lines | tail -n $((n - steps_seen)) | while read -r item; do post "$(describe "$item")"; done
+                    step_lines | tail -n $((n - steps_seen)) | while read -r item; do d=$(describe "$item"); [ -n "$d" ] && post "$d"; done
                     steps_seen=$n
                     said=1
                 fi
