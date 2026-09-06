@@ -615,7 +615,9 @@ export function PxeWorkspace({
   const [tsJoinOptIn, setTsJoinOptIn] = useState<Set<string>>(new Set());
   // Vault secrets offered as join credentials, and the editor that manages them.
   const [vaultSecrets, setVaultSecrets] = useState<VaultSecretSummary[]>([]);
-  const [vaultEditor, setVaultEditor] = useState<{ open: boolean; seqId?: string; target?: "join" | "account" }>({ open: false });
+  // target: which field the picked credential lands in - the Windows join credential,
+  // the Windows local account, or a Debian sequence's first user.
+  const [vaultEditor, setVaultEditor] = useState<{ open: boolean; seqId?: string; target?: "join" | "account" | "debianUser" }>({ open: false });
 
   const loadVaultSecrets = useCallback(async () => {
     try {
@@ -3153,24 +3155,34 @@ export function PxeWorkspace({
                                         ) : null}
                                       </select>
                                     ) : tsPlatform(seq) === "debian" && key === "userVaultSecret" ? (
-                                      <select
-                                        className="input-box mono h-[26px] text-[11px]"
-                                        style={tsFieldOutline(seq.id, key)}
-                                        value={seq.fields[key] ?? ""}
-                                        title="The credential's login becomes the user (lower-cased, letters, digits, - and _), its full name the display name, and its password is hashed at publish. Nothing in clear reaches the share."
-                                        onChange={(e) => setField(e.target.value)}
-                                      >
-                                        <option value="">Choose a vault credential...</option>
-                                        {vaultSecrets.map((s) => (
-                                          <option key={s.name} value={s.name}>
-                                            {s.label || s.name}
-                                            {s.userName ? ` - ${s.userName}` : ""}
-                                          </option>
-                                        ))}
-                                        {seq.fields[key] && !vaultSecrets.some((s) => s.name === seq.fields[key]) ? (
-                                          <option value={seq.fields[key]}>{seq.fields[key]} (not in the vault)</option>
-                                        ) : null}
-                                      </select>
+                                      <div className="flex items-center gap-1.5">
+                                        <select
+                                          className="input-box mono h-[26px] flex-1 text-[11px]"
+                                          style={tsFieldOutline(seq.id, key)}
+                                          value={seq.fields[key] ?? ""}
+                                          title="The credential's login becomes the user (lower-cased, letters, digits, - and _), its full name the display name, and its password is hashed at publish. Nothing in clear reaches the share."
+                                          onChange={(e) => setField(e.target.value)}
+                                        >
+                                          <option value="">Choose a vault credential...</option>
+                                          {vaultSecrets.map((s) => (
+                                            <option key={s.name} value={s.name}>
+                                              {s.label || s.name}
+                                              {s.userName ? ` - ${s.userName}` : ""}
+                                            </option>
+                                          ))}
+                                          {seq.fields[key] && !vaultSecrets.some((s) => s.name === seq.fields[key]) ? (
+                                            <option value={seq.fields[key]}>{seq.fields[key]} (not in the vault)</option>
+                                          ) : null}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          className="btn px-1.5 py-0 text-[10px]"
+                                          title="Add a credential (user + password) to the vault, or pick one - it becomes this sequence's first user"
+                                          onClick={() => setVaultEditor({ open: true, seqId: seq.id, target: "debianUser" })}
+                                        >
+                                          Vault...
+                                        </button>
+                                      </div>
                                     ) : tsPlatform(seq) === "debian" && key === "userPassword" ? (
                                       <input
                                         className="input-box mono h-[26px] text-[11px]"
@@ -4251,6 +4263,9 @@ export function PxeWorkspace({
               if (target === "account") {
                 const acct = s.localAccount ?? { enabled: true, name: "localadmin", mode: "vault" };
                 return { ...s, localAccount: { ...acct, mode: "vault", vaultSecret: secretName } };
+              }
+              if (target === "debianUser") {
+                return { ...s, fields: { ...s.fields, userSource: "vault", userVaultSecret: secretName } };
               }
               return { ...s, fields: { ...s.fields, joinCredential: `vault:${secretName}` } };
             }),
